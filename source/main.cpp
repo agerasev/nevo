@@ -1,22 +1,26 @@
-#include <cstdio>
-#include <vector>
+#include <QtGui/QApplication>
+#include <QtGui/QWidget>
+//#include <QtGui/QGraphicsView>
 
-class Entity {
+class MainWindow : public QWidget {
 public:
-	std::vector<float> input;
-	std::vector<float> output;
-	std::vector<float> params;
-
-	Entity(int ni, int no, int np) {
-		input.resize(ni, 0.0f);
-		output.resize(no, 0.0f);
-		params.resize(np, 0.0f);
+	//QGraphicsView view;
+	//QGraphicsScene scene;
+	
+	MainWindow() : QWidget() {
+		
+		
+		resize(800, 600);
+		setWindowTitle("NEvo");
 	}
-	virtual void step() = 0;
-	virtual void vary() = 0;
 };
 
 int main(int argc, char *argv[]) {
 	
-	return 0;
+	QApplication app(argc, argv);
+	
+	MainWindow window;
+	window.show();
+	
+	return app.exec();
 }

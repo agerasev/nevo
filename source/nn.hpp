@@ -7,34 +7,46 @@
 
 namespace nn {
 
-class Node {
+class Map {
 public:
-	std::vector<std::vector<float>*> ibufs, obufs;
+	enum Type {
+		UNIFORM = 0,
+		TANH,
+		SOFTMAX,
+		BIAS,
+		MATRIX,
+		FORK,
+		JOIN
+	};
 	
-	Node(int ni, int no) {
-		ib.resize(ni);
-		ob.resize(no);
-	}
-	virtual void ilink(std::vector<float> *buf, int p = 0) {
-		ibufs[p] = buf;
-	}
-	virtual void olink(std::vector<float> *buf, int p = 0) {
-		obufs[p] = buf;
-	}
+	Type type;
+	slice<float> data;
 };
 
-class Network : public Node {
+class Layer {
 public:
-	std::vector<Node*> nodes;
-	Network(int ni, int no) : Node(ni, no) {
-		
-	}
-	virtual void ilink(std::vector<float> *buf, int p = 0) override {
-		Node::ilink(buf, p);
-	}
-	virtual void olink(std::vector<float> *buf, int p = 0) override {
-		Node::olink(buf, p);
-	}
+	
+};
+
+class Network : public Map {
+public:
+	
 };
 
 }
+
+
+class Entity {
+public:
+	std::vector<float> input;
+	std::vector<float> output;
+	std::vector<float> params;
+
+	Entity(int ni, int no, int np) {
+		input.resize(ni, 0.0f);
+		output.resize(no, 0.0f);
+		params.resize(np, 0.0f);
+	}
+	virtual void step() = 0;
+	virtual void vary() = 0;
+};
