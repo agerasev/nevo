@@ -10,6 +10,7 @@ include_directories(source /usr/include/qt4)
 
 add_executable(nevo source/main.cpp ${SOURCE})
 
-set(LIBS QtCore QtGui)
+set(LIBS ${LIBS} pthread)
+set(LIBS ${LIBS} QtCore QtGui QtSvg)
 
 target_link_libraries(nevo ${LIBS})
