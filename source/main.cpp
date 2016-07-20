@@ -1,46 +1,58 @@
+#include <world.hpp>
+#include <event.hpp>
+
 #include <QtGui/QApplication>
 #include <QtGui/QWidget>
+#include <QtGui/QGraphicsItem>
 #include <QtGui/QGraphicsView>
 #include <QtGui/QHBoxLayout>
-#include <QtGui/QWheelEvent>
-#include <QtGui/QGraphicsEffect>
-#include <QtSvg/QGraphicsSvgItem>
+#include <QtGui/QLabel>
+#include <QtGui/QPushButton>
 
-#include <thread>
 #include <map>
-#include <cstdio>
 #include <cmath>
+#include <string>
 
-class Item {
+QPointF v2q(const vec2 &v) {
+	return QPointF(v.x(), v.y());
+}
+
+class ItemView : public QGraphicsItem {
 public:
-	int id;
-	Item(int _id = 0) {
-		id = _id;
+	bool exists = true;
+	double size = 20.0;
+	
+	ItemView() : QGraphicsItem() {
+		
 	}
-};
-
-class ItemEvent : public QEvent {
-public:
-	enum Action {
-		ADD,
-		DEL
-	};
-
-	Action act;
-	Item *item;
-
-	ItemEvent(Action a, Item *it) : QEvent(QEvent::User) {
-		item = it;
-		act = a;
+	
+	virtual QRectF boundingRect() const {
+		return QRectF(-size, -size, 2*size, 2*size);
+	}
+	
+	virtual void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget = 0) {
+		QPen pen;
+		pen.setWidth(2);
+		pen.setCosmetic(true);
+		pen.setColor("#000000");
+		painter->setPen(pen);
+		
+		painter->setBrush(QColor("#44EE22"));
+		painter->drawEllipse(-size, -size, 2*size, 2*size);
 	}
 };
 
 class MainScene : public QGraphicsScene {
 public:
-	std::map<int, QGraphicsItem*> items;
+	std::map<int, ItemView*> items;
+	World *world = nullptr;
 
-	MainScene() : QGraphicsScene() {
-
+	MainScene(World *w) : QGraphicsScene() {
+		world = w;
+		
+		setBackgroundBrush(QColor("#FFFFFF"));
+		setSceneRect(-world->size, -world->size, 2*world->size, 2*world->size);
+		addRect(sceneRect(), QPen(), QBrush(QColor("#FFFFCC")));
 	}
 
 	virtual ~MainScene() {
@@ -48,29 +60,64 @@ public:
 			delete p.second;
 		}
 	}
-
+	
+	void sync_item(Item *raw_item, ItemView *item) {
+		item->setPos(v2q(raw_item->pos));
+	}
+	
+	ItemView *instance(Item *raw_item) {
+		return new ItemView();
+	}
+	
+	void sync() {
+		for(auto &p : items) {
+			p.second->exists = false;
+		}
+		
+		world->access.lock();
+		{
+			auto &raw_items = world->items;
+			for(auto &rp : raw_items) {
+				int id = rp.first;
+				Item *ri = rp.second;
+				ItemView *iv = nullptr;
+				auto ii = items.find(id);
+				if(ii == items.end()) {
+					iv = instance(ri);
+					ii = items.insert(std::pair<int, ItemView*>(id, iv)).first;
+					addItem(iv);
+				} else {
+					iv = ii->second;
+				}
+				sync_item(ri, iv);
+				iv->exists = true;
+			}
+		}
+		world->access.unlock();
+		
+		for(auto ii = items.begin(); ii != items.end();) {
+			if(ii->second->exists) {
+				++ii;
+			} else {
+				auto iv = ii->second;
+				removeItem(iv);
+				items.erase(ii++);
+			}
+		}
+		
+		
+	}
+	
 	virtual bool event(QEvent *event) override {
 		if(event->type() == QEvent::User) {
-			ItemEvent *ie = static_cast<ItemEvent*>(event);
-			int id = ie->item->id;
-			if(ie->act == ItemEvent::ADD) {
-				auto gi = new QGraphicsEllipseItem(id*20, 0, 10, 10);
-				addItem(gi);
-				items.insert(std::pair<int, QGraphicsItem*>(id, gi));
-			} else if(ie->act == ItemEvent::DEL) {
-				auto ii = items.find(id);
-				if(ii != items.end()) {
-					auto gi = (*ii).second;
-					removeItem(gi);
-					items.erase(ii);
-				}
-			} else {
-				return false;
+			UserEvent *ue = static_cast<UserEvent*>(event);
+			if(ue->utype == SyncEvent::UTYPE) {
+				sync();
+				return true;
 			}
-			return true;
-		} else {
-			return QGraphicsScene::event(event);
+			return false;
 		}
+		return QGraphicsScene::event(event);
 	}
 };
 
@@ -81,15 +128,56 @@ public:
 	MainView() : QGraphicsView() {
 		setStyleSheet( "border-style: none;");
 
-		//setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-		//setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+		setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+		setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
 		setDragMode(ScrollHandDrag);
+		
+		setRenderHint(QPainter::Antialiasing);
 	}
 
+	virtual void enterEvent(QEvent *event) override {
+		QGraphicsView::enterEvent(event);
+		viewport()->setCursor(Qt::ArrowCursor);
+	}
+	
+	virtual void mousePressEvent(QMouseEvent *event) override {
+		QGraphicsView::mousePressEvent(event);
+		viewport()->setCursor(Qt::ArrowCursor);
+	}
+	
+	virtual void mouseReleaseEvent(QMouseEvent *event) override {
+		QGraphicsView::mouseReleaseEvent(event);
+		viewport()->setCursor(Qt::ArrowCursor);
+	}
+	
+	virtual void mouseDoubleClickEvent(QMouseEvent *event) override {
+		QGraphicsView::mouseDoubleClickEvent(event);
+	}
+	
 	virtual void wheelEvent(QWheelEvent *event) override {
 		float z = pow(zf, event->delta()/120.0);
 		scale(z,z);
+	}
+};
+
+class SidePanel : public QWidget {
+public:
+	World *world;
+	
+	QLabel lwsize;
+	
+	QVBoxLayout layout;
+	
+	SidePanel(World *w) : QWidget() {
+		world = w;
+		
+		lwsize.setText(("World size: " + std::to_string(world->size)).c_str());
+		layout.addWidget(&lwsize);
+		
+		layout.addStretch(1);
+		
+		setLayout(&layout);
 	}
 };
 
@@ -98,11 +186,11 @@ public:
 	MainScene scene;
 	MainView view;
 
-	QWidget panel;
+	SidePanel panel;
 
 	QHBoxLayout layout;
 	
-	MainWindow() : QWidget() {
+	MainWindow(World *w) : QWidget(), scene(w), panel(w) {
 		view.setScene(&scene);
 
 		layout.addWidget(&view, 2);
@@ -110,39 +198,29 @@ public:
 
 		setLayout(&layout);
 		
-		resize(800, 600);
-		setWindowTitle("NEvo");
-	}
-};
-
-class ThreadFunc {
-public:
-	bool done = false;
-	QApplication *app;
-	QObject *dst;
-	Item item;
-	ThreadFunc(QApplication *_app, QObject *_dst) {
-		app = _app;
-		dst = _dst;
-	}
-	void operator ()() {
-		app->postEvent(dst, new ItemEvent(ItemEvent::ADD, &item));
+		resize(900, 600);
+		setWindowTitle("Evolution");
 	}
 };
 
 int main(int argc, char *argv[]) {
+	World world;
 	
 	QApplication app(argc, argv);
 	
-	MainWindow window;
+	MainWindow window(&world);
+	MainScene &scene = window.scene;
+	
 	window.show();
 	
-	ThreadFunc tf(&app, &window.scene);
-	std::thread thread(tf);
+	world.sync = [&app, &scene]() {
+		app.postEvent(&scene, new SyncEvent());
+	};
+	std::thread thread([&world](){world();});
 
 	int rs = app.exec();
 
-	tf.done = true;
+	world.done = true;
 	thread.join();
 
 	return rs;

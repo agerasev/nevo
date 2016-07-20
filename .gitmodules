@@ -1,0 +1,3 @@
+[submodule "libla"]
+	path = libla
+	url = https://github.com/nthend/libla.git

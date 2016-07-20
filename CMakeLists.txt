@@ -6,7 +6,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_C_FLAGS} -std=c++11")
 
 set(SOURCE "")
 
-include_directories(source /usr/include/qt4)
+include_directories(source libla /usr/include/qt4)
 
 add_executable(nevo source/main.cpp ${SOURCE})
 
