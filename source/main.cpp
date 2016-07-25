@@ -17,10 +17,21 @@ QPointF v2q(const vec2 &v) {
 	return QPointF(v.x(), v.y());
 }
 
+QColor qmix(const QColor &a, const QColor &b, double r = 0.5) {
+	return QColor(
+		a.red()*r + b.red()*(1 - r),
+		a.green()*r + b.green()*(1 - r),
+		a.blue()*r + b.blue()*(1 - r),
+		255
+	);
+}
+
 class ItemView : public QGraphicsItem {
 public:
 	bool exists = true;
 	double size = 20.0;
+	
+	QColor color;
 	
 	ItemView() : QGraphicsItem() {
 		
@@ -34,10 +45,10 @@ public:
 		QPen pen;
 		pen.setWidth(2);
 		pen.setCosmetic(true);
-		pen.setColor("#000000");
+		pen.setColor(qmix(color, QColor("#000000"), 0.75));
 		painter->setPen(pen);
 		
-		painter->setBrush(QColor("#44EE22"));
+		painter->setBrush(color);
 		painter->drawEllipse(-size, -size, 2*size, 2*size);
 	}
 };
@@ -66,7 +77,17 @@ public:
 	}
 	
 	ItemView *instance(Item *raw_item) {
-		return new ItemView();
+		int t = raw_item->type;
+		ItemView *item = new ItemView();
+		item->size = raw_item->size;
+		if(t == 0) {
+			item->color = QColor("#22CC22");
+		} else if(t == 1) {
+			item->color = QColor("#FFFF22");
+		} else {
+			item->color = QColor("#000000");
+		}
+		return item;
 	}
 	
 	void sync() {

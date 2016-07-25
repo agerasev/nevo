@@ -1,5 +1,9 @@
 #pragma once
 
+#include <vector>
+
+using namespace std;
+
 class Entity {
 public:
 	vector<float> input;
@@ -11,7 +15,9 @@ public:
 		output.resize(no, 0.0f);
 		params.resize(np, 0.0f);
 	}
+	/*
 	virtual void step() = 0;
 	virtual void vary() = 0;
+	*/
 };
 
