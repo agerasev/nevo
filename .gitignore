@@ -1,7 +1,2 @@
-build
-
-*.config
-*.files
-*.includes
-*.creator
-*.user*
+__pycache__
+*.sublime*
