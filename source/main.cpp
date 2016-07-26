@@ -42,14 +42,16 @@ public:
 	}
 	
 	virtual void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget = 0) {
-		QPen pen;
-		pen.setWidth(2);
-		pen.setCosmetic(true);
-		pen.setColor(qmix(color, QColor("#000000"), 0.75));
-		painter->setPen(pen);
-		
-		painter->setBrush(color);
-		painter->drawEllipse(-size, -size, 2*size, 2*size);
+		if(size > 0.0) {
+			QPen pen;
+			pen.setWidth(2);
+			pen.setCosmetic(true);
+			pen.setColor(qmix(color, QColor("#000000"), 0.75));
+			painter->setPen(pen);
+			
+			painter->setBrush(color);
+			painter->drawEllipse(boundingRect());
+		}
 	}
 };
 
@@ -62,7 +64,7 @@ public:
 		world = w;
 		
 		setBackgroundBrush(QColor("#FFFFFF"));
-		setSceneRect(-world->size, -world->size, 2*world->size, 2*world->size);
+		setSceneRect(-world->size.x(), -world->size.y(), 2*world->size.x(), 2*world->size.y());
 		addRect(sceneRect(), QPen(), QBrush(QColor("#FFFFCC")));
 	}
 
@@ -74,12 +76,13 @@ public:
 	
 	void sync_item(Item *raw_item, ItemView *item) {
 		item->setPos(v2q(raw_item->pos));
+		item->size = raw_item->size();
+		item->update();
 	}
 	
 	ItemView *instance(Item *raw_item) {
 		int t = raw_item->type;
 		ItemView *item = new ItemView();
-		item->size = raw_item->size;
 		if(t == 0) {
 			item->color = QColor("#22CC22");
 		} else if(t == 1) {
@@ -105,6 +108,7 @@ public:
 				auto ii = items.find(id);
 				if(ii == items.end()) {
 					iv = instance(ri);
+					iv->setZValue(id);
 					ii = items.insert(std::pair<int, ItemView*>(id, iv)).first;
 					addItem(iv);
 				} else {
@@ -125,8 +129,6 @@ public:
 				items.erase(ii++);
 			}
 		}
-		
-		
 	}
 	
 	virtual bool event(QEvent *event) override {
@@ -193,7 +195,7 @@ public:
 	SidePanel(World *w) : QWidget() {
 		world = w;
 		
-		lwsize.setText(("World size: " + std::to_string(world->size)).c_str());
+		lwsize.setText(("World size: " + std::to_string(world->size.x()) + "x" + std::to_string(world->size.y())).c_str());
 		layout.addWidget(&lwsize);
 		
 		layout.addStretch(1);
@@ -202,24 +204,24 @@ public:
 	}
 };
 
-class MainWindow : public QWidget {
+class MainWindow : public MainView { //QWidget {
 public:
 	MainScene scene;
-	MainView view;
+	// MainView view;
 
 	SidePanel panel;
 
 	QHBoxLayout layout;
 	
-	MainWindow(World *w) : QWidget(), scene(w), panel(w) {
-		view.setScene(&scene);
-
-		layout.addWidget(&view, 2);
-		layout.addWidget(&panel, 1);
-
-		setLayout(&layout);
+	MainWindow(World *w) : MainView(), scene(w), panel(w) {
+		setScene(&scene);
 		
-		resize(900, 600);
+		//layout.addWidget(&view, 2);
+		//layout.addWidget(&panel, 1);
+
+		//setLayout(&layout);
+		
+		resize(1280, 720);
 		setWindowTitle("Evolution");
 	}
 };

@@ -5,7 +5,7 @@
 
 using namespace std;
 
-#include "slice.hpp"
+#include "vector.hpp"
 
 namespace nn {
 
