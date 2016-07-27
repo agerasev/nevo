@@ -54,7 +54,7 @@ class RNN(Mind):
 
 	def proc(self):
 		self.h = np.tanh(
-			np.dot(self.Wih, self.i) +
-			np.dot(self.Whh, self.h) +
+			np.dot(self.i, self.Wih) +
+			np.dot(self.h, self.Whh) +
 			self.bh)
-		self.o = np.dot(self.Who, self.h) + self.bo
+		self.o = np.dot(self.h, self.Who) + self.bo

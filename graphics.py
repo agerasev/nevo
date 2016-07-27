@@ -74,9 +74,12 @@ class MainScene(QGraphicsScene):
 					item.sync(entity)
 				item.exist = True
 
+		delkeys = []
 		for key, item in self.items.items():
 			if not item.exist:
-				del self.items[key]
+				delkeys.append(key)
+		for key in delkeys:
+			del self.items[key]
 
 	def event(self, event):
 		if event.type() == QEvent.User:
