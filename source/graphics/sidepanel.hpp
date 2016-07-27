@@ -29,6 +29,12 @@ public:
 	QLabel step_duration;
 	QLabel steps_elapsed;
 	
+	QGroupBox stat_groupbox;
+	QVBoxLayout stat_layout;
+	QLabel count_label;
+	QLabel age_label;
+	QLabel nanc_label;
+	
 	QVBoxLayout layout;
 	
 	SidePanel(World *w) : QWidget() {
@@ -79,6 +85,13 @@ public:
 		layout.addWidget(&step_duration);
 		layout.addWidget(&steps_elapsed);
 		
+		stat_groupbox.setTitle("Statistics");
+		stat_layout.addWidget(&count_label);
+		stat_layout.addWidget(&age_label);
+		stat_layout.addWidget(&nanc_label);
+		stat_groupbox.setLayout(&stat_layout);
+		layout.addWidget(&stat_groupbox);
+		
 		layout.addStretch(1);
 		
 		setLayout(&layout);
@@ -87,5 +100,9 @@ public:
 	void sync() {
 		step_duration.setText(("Step duration: " + std::to_string(world->step_duration) + " ms").c_str());
 		steps_elapsed.setText(("Steps elapsed: " + std::to_string(world->steps_elapsed)).c_str());
+		
+		count_label.setText(("Animal count: " + std::to_string(world->anim_count)).c_str());
+		age_label.setText(("Oldest animal age: " + std::to_string(world->anim_max_age)).c_str());
+		nanc_label.setText(("Longest animal ancestry: " + std::to_string(world->anim_max_anc)).c_str());
 	}
 };

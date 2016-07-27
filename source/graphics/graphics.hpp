@@ -60,7 +60,7 @@ public:
 
 class MainScene : public QGraphicsScene {
 public:
-	std::map<int, Item*> items;
+	std::map<long, Item*> items;
 	World *world = nullptr;
 
 	MainScene(World *w) : QGraphicsScene() {

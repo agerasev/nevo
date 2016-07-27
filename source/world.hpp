@@ -22,6 +22,9 @@ class Entity {
 public:
 	double score = 0.0;
 	
+	long total_age = 0, age = 0;
+	int nanc = 0;
+	
 	int type;
 	
 	bool alive = true;
@@ -57,9 +60,9 @@ public:
 class Animal : public Entity {
 public:
 	const int 
-		ni = 3,
+		ni = 6,
 		no = 3,
-		nh = 4;
+		nh = 8;
 	
 	Mind mind;
 	slice<float> Wih, Whh, bh, Who, bo;
@@ -114,9 +117,9 @@ public:
 
 class World {
 public:
-	int id_counter = 1;
+	long id_counter = 1;
 	
-	std::map<int, Entity*> entities;
+	std::map<long, Entity*> entities;
 	std::mutex access;
 	std::function<void(void)> sync;
 	
@@ -129,29 +132,33 @@ public:
 	double step_duration = 0.0; // ms
 	long steps_elapsed = 0;
 	
-	const int max_plant_timer = 3;
-	int plant_timer = max_plant_timer;
+	// config
 	
-	const int max_plant_count = 500;
+	const int max_plant_count = 200;
 	int plant_count = 0;
 	
 	const int min_anim_count = 20;
 	int anim_count = 0;
 	
-	const int max_breed_timer = 100;
-	int breed_timer = max_breed_timer;
-	
-	double max_speed = 100.0;
+	double max_speed = 50.0;
 	
 	double eat_factor = 0.1;
-	double time_fine = 2.0;
-	double move_fine = 0.0;
+	double time_fine = 0.2;
+	double move_fine = 0.2;
 	
-	double breed_threshold = 400.0;
+	double breed_threshold = 1000.0;
+	double breed_age = 400;
+	double breed_min_score = 400.0;
 	double init_score = 100.0;
 	
-	double plant_max_score = 400.0;
+	double plant_max_score = 500.0;
 	double plant_grow_speed = 1.0;
+	double plant_grow_exp = 0.0; //0.001;
+	
+	// statistics
+	
+	long anim_max_age = 0;
+	int anim_max_anc = 0;
 	
 	std::minstd_rand rand_engine;
 	std::uniform_real_distribution<> rand_dist;
@@ -196,6 +203,23 @@ public:
 			delete p.second;
 		}
 	}
+	
+	std::pair<double, vec2> potential(const vec2 &pos, std::function<bool(Entity*)> selector) {
+		vec2 dir = nullvec2;
+		double pot = 0.0;
+		for(auto &op : entities) {
+			Entity *p = static_cast<Plant*>(op.second);
+			if(selector(p)) {
+				vec2 d = 0.5*(p->pos - pos)/size.y();
+				double l = length(d) + 1e-2;
+				double m = p->score;
+				dir += m*d/(l*l*l);
+				pot += m/l;
+			}
+		}
+		return std::pair<double, vec2>(pot, dir);
+	}
+	
 	void operator()() {
 		auto last_draw_time = std::chrono::steady_clock::now();
 		while(!done) {
@@ -224,7 +248,10 @@ public:
 							}
 						}
 						// die
-						if(anim->score < 0.0) {
+						if(
+							anim->score < 0.0 ||
+							(anim->age > breed_age && anim->score < breed_min_score)
+						) {
 							anim->alive = false;
 							anim_count -= 1;
 						}
@@ -259,14 +286,22 @@ public:
 					Entity *entity = p.second;
 					if(entity->type == 1) {
 						Animal *asrc = static_cast<Animal*>(entity);
-						if(asrc->score > breed_threshold) {
+						if((asrc->score - breed_min_score)/(breed_threshold - breed_min_score) + asrc->age/breed_age > 1.0) {
+						// if(asrc->score > breed_threshold || asrc->age > breed_age) {
 							Animal *anim = new Animal(&asrc->mind);
+							
 							asrc->score /= 2;
 							anim->score = asrc->score;
+							asrc->age = 0;
+							anim->total_age = asrc->total_age;
+							anim->nanc = (asrc->nanc += 1);
+							
 							vec2 dir = normalize(rand2());
 							anim->pos = asrc->pos + 0.5*dir*asrc->size();
 							asrc->pos -= 0.5*dir*asrc->size();
+							
 							anim->mind.vary([this](){return rand();}, 0.04);
+							
 							entities.insert(std::pair<int, Entity*>(id_counter++, anim));
 							anim_count += 1;
 						}
@@ -274,20 +309,28 @@ public:
 				}
 				
 				// update scores
+				anim_max_age = 0;
+				anim_max_anc = 0;
 				for(auto &p : entities) {
 					Entity *entity = p.second;
 					if(entity->type == 1) {
 						Animal *anim = static_cast<Animal*>(entity);
 						anim->score -= time_fine + move_fine*length(anim->vel)/max_speed;
+						if(anim_max_age < anim->total_age)
+							anim_max_age = anim->total_age;
+						if(anim_max_anc < anim->nanc)
+							anim_max_anc = anim->nanc;
 					} else if(entity->type == 0) {
 						Plant *p = static_cast<Plant*>(entity);
 						if(p->score < plant_max_score) {
-							p->score += plant_grow_speed;
+							p->score += plant_grow_speed + plant_grow_exp*p->score;
 							if(p->score > plant_max_score) {
 								p->score = plant_max_score;
 							}
 						}
 					}
+					entity->age += 1;
+					entity->total_age += 1;
 				}
 				
 				// set inputs
@@ -295,34 +338,44 @@ public:
 					Entity *entity = p.second;
 					if(entity->type == 1) {
 						Animal *anim = static_cast<Animal*>(entity);
-						vec2 dir = nullvec2;
-						double pot = 0.0;
-						for(auto &op : entities) {
-							if(op.second->type == 0) {
-								Plant *p = static_cast<Plant*>(op.second);
-								vec2 d = 0.5*(p->pos - anim->pos)/size.y();
-								double l = length(d) + 1e-2;
-								double m = p->score/plant_max_score;
-								dir += m*d/(l*l*l);
-								pot += m/l;
-							}
-						}
-						if(plant_count > 0) {
-							dir /= plant_count;
-							pot /= plant_count;
-						}
 						
+						std::pair<double, vec2> pg;
+						double pot = 0.0;
+						vec2 dir = nullvec2;
+						
+						pg = potential(anim->pos, [](Entity *e) {return e->type == 0;});
+						pot = pg.first;
+						dir = pg.second;
+						if(plant_count > 0) {
+							pot /= plant_count*plant_max_score;
+							dir /= plant_count*plant_max_score;
+						}
 						if(length(dir) > 1e-2) {
 							dir = normalize(dir);
 						} else {
 							dir = nullvec2;
 						}
 						
-						//fprintf(stderr, "%f %f %f\n", dir.x(), dir.y(), pot);
-						
 						anim->mind.input[0] = dir[0];
 						anim->mind.input[1] = dir[1];
 						anim->mind.input[2] = pot;
+						
+						pg = potential(anim->pos, [anim](Entity *e) {return e->type == 1 && e != anim;});
+						pot = pg.first;
+						dir = pg.second;
+						if(anim_count > 0) {
+							pot /= anim_count*breed_threshold;
+							dir /= anim_count*breed_threshold;
+						}
+						if(length(dir) > 1e-2) {
+							dir = normalize(dir);
+						} else {
+							dir = nullvec2;
+						}
+						
+						anim->mind.input[3] = dir[0];
+						anim->mind.input[4] = dir[1];
+						anim->mind.input[5] = pot;
 					}
 				}
 				
