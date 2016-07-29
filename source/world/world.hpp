@@ -7,113 +7,12 @@
 #include <map>
 #include <cmath>
 #include <random>
-#include <cassert>
 
 #include <la/vec.hpp>
 #include <la/mat.hpp>
 
-#include "mind.hpp"
+#include "entity.hpp"
 
-#include <cstdio>
-
-#include "vector.hpp"
-
-class Entity {
-public:
-	double score = 0.0;
-	
-	long total_age = 0, age = 0;
-	int nanc = 0;
-	
-	int type;
-	
-	bool alive = true;
-	
-	double mass = 1.0;
-	vec2 pos = nullvec2;
-	vec2 vel = nullvec2;
-	
-	double size() const {
-		return 0.5*sqrt(score);
-	}
-	
-	Entity(int t) {
-		type = t;
-	}
-	virtual ~Entity() = default;
-	
-	virtual void proc() = 0;
-};
-
-class Plant : public Entity {
-public:
-	Plant() : Entity(0) {
-		
-	}
-	
-	virtual void proc() override {
-		
-	}
-};
-
-
-class Animal : public Entity {
-public:
-	const int 
-		ni = 6,
-		no = 3,
-		nh = 8;
-	
-	Mind mind;
-	slice<float> Wih, Whh, bh, Who, bo;
-	slice<float> vi, vo, vh;
-	vector<float> th;
-	
-	Animal(Mind *esrc = nullptr) : 
-		Entity(1),
-		mind(ni, no, ni*nh + (nh*nh + nh) + nh*no + no, nh),
-		th(nh)
-	{
-		if(esrc != nullptr) {
-			mind = *esrc;
-		}
-		
-		float *w = mind.weight.data();
-		
-		Wih = slice<float>(w, ni*nh);
-		w += Wih.size();
-		
-		Whh = slice<float>(w, nh*nh);
-		w += Whh.size();
-		
-		bh = slice<float>(w, nh);
-		w += bh.size();
-		
-		Who = slice<float>(w, nh*no);
-		w += Who.size();
-		
-		bo = slice<float>(w, no);
-		w += bo.size();
-		
-		assert(w == mind.weight.data() + mind.weight.size());
-		
-		vi = slice<float>(mind.input.data(), ni);
-		vo = slice<float>(mind.output.data(), no);
-		vh = slice<float>(mind.memory.data(), nh);
-	}
-	
-	virtual void proc() override {
-		dot(th, Wih, vi);
-		
-		dot(vh, Whh, vh);
-		add(vh, th, vh);
-		add(vh, vh, bh);
-		tanh(vh, vh);
-		
-		dot(vo, Who, vh);
-		add(vo, bo, vo);
-	}
-};
 
 class World {
 public:
@@ -128,23 +27,25 @@ public:
 	
 	vec2 size;
 	
-	int delay = 40000; // ms
+	int delay = 40000; // us
 	double step_duration = 0.0; // ms
 	long steps_elapsed = 0;
 	
 	// config
 	
-	const int max_plant_count = 200;
+	const int max_plant_count = 400;
 	int plant_count = 0;
 	
-	const int min_anim_count = 20;
+	const int min_anim_count = 10;
 	int anim_count = 0;
 	
 	double max_speed = 50.0;
+	double max_spin = 10.0;
 	
 	double eat_factor = 0.1;
 	double time_fine = 0.2;
 	double move_fine = 0.2;
+	double spin_fine = 0.1;
 	
 	double breed_threshold = 1000.0;
 	double breed_age = 400;
@@ -161,10 +62,15 @@ public:
 	int anim_max_anc = 0;
 	
 	std::minstd_rand rand_engine;
-	std::uniform_real_distribution<> rand_dist;
+	std::uniform_real_distribution<> unif_dist;
+	std::normal_distribution<> norm_dist;
 	
 	double rand() {
-		return rand_dist(rand_engine);
+		return unif_dist(rand_engine);
+	}
+	
+	double randn() {
+		return norm_dist(rand_engine);
 	}
 	
 	vec2 rand2() {
@@ -179,7 +85,7 @@ public:
 		delay = ms;
 	}
 	
-	World(const vec2 &s) : rand_dist(-0.5, 0.5) {
+	World(const vec2 &s) : unif_dist(-0.5, 0.5) {
 		size = s;
 		
 		for(int i = 0; i < min_anim_count; ++i) {
@@ -204,20 +110,26 @@ public:
 		}
 	}
 	
-	std::pair<double, vec2> potential(const vec2 &pos, std::function<bool(Entity*)> selector) {
-		vec2 dir = nullvec2;
+	std::pair<double, vec2> potential(Entity *e, std::function<bool(Entity*)> selector) {
 		double pot = 0.0;
+		vec2 grad = nullvec2;
 		for(auto &op : entities) {
-			Entity *p = static_cast<Plant*>(op.second);
-			if(selector(p)) {
-				vec2 d = 0.5*(p->pos - pos)/size.y();
-				double l = length(d) + 1e-2;
-				double m = p->score;
-				dir += m*d/(l*l*l);
+			Entity *p = op.second;
+			double spot = 4*e->size();
+			if(selector(p) && length(p->pos - e->pos) - p->size() < spot) {
+				vec2 d = p->pos - e->pos;
+				double l = length(d) + p->size();
+				double m = p->size()/e->size();
 				pot += m/l;
+				grad += m*d/(l*l*l);
 			}
 		}
-		return std::pair<double, vec2>(pot, dir);
+		double lg = length(grad);
+		if(lg < 1e-4)
+			grad = nullvec2;
+		else
+			grad = normalize(grad);
+		return std::pair<double, vec2>(pot, grad);
 	}
 	
 	void operator()() {
@@ -277,7 +189,7 @@ public:
 					Animal *anim = new Animal();
 					anim->pos = rand_pos(anim->size());
 					anim->score = init_score;
-					anim->mind.randomize([this](){return rand();});
+					anim->mind.randomize([this](){return randn();});
 					entities.insert(std::pair<int, Entity*>(id_counter++, anim));
 					anim_count += 1;
 				}
@@ -300,7 +212,7 @@ public:
 							anim->pos = asrc->pos + 0.5*dir*asrc->size();
 							asrc->pos -= 0.5*dir*asrc->size();
 							
-							anim->mind.vary([this](){return rand();}, 0.04);
+							anim->mind.vary([this](){return randn();}, 0.01);
 							
 							entities.insert(std::pair<int, Entity*>(id_counter++, anim));
 							anim_count += 1;
@@ -315,7 +227,7 @@ public:
 					Entity *entity = p.second;
 					if(entity->type == 1) {
 						Animal *anim = static_cast<Animal*>(entity);
-						anim->score -= time_fine + move_fine*length(anim->vel)/max_speed;
+						anim->score -= time_fine + move_fine*length(anim->vel)/max_speed + spin_fine*fabs(anim->spin)/max_spin;
 						if(anim_max_age < anim->total_age)
 							anim_max_age = anim->total_age;
 						if(anim_max_anc < anim->nanc)
@@ -343,35 +255,20 @@ public:
 						double pot = 0.0;
 						vec2 dir = nullvec2;
 						
-						pg = potential(anim->pos, [](Entity *e) {return e->type == 0;});
+						mat2 rot(anim->dir.x(), anim->dir.y(), -anim->dir.y(), anim->dir.x());
+						
+						pg = potential(anim, [](Entity *e) {return e->type == 0;});
 						pot = pg.first;
-						dir = pg.second;
-						if(plant_count > 0) {
-							pot /= plant_count*plant_max_score;
-							dir /= plant_count*plant_max_score;
-						}
-						if(length(dir) > 1e-2) {
-							dir = normalize(dir);
-						} else {
-							dir = nullvec2;
-						}
+						dir = rot*pg.second;
 						
 						anim->mind.input[0] = dir[0];
 						anim->mind.input[1] = dir[1];
 						anim->mind.input[2] = pot;
 						
-						pg = potential(anim->pos, [anim](Entity *e) {return e->type == 1 && e != anim;});
+						
+						pg = potential(anim, [anim](Entity *e) {return e->type == 1 && e != anim;});
 						pot = pg.first;
-						dir = pg.second;
-						if(anim_count > 0) {
-							pot /= anim_count*breed_threshold;
-							dir /= anim_count*breed_threshold;
-						}
-						if(length(dir) > 1e-2) {
-							dir = normalize(dir);
-						} else {
-							dir = nullvec2;
-						}
+						dir = rot*pg.second;
 						
 						anim->mind.input[3] = dir[0];
 						anim->mind.input[4] = dir[1];
@@ -391,14 +288,8 @@ public:
 					if(entity->type == 1) {
 						Animal *anim = static_cast<Animal*>(entity);
 						float *out = anim->mind.output.data();
-						vec2 dir(out[0], out[1]);
-						double spd = max_speed*fabs(tanh(out[2]));
-						if(length(dir) > 1e-2) {
-							anim->vel = spd*normalize(dir);
-						} else {
-							anim->vel = nullvec2;
-						}
-						//fprintf(stderr, "%f %f %f\n", dir.x(), dir.y(), spd);
+						anim->spin = max_spin*tanh(out[1]);
+						anim->vel = max_speed*fabs(tanh(out[0]))*anim->dir;
 					}
 				}
 				
@@ -406,6 +297,10 @@ public:
 				double dt = 1e-1;
 				for(auto &p : entities) {
 					Entity *entity = p.second;
+					double da = dt*entity->spin;
+					double sda = sin(da), cda = cos(da);
+					mat2 rot(cda, sda, -sda, cda);
+					entity->dir = normalize(rot*entity->dir);
 					entity->pos += entity->vel*dt;
 				}
 				for(auto &p : entities) {

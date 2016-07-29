@@ -1,15 +1,14 @@
-#include <world.hpp>
-#include <event.hpp>
-
 #include <QApplication>
 
 #include <la/vec.hpp>
 
+#include <event.hpp>
 #include <graphics/graphics.hpp>
+#include <world/world.hpp>
 
 
 int main(int argc, char *argv[]) {
-	World world(vec2(640, 640)/2);
+	World world(500*vec2(1, 1));
 	
 	QApplication app(argc, argv);
 	

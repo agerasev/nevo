@@ -10,7 +10,7 @@
 
 #include <string>
 
-#include <world.hpp>
+#include <world/world.hpp>
 
 
 class SidePanel : public QWidget {

@@ -10,7 +10,7 @@
 #include <cmath>
 #include <string>
 
-#include <world.hpp>
+#include <world/world.hpp>
 #include <event.hpp>
 
 #include "sidepanel.hpp"
@@ -31,13 +31,24 @@ QColor qmix(const QColor &a, const QColor &b, double r = 0.5) {
 
 class Item : public QGraphicsItem {
 public:
+	int type = 0;
+	
 	bool exists = true;
+	
 	double size = 20.0;
+	vec2 dir = vec2(1, 0);
 	
 	QColor color;
 	
-	Item() : QGraphicsItem() {
-		
+	Item(Entity *e) : QGraphicsItem() {
+		type = e->type;
+		if(type == 0) {
+			color = QColor("#22CC22");
+		} else if(type == 1) {
+			color = QColor("#FFFF22");
+		} else {
+			color = QColor("#000000");
+		}
 	}
 	
 	virtual QRectF boundingRect() const {
@@ -46,15 +57,25 @@ public:
 	
 	virtual void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget = 0) {
 		if(size > 0.0) {
+			QColor dark_color = qmix(color, QColor("#000000"), 0.75);
 			QPen pen;
 			pen.setWidth(2);
 			pen.setCosmetic(true);
-			pen.setColor(qmix(color, QColor("#000000"), 0.75));
+			pen.setColor(dark_color);
 			painter->setPen(pen);
 			
 			painter->setBrush(color);
 			painter->drawEllipse(boundingRect());
+			if(type == 1)
+				painter->drawLine(v2q(nullvec2), v2q(size*dir));
 		}
+	}
+	
+	void sync(Entity *e) {
+		setPos(v2q(e->pos));
+		size = e->size();
+		dir = e->dir;
+		// item->update();
 	}
 };
 
@@ -77,25 +98,6 @@ public:
 		}
 	}
 	
-	void sync_item(Entity *entity, Item *item) {
-		item->setPos(v2q(entity->pos));
-		item->size = entity->size();
-		// item->update();
-	}
-	
-	Item *instance(Entity *entity) {
-		int t = entity->type;
-		Item *item = new Item();
-		if(t == 0) {
-			item->color = QColor("#22CC22");
-		} else if(t == 1) {
-			item->color = QColor("#FFFF22");
-		} else {
-			item->color = QColor("#000000");
-		}
-		return item;
-	}
-	
 	void sync() {
 		for(auto &p : items) {
 			p.second->exists = false;
@@ -109,14 +111,14 @@ public:
 				Item *it = nullptr;
 				auto ii = items.find(id);
 				if(ii == items.end()) {
-					it = instance(e);
+					it = new Item(e);
 					it->setZValue(id);
 					ii = items.insert(std::pair<int, Item*>(id, it)).first;
 					addItem(it);
 				} else {
 					it = ii->second;
 				}
-				sync_item(e, it);
+				it->sync(e);
 				it->exists = true;
 			}
 		}
@@ -195,6 +197,10 @@ public:
 		
 		resize(1280, 720);
 		setWindowTitle("Evolution");
+		
+		vec2 zv = vec2(view.size().width(), view.size().height())/(2*w->size);
+		float z = zv.x() > zv.y() ? zv.x() : zv.y();
+		view.scale(z, z);
 	}
 	
 	virtual bool event(QEvent *event) override {
