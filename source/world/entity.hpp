@@ -16,8 +16,6 @@ public:
 	long total_age = 0, age = 0;
 	int nanc = 0;
 	
-	int type;
-	
 	bool alive = true;
 	
 	double mass = 1.0;
@@ -31,9 +29,7 @@ public:
 		return 0.5*sqrt(score);
 	}
 	
-	Entity(int t) {
-		type = t;
-	}
+	Entity() = default;
 	virtual ~Entity() = default;
 	
 	virtual void proc() = 0;
@@ -41,13 +37,7 @@ public:
 
 class Plant : public Entity {
 public:
-	Plant() : Entity(0) {
-		
-	}
-	
-	virtual void proc() override {
-		
-	}
+	virtual void proc() override {}
 };
 
 
@@ -65,7 +55,6 @@ public:
 	vector<float> th;
 	
 	Animal(Mind *esrc = nullptr) : 
-		Entity(1),
 		mind(ni, no, ni*nh + (nh*nh + nh) + nh*no + no, nh),
 		th(nh)
 	{

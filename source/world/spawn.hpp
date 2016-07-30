@@ -2,7 +2,7 @@
 
 #include "entity.hpp"
 
-class Spawner : public Entity {
+class Spawn : public Entity {
 public:
 	
 };

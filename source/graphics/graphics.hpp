@@ -31,7 +31,14 @@ QColor qmix(const QColor &a, const QColor &b, double r = 0.5) {
 
 class Item : public QGraphicsItem {
 public:
-	int type = 0;
+	enum class Type {
+		NONE = 0,
+		PLANT,
+		ANIMAL,
+		AREA
+	};
+
+	Type type = Type::NONE;
 	
 	bool exists = true;
 	
@@ -41,12 +48,14 @@ public:
 	QColor color;
 	
 	Item(Entity *e) : QGraphicsItem() {
-		type = e->type;
-		if(type == 0) {
+		if(dynamic_cast<Plant*>(e)) {
+			type = Type::PLANT;
 			color = QColor("#22CC22");
-		} else if(type == 1) {
+		} else if(dynamic_cast<Animal*>(e)) {
+			type = Type::ANIMAL;
 			color = QColor("#FFFF22");
 		} else {
+			type = Type::NONE;
 			color = QColor("#000000");
 		}
 	}
@@ -66,7 +75,7 @@ public:
 			
 			painter->setBrush(color);
 			painter->drawEllipse(boundingRect());
-			if(type == 1)
+			if(type == Type::ANIMAL)
 				painter->drawLine(v2q(nullvec2), v2q(size*dir));
 		}
 	}

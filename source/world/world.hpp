@@ -145,28 +145,29 @@ public:
 			{
 				// consume
 				for(auto &p : entities) {
-					Entity *entity = p.second;
-					if(entity->type == 1) {
-						Animal *anim = static_cast<Animal*>(entity);
-						// eat plants
-						for(auto &op : entities) {
-							if(op.second->type == 0) {
-								Plant *p = static_cast<Plant*>(op.second);
-								if(p->alive && length(p->pos - anim->pos) < 0.8*(p->size() + anim->size())) {
-									p->alive = false;
-									plant_count -= 1;
-									anim->score += p->score*eat_factor;
-								}
-							}
+					Animal *anim = dynamic_cast<Animal*>(p.second);
+					if(anim == nullptr)
+						continue;
+					
+					// eat plants
+					for(auto &op : entities) {
+						Plant *p = dynamic_cast<Plant*>(op.second);
+						if(p == nullptr)
+							continue;
+						if(p->alive && length(p->pos - anim->pos) < 0.8*(p->size() + anim->size())) {
+							p->alive = false;
+							plant_count -= 1;
+							anim->score += p->score*eat_factor;
 						}
-						// die
-						if(
-							anim->score < 0.0 ||
-							(anim->age > breed_age && anim->score < breed_min_score)
-						) {
-							anim->alive = false;
-							anim_count -= 1;
-						}
+					}
+					
+					// die
+					if(
+						anim->score < 0.0 ||
+						(anim->age > breed_age && anim->score < breed_min_score)
+					) {
+						anim->alive = false;
+						anim_count -= 1;
 					}
 				}
 				for(auto ii = entities.begin(); ii != entities.end();) {
@@ -195,28 +196,27 @@ public:
 				}
 				// breed animal
 				for(auto &p : entities) {
-					Entity *entity = p.second;
-					if(entity->type == 1) {
-						Animal *asrc = static_cast<Animal*>(entity);
-						if((asrc->score - breed_min_score)/(breed_threshold - breed_min_score) + asrc->age/breed_age > 1.0) {
-						// if(asrc->score > breed_threshold || asrc->age > breed_age) {
-							Animal *anim = new Animal(&asrc->mind);
-							
-							asrc->score /= 2;
-							anim->score = asrc->score;
-							asrc->age = 0;
-							anim->total_age = asrc->total_age;
-							anim->nanc = (asrc->nanc += 1);
-							
-							vec2 dir = normalize(rand2());
-							anim->pos = asrc->pos + 0.5*dir*asrc->size();
-							asrc->pos -= 0.5*dir*asrc->size();
-							
-							anim->mind.vary([this](){return randn();}, 0.01);
-							
-							entities.insert(std::pair<int, Entity*>(id_counter++, anim));
-							anim_count += 1;
-						}
+					Animal *asrc = dynamic_cast<Animal*>(p.second);
+					if(asrc == nullptr)
+						continue;
+					if((asrc->score - breed_min_score)/(breed_threshold - breed_min_score) + asrc->age/breed_age > 1.0) {
+					// if(asrc->score > breed_threshold || asrc->age > breed_age) {
+						Animal *anim = new Animal(&asrc->mind);
+						
+						asrc->score /= 2;
+						anim->score = asrc->score;
+						asrc->age = 0;
+						anim->total_age = asrc->total_age;
+						anim->nanc = (asrc->nanc += 1);
+						
+						vec2 dir = normalize(rand2());
+						anim->pos = asrc->pos + 0.5*dir*asrc->size();
+						asrc->pos -= 0.5*dir*asrc->size();
+						
+						anim->mind.vary([this](){return randn();}, 0.01);
+						
+						entities.insert(std::pair<int, Entity*>(id_counter++, anim));
+						anim_count += 1;
 					}
 				}
 				
@@ -225,15 +225,13 @@ public:
 				anim_max_anc = 0;
 				for(auto &p : entities) {
 					Entity *entity = p.second;
-					if(entity->type == 1) {
-						Animal *anim = static_cast<Animal*>(entity);
+					if(Animal *anim = dynamic_cast<Animal*>(entity)) {
 						anim->score -= time_fine + move_fine*length(anim->vel)/max_speed + spin_fine*fabs(anim->spin)/max_spin;
 						if(anim_max_age < anim->total_age)
 							anim_max_age = anim->total_age;
 						if(anim_max_anc < anim->nanc)
 							anim_max_anc = anim->nanc;
-					} else if(entity->type == 0) {
-						Plant *p = static_cast<Plant*>(entity);
+					} else if(Plant *p = dynamic_cast<Plant*>(entity)) {
 						if(p->score < plant_max_score) {
 							p->score += plant_grow_speed + plant_grow_exp*p->score;
 							if(p->score > plant_max_score) {
@@ -247,33 +245,32 @@ public:
 				
 				// set inputs
 				for(auto &p : entities) {
-					Entity *entity = p.second;
-					if(entity->type == 1) {
-						Animal *anim = static_cast<Animal*>(entity);
-						
-						std::pair<double, vec2> pg;
-						double pot = 0.0;
-						vec2 dir = nullvec2;
-						
-						mat2 rot(anim->dir.x(), anim->dir.y(), -anim->dir.y(), anim->dir.x());
-						
-						pg = potential(anim, [](Entity *e) {return e->type == 0;});
-						pot = pg.first;
-						dir = rot*pg.second;
-						
-						anim->mind.input[0] = dir[0];
-						anim->mind.input[1] = dir[1];
-						anim->mind.input[2] = pot;
-						
-						
-						pg = potential(anim, [anim](Entity *e) {return e->type == 1 && e != anim;});
-						pot = pg.first;
-						dir = rot*pg.second;
-						
-						anim->mind.input[3] = dir[0];
-						anim->mind.input[4] = dir[1];
-						anim->mind.input[5] = pot;
-					}
+					Animal *anim = dynamic_cast<Animal*>(p.second);
+					if(anim == nullptr)
+						continue;
+					
+					std::pair<double, vec2> pg;
+					double pot = 0.0;
+					vec2 dir = nullvec2;
+					
+					mat2 rot(anim->dir.x(), anim->dir.y(), -anim->dir.y(), anim->dir.x());
+					
+					pg = potential(anim, [](Entity *e) {return dynamic_cast<Plant*>(e) != nullptr;});
+					pot = pg.first;
+					dir = rot*pg.second;
+					
+					anim->mind.input[0] = dir[0];
+					anim->mind.input[1] = dir[1];
+					anim->mind.input[2] = pot;
+					
+					
+					pg = potential(anim, [anim](Entity *e) {return dynamic_cast<Animal*>(e) != nullptr && e != anim;});
+					pot = pg.first;
+					dir = rot*pg.second;
+					
+					anim->mind.input[3] = dir[0];
+					anim->mind.input[4] = dir[1];
+					anim->mind.input[5] = pot;
 				}
 				
 				// process
@@ -284,13 +281,12 @@ public:
 				
 				// get outputs
 				for(auto &p : entities) {
-					Entity *entity = p.second;
-					if(entity->type == 1) {
-						Animal *anim = static_cast<Animal*>(entity);
-						float *out = anim->mind.output.data();
-						anim->spin = max_spin*tanh(out[1]);
-						anim->vel = max_speed*fabs(tanh(out[0]))*anim->dir;
-					}
+					Animal *anim = dynamic_cast<Animal*>(p.second);
+					if(anim == nullptr)
+						continue;
+					float *out = anim->mind.output.data();
+					anim->spin = max_spin*tanh(out[1]);
+					anim->vel = max_speed*fabs(tanh(out[0]))*anim->dir;
 				}
 				
 				// move entities
