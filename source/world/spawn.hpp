@@ -31,7 +31,7 @@ public:
 	virtual bool own(const Entity *e) const = 0;
 	
 	void interact(Entity *e) override {
-		if(own(e) && length(pos - e->pos) < rad) {
+		if(max_count > 0 && own(e) && length(pos - e->pos) < rad) {
 			count += 1;
 		}
 	}
@@ -62,7 +62,7 @@ public:
 	template <typename ... Args>
 	SpawnPlant(Args ... args) : Spawn(args...) {}
 	
-	Entity *instance() const override {
+	Plant *instance() const override {
 		Plant *a = new Plant();
 		
 		a->pos = rand_pos();
@@ -81,18 +81,45 @@ public:
 	template <typename ... Args>
 	SpawnAnimal(Args ... args) : Spawn(args...) {}
 	
-	Entity *instance() const override {
-		Animal *a = new Animal();
+	bool own(const Entity *e) const override {
+		return dynamic_cast<const Animal*>(e) != nullptr;
+	}
+};
+
+class SpawnHerbivore : public SpawnAnimal {
+public:
+	template <typename ... Args>
+	SpawnHerbivore(Args ... args) : SpawnAnimal(args...) {}
+	
+	Herbivore *instance() const override {
+		Herbivore *a = new Herbivore();
 		
 		a->pos = rand_pos();
-		a->score = Animal::init_score;
 		a->mind.randomize(rand_norm);
 		
 		return a;
 	}
 	
 	bool own(const Entity *e) const override {
-		return dynamic_cast<const Animal*>(e) != nullptr;
+		return dynamic_cast<const Herbivore*>(e) != nullptr;
 	}
 };
 
+class SpawnCarnivore : public SpawnAnimal {
+public:
+	template <typename ... Args>
+	SpawnCarnivore(Args ... args) : SpawnAnimal(args...) {}
+	
+	Carnivore *instance() const override {
+		Carnivore *a = new Carnivore();
+		
+		a->pos = rand_pos();
+		a->mind.randomize(rand_norm);
+		
+		return a;
+	}
+	
+	bool own(const Entity *e) const override {
+		return dynamic_cast<const Carnivore*>(e) != nullptr;
+	}
+};

@@ -87,38 +87,38 @@ public:
 	}
 };
 
+struct PG {
+	double pot = 0.0;
+	vec2 grad = nullvec2;
+};
 
 class Animal : public Entity {
 public:
-	static const double constexpr
-		max_speed = 100.0,
-		max_spin = 10.0,
+	double 
+		max_speed,
+		max_spin,
 	
-		eat_factor = 0.2,
-		time_fine = 0.4,
-		move_fine = 0.4,
-		spin_fine = 0.2,
+		eat_factor,
+		time_fine,
 	
-		breed_threshold = 1000.0,
-		breed_age = 200,
-		breed_min_score = 400.0,
-		init_score = 100.0;
+		breed_score,
+		max_age;
 	
 	vec2 dir = vec2(1, 0);
 	double spin = 0.0;
 	
 	// const int neyes = 12;
 	const int 
-		ni = 6,
+		ni = 3*3,
 		no = 2,
-		nh = 8;
+		nh = 16;
 	
 	Mind mind;
 	slice<float> Wih, Whh, bh, Who, bo;
 	slice<float> vi, vo, vh;
 	vector<float> th;
 	
-	Animal(Mind *esrc = nullptr) : 
+	Animal(const Mind *esrc = nullptr) : 
 		mind(ni, no, ni*nh + (nh*nh + nh) + nh*no + no, nh),
 		th(nh)
 	{
@@ -150,46 +150,39 @@ public:
 		vh = slice<float>(mind.memory.data(), nh);
 	}
 	
+	virtual bool edible(const Entity *e) const = 0;
+	
 	void interact(Entity *e) override {
-		// eat plants
-		Plant *p = dynamic_cast<Plant*>(e);
-		if(p == nullptr)
-			return;
-		if(p->alive && length(p->pos - pos) < 0.8*(p->size() + size())) {
-			score += p->score*eat_factor;
-			p->score = 0.0;
+		// eat
+		if(edible(e)) {
+			if(e->alive && length(e->pos - pos) < 0.8*(e->size() + size())) {
+				score += e->score*eat_factor;
+				e->score = 0.0;
+			}
 		}
 	}
 	
-	virtual void sense(const std::pair<double, vec2> &pp, const std::pair<double, vec2> &ap) {
-		double p = 0.0;
-		vec2 d = nullvec2;
-		
+	virtual void sense(const std::vector<PG> &pl) {
 		mat2 rot(dir.x(), dir.y(), -dir.y(), dir.x());
 		
-		p = pp.first;
-		d = rot*pp.second;
-		
-		mind.input[0] = d[0];
-		mind.input[1] = d[1];
-		mind.input[2] = p;
-		
-		p = ap.first;
-		d = rot*ap.second;
-		
-		mind.input[3] = d[0];
-		mind.input[4] = d[1];
-		mind.input[5] = p;
+		for(int i = 0; i < int(pl.size()); ++i) {
+			double p = pl[i].pot;
+			vec2 d = rot*pl[i].grad;
+			
+			mind.input[3*i + 0] = d[0];
+			mind.input[3*i + 1] = d[1];
+			mind.input[3*i + 2] = p;
+		}
 	}
 	
 	void process() override {
 		Entity::process();
 		
 		// update scores
-		score -= time_fine + move_fine*length(vel)/max_speed + spin_fine*fabs(spin)/max_spin;
+		score -= time_fine;
 		
 		// check able to live
-		if(score < 0.0 || (age > breed_age && score < breed_min_score)) {
+		if(score < 0.0 || age > max_age) {
 			// die
 			alive = false;
 			return;
@@ -210,12 +203,13 @@ public:
 		spin = max_spin*tanh(out[1]);
 	}
 	
+	virtual Animal *instance() const = 0;
+	
 	std::list<Entity*> produce() override {
 		std::list<Entity*> list;
 		
-		if((score - breed_min_score)/(breed_threshold - breed_min_score) + age/breed_age > 1.0) {
-		// if(score > breed_threshold || age > breed_age) {
-			Animal *anim = new Animal(&mind);
+		if(score > breed_score) {
+			Animal *anim = instance();
 			
 			score /= 2;
 			anim->score = score;
@@ -241,5 +235,53 @@ public:
 		double sda = sin(da), cda = cos(da);
 		mat2 rot(cda, sda, -sda, cda);
 		dir = normalize(rot*dir);
+	}
+};
+
+class Herbivore : public Animal {
+public:
+	Herbivore(const Mind *ms = nullptr) : Animal(ms) {
+		max_speed = 100.0;
+		max_spin = 10.0;
+	
+		eat_factor = 0.2;
+		time_fine = 1.0;
+	
+		breed_score = 800.0;
+		max_age = 500;
+		
+		score = 100.0;
+	}
+	
+	bool edible(const Entity *e) const override {
+		return dynamic_cast<const Plant*>(e) != nullptr;
+	}
+	
+	Herbivore *instance() const override {
+		return new Herbivore(&mind);
+	}
+};
+
+class Carnivore : public Animal {
+public:
+	Carnivore(const Mind *ms = nullptr) : Animal(ms) {
+		max_speed = 200.0;
+		max_spin = 10.0;
+	
+		eat_factor = 0.3;
+		time_fine = 0.4;
+	
+		breed_score = 1000.0;
+		max_age = 500;
+		
+		score = 100.0;
+	}
+	
+	bool edible(const Entity *e) const override {
+		return dynamic_cast<const Herbivore*>(e) != nullptr;
+	}
+	
+	Carnivore *instance() const override {
+		return new Carnivore(&mind);
 	}
 };

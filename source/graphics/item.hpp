@@ -73,12 +73,21 @@ public:
 
 class ItemAnimal : public Item {
 public:
-	constexpr static const char *COLOR = "#FFFF22";
+	constexpr static const char 
+		*ACOLOR = "#CCCCCC",
+		*HCOLOR = "#FFFF22",
+		*CCOLOR = "#FF2222";
 	
 	vec2 dir = vec2(1, 0);
 	
 	ItemAnimal(Animal *a) : Item(a) {
-		color = QColor(COLOR);
+		if(dynamic_cast<Herbivore*>(a)) {
+			color = QColor(HCOLOR);
+		} else if(dynamic_cast<Carnivore*>(a)) {
+			color = QColor(CCOLOR);
+		} else {
+			color = QColor(ACOLOR);
+		}
 	}
 	
 	void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override {
@@ -96,7 +105,13 @@ class ItemSpawn : public Item {
 public:
 	ItemSpawn(Spawn *s) : Item(s) {
 		if(dynamic_cast<SpawnAnimal*>(s)) {
-			color = QColor(ItemAnimal::COLOR);
+			if(dynamic_cast<SpawnHerbivore*>(s)) {
+				color = QColor(ItemAnimal::HCOLOR);
+			} else if(dynamic_cast<SpawnCarnivore*>(s)) {
+				color = QColor(ItemAnimal::CCOLOR);
+			} else {
+				color = QColor(ItemAnimal::ACOLOR);
+			}
 		} else if(dynamic_cast<SpawnPlant*>(s)) {
 			color = QColor(ItemPlant::COLOR);
 		} else {
