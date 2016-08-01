@@ -6,6 +6,8 @@
 #include <graphics/graphics.hpp>
 #include <world/world.hpp>
 
+#include "world/random.hpp"
+
 
 int main(int argc, char *argv[]) {
 	World world(500*vec2(1, 1));

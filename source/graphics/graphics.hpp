@@ -83,8 +83,9 @@ public:
 	void sync(Entity *e) {
 		setPos(v2q(e->pos));
 		size = e->size();
-		dir = e->dir;
-		// item->update();
+		if(auto *a = dynamic_cast<Animal*>(e))
+			dir = a->dir;
+		// update();
 	}
 };
 
@@ -140,6 +141,7 @@ public:
 				auto iv = ii->second;
 				removeItem(iv);
 				items.erase(ii++);
+				delete iv;
 			}
 		}
 		
