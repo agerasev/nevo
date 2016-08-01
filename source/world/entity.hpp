@@ -25,7 +25,7 @@ public:
 	long total_age = 0;
 	int age = 0, anc = 0;
 	
-	double size() const {
+	virtual double size() const {
 		return 0.5*sqrt(score);
 	}
 	
@@ -51,16 +51,25 @@ class Plant : public Entity {
 public:
 	static const double constexpr
 		init_score = 0.1,
-		max_score = 500.0,
-		grow_speed = 1.0,
-		grow_exp = 0.0; //0.001;
+		lower_score = 300.0,
+		upper_score = 700.0,
+		score_fine = 1.0,
+		grow_speed = 2.0,
+		grow_exp = 0.0, //0.001,
+		max_age = 2000;
+	
+	double max_score = lower_score;
+	
+	Plant() {
+		max_score = lower_score + (upper_score - lower_score)*rand_unif();
+	}
 	
 	virtual void interact(Entity *e) override {}
 	
 	void process() override {
 		Entity::process();
 		// die
-		if(score <= 0.0) {
+		if(score <= 0.0 || age + score_fine*(score - lower_score) > max_age) {
 			alive = false;
 			return;
 		}
@@ -82,16 +91,16 @@ public:
 class Animal : public Entity {
 public:
 	static const double constexpr
-		max_speed = 50.0,
+		max_speed = 100.0,
 		max_spin = 10.0,
 	
-		eat_factor = 0.1,
-		time_fine = 0.2,
-		move_fine = 0.2,
-		spin_fine = 0.1,
+		eat_factor = 0.2,
+		time_fine = 0.4,
+		move_fine = 0.4,
+		spin_fine = 0.2,
 	
 		breed_threshold = 1000.0,
-		breed_age = 400,
+		breed_age = 200,
 		breed_min_score = 400.0,
 		init_score = 100.0;
 	
@@ -214,11 +223,11 @@ public:
 			anim->total_age = total_age;
 			anim->anc = (anc += 1);
 			
-			vec2 dir = normalize(randu2() - vec2(0.5, 0.5));
+			vec2 dir = normalize(rand_unif2() - vec2(0.5, 0.5));
 			anim->pos = pos + 0.5*dir*size();
 			pos -= 0.5*dir*size();
 			
-			anim->mind.vary([this](){return randn();}, 0.01);
+			anim->mind.vary(rand_norm, 0.01);
 			
 			list.push_back(anim);
 		}

@@ -12,6 +12,7 @@
 
 #include "random.hpp"
 #include "entity.hpp"
+#include "spawn.hpp"
 
 
 class World {
@@ -45,7 +46,7 @@ public:
 	int anim_max_anc = 0;
 	
 	vec2 rand_pos(double is) {
-		return 2*(randu2() - vec2(0.5, 0.5))*(size - vec2(is, is));
+		return 2*(rand_unif2() - vec2(0.5, 0.5))*(size - vec2(is, is));
 	}
 	
 	void setDelay(int ms) {
@@ -54,22 +55,6 @@ public:
 	
 	World(const vec2 &s) {
 		size = s;
-		
-		for(int i = 0; i < min_anim_count; ++i) {
-			Animal *anim = new Animal();
-			anim->pos = rand_pos(anim->size());
-			anim->score = Animal::init_score;
-			anim->mind.randomize([this](){return randu() - 0.5;});
-			entities.insert(std::pair<int, Entity*>(id_counter++, anim));
-			anim_count += 1;
-		}
-		for(int i = 0; i < max_plant_count; ++i) {
-			Plant *plant = new Plant();
-			plant->pos = rand_pos(plant->size());
-			plant->score = Plant::max_score;
-			entities.insert(std::pair<int, Entity*>(id_counter++, plant));
-			plant_count += 1;
-		}
 	}
 	~World() {
 		for(auto &p : entities) {
@@ -77,13 +62,17 @@ public:
 		}
 	}
 	
+	void add(Entity *e) {
+		entities.insert(std::pair<int, Entity*>(id_counter++, e));
+	}
+	
 	std::pair<double, vec2> potential(Entity *e, std::function<bool(Entity*)> selector) {
 		double pot = 0.0;
 		vec2 grad = nullvec2;
 		for(auto &op : entities) {
 			Entity *p = op.second;
-			double spot = 8*e->size();
-			if(selector(p) && length(p->pos - e->pos) - p->size() < spot) {
+			// double spot = 20*e->size();
+			if(selector(p)) { // && length(p->pos - e->pos) - p->size() < spot) {
 				vec2 d = p->pos - e->pos;
 				double l = length(d) + p->size();
 				double m = p->size()/e->size();
@@ -92,7 +81,7 @@ public:
 			}
 		}
 		double lg = length(grad);
-		if(lg < 1e-4)
+		if(lg < 1e-8)
 			grad = nullvec2;
 		else
 			grad = normalize(grad);
@@ -116,7 +105,7 @@ public:
 					if(e->active) {
 						for(auto &op : entities) {
 							Entity *oe = op.second;
-							if(length(e->pos - oe->pos)) {
+							if(length(e->pos - oe->pos) < e->size() + oe->size()) {
 								e->interact(oe);
 							}
 						}
@@ -156,29 +145,12 @@ public:
 					}
 				}
 				
-				// spawn plant
-				while(plant_count < max_plant_count) { // && plant_timer <= 0) {
-					Plant *plant = new Plant();
-					plant->score = Plant::init_score;
-					plant->pos = rand_pos(plant->size());
-					entities.insert(std::pair<int, Entity*>(id_counter++, plant));
-					plant_count += 1;
-				}
-				// spawn anim
-				while(anim_count < min_anim_count) {
-					Animal *anim = new Animal();
-					anim->pos = rand_pos(anim->size());
-					anim->score = Animal::init_score;
-					anim->mind.randomize([this](){return randn();});
-					entities.insert(std::pair<int, Entity*>(id_counter++, anim));
-					anim_count += 1;
-				}
 				// reproduce
 				for(auto &p : entities) {
 					Entity *e = p.second;
 					std::list<Entity*> prod = e->produce();
 					for(Entity *ne : prod) {
-						entities.insert(std::pair<int, Entity*>(id_counter++, ne));
+						add(ne);
 						if(dynamic_cast<Animal*>(ne))
 							anim_count += 1;
 						else if(dynamic_cast<Plant*>(ne))

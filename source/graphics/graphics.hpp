@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QWidget>
-#include <QGraphicsItem>
 #include <QGraphicsView>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -14,80 +13,7 @@
 #include <event.hpp>
 
 #include "sidepanel.hpp"
-
-
-QPointF v2q(const vec2 &v) {
-	return QPointF(v.x(), v.y());
-}
-
-QColor qmix(const QColor &a, const QColor &b, double r = 0.5) {
-	return QColor(
-		a.red()*r + b.red()*(1 - r),
-		a.green()*r + b.green()*(1 - r),
-		a.blue()*r + b.blue()*(1 - r),
-		255
-	);
-}
-
-class Item : public QGraphicsItem {
-public:
-	enum class Type {
-		NONE = 0,
-		PLANT,
-		ANIMAL,
-		AREA
-	};
-
-	Type type = Type::NONE;
-	
-	bool exists = true;
-	
-	double size = 20.0;
-	vec2 dir = vec2(1, 0);
-	
-	QColor color;
-	
-	Item(Entity *e) : QGraphicsItem() {
-		if(dynamic_cast<Plant*>(e)) {
-			type = Type::PLANT;
-			color = QColor("#22CC22");
-		} else if(dynamic_cast<Animal*>(e)) {
-			type = Type::ANIMAL;
-			color = QColor("#FFFF22");
-		} else {
-			type = Type::NONE;
-			color = QColor("#000000");
-		}
-	}
-	
-	virtual QRectF boundingRect() const {
-		return QRectF(-size, -size, 2*size, 2*size);
-	}
-	
-	virtual void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget = 0) {
-		if(size > 0.0) {
-			QColor dark_color = qmix(color, QColor("#000000"), 0.75);
-			QPen pen;
-			pen.setWidth(2);
-			pen.setCosmetic(true);
-			pen.setColor(dark_color);
-			painter->setPen(pen);
-			
-			painter->setBrush(color);
-			painter->drawEllipse(boundingRect());
-			if(type == Type::ANIMAL)
-				painter->drawLine(v2q(nullvec2), v2q(size*dir));
-		}
-	}
-	
-	void sync(Entity *e) {
-		setPos(v2q(e->pos));
-		size = e->size();
-		if(auto *a = dynamic_cast<Animal*>(e))
-			dir = a->dir;
-		// update();
-	}
-};
+#include "item.hpp"
 
 class MainScene : public QGraphicsScene {
 public:
@@ -108,6 +34,16 @@ public:
 		}
 	}
 	
+	Item *instance(Entity *e) const {
+		if(auto p = dynamic_cast<Plant*>(e))
+			return new ItemPlant(p);
+		if(auto a = dynamic_cast<Animal*>(e))
+			return new ItemAnimal(a);
+		if(auto s = dynamic_cast<Spawn*>(e))
+			return new ItemSpawn(s);
+		return new Item(e);
+	}
+	
 	void sync() {
 		for(auto &p : items) {
 			p.second->exists = false;
@@ -121,7 +57,7 @@ public:
 				Item *it = nullptr;
 				auto ii = items.find(id);
 				if(ii == items.end()) {
-					it = new Item(e);
+					it = instance(e);
 					it->setZValue(id);
 					ii = items.insert(std::pair<int, Item*>(id, it)).first;
 					addItem(it);
