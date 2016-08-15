@@ -1,3 +1,6 @@
 [submodule "libla"]
 	path = libla
 	url = https://github.com/nthend/libla.git
+[submodule "2d-world-framework"]
+	path = 2d-world-framework
+	url = https://github.com/nthend/2d-world-framework.git

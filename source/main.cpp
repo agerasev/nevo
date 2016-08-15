@@ -3,14 +3,15 @@
 #include <la/vec.hpp>
 
 #include <event.hpp>
-#include <graphics/graphics.hpp>
+
+#include <graphics/window.hpp>
 #include <world/world.hpp>
 
 #include "world/random.hpp"
 
 
 int main(int argc, char *argv[]) {
-	World world(vec2(1000, 1600));
+	MyWorld world(vec2(1000, 1600));
 	
 	world.add(new SpawnHerbivore(vec2(0, 1500), 100, 10, 0));
 	world.add(new SpawnPlant(vec2(0, 1300), 300, 0, 100));
@@ -23,7 +24,7 @@ int main(int argc, char *argv[]) {
 	
 	QApplication app(argc, argv);
 	
-	MainWindow window(&world);
+	Window window(&world);
 	window.show();
 	
 	

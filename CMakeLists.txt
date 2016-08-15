@@ -9,6 +9,9 @@ set(SOURCE source/world/random.cpp)
 set(QT5_INCLUDE /usr/include/x86_64-linux-gnu/qt5)
 include_directories(source libla ${QT5_INCLUDE} ${QT5_INCLUDE}/QtWidgets)
 
+add_subdirectory(2d-world-framework)
+include_directories(2d-world-framework/include)
+
 add_executable(nevo source/main.cpp ${SOURCE})
 
 set(LIBS ${LIBS} pthread)
