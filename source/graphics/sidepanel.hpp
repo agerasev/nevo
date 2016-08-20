@@ -10,12 +10,12 @@
 
 #include <string>
 
-#include <core/world.hpp>
+#include <world/myworld.hpp>
 
 
 class SidePanel : public QWidget {
 public:
-	World *world;
+	MyWorld *world;
 	
 	// QLabel size_label;
 	QPushButton pause_button;
@@ -34,10 +34,12 @@ public:
 	QLabel count_label;
 	QLabel age_label;
 	QLabel nanc_label;
+	QLabel cscore_label;
+	QLabel hscore_label;
 	
 	QVBoxLayout layout;
 	
-	SidePanel(World *w) : QWidget() {
+	SidePanel(MyWorld *w) : QWidget() {
 		world = w;
 		
 		// size_label.setText(("World size: " + std::to_string(int(world->size.x())) + "x" + std::to_string(int(world->size.y()))).c_str());
@@ -89,6 +91,8 @@ public:
 		stat_layout.addWidget(&count_label);
 		stat_layout.addWidget(&age_label);
 		stat_layout.addWidget(&nanc_label);
+		stat_layout.addWidget(&hscore_label);
+		stat_layout.addWidget(&cscore_label);
 		stat_groupbox.setLayout(&stat_layout);
 		layout.addWidget(&stat_groupbox);
 		
@@ -104,5 +108,7 @@ public:
 		// count_label.setText(("Animal count: " + std::to_string(world->anim_count)).c_str());
 		// age_label.setText(("Oldest animal age: " + std::to_string(world->anim_max_age)).c_str());
 		// nanc_label.setText(("Longest animal ancestry: " + std::to_string(world->anim_max_anc)).c_str());
+		hscore_label.setText(("Herbivore champion score: " + std::to_string(world->hsel.max_score)).c_str());
+		cscore_label.setText(("Carnivore champion score: " + std::to_string(world->csel.max_score)).c_str());
 	}
 };

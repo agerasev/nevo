@@ -89,11 +89,13 @@ public:
 	
 		eat_factor,
 		time_fine,
+		spin_fine,
 	
 		breed_energy,
 		max_age,
 	
-		breed_price;
+		breed_factor,
+		mind_delta;
 	
 	int child_count = 2;
 	
@@ -118,9 +120,10 @@ public:
 		active = true;
 		
 		max_spin = 10.0;
-		max_age = 500;
 		energy = 100.0;
-		breed_price = 500.0;
+		spin_fine = 0.1;
+		breed_factor = 2.0;
+		mind_delta = 0.01;
 		
 		if(esrc != nullptr) {
 			mind = *esrc;
@@ -149,7 +152,7 @@ public:
 	}
 	
 	double score() const override {
-		return _score + (max_age - age);
+		return _score;
 	}
 	
 	virtual bool edible(const Organism *e) const = 0;
@@ -159,8 +162,10 @@ public:
 		Organism *o = static_cast<Organism*>(e);
 		if(edible(o)) {
 			if(o->alive && length(o->pos - pos) < 0.8*(o->size() + size())) {
-				energy += o->energy*eat_factor;
+				double ae = o->energy*eat_factor;
+				energy += ae;
 				o->energy = 0.0;
+				_score += ae;
 			}
 		}
 	}
@@ -182,7 +187,7 @@ public:
 		Organism::process();
 		
 		// update scores
-		energy -= time_fine;
+		energy -= time_fine + spin_fine*fabs(spin);
 		
 		// check able to live
 		if(energy < 0.0 || age > max_age) {
@@ -221,12 +226,12 @@ public:
 				
 				anim->pos = pos + 0.5*rand_disk()*size();
 				
-				anim->mind.vary(rand_norm, 0.01);
+				anim->mind.vary(rand_norm, mind_delta);
 				
 				list.push_back(anim);
 			}
 			
-			_score += breed_price;
+			_score += breed_factor*(max_age - age);
 			alive = false;
 		}
 		
@@ -246,7 +251,9 @@ class Herbivore : public Animal {
 public:
 	Herbivore(const Mind *ms = nullptr) : Animal(ms) {
 		max_speed = 100.0;
-	
+		
+		max_age = 500;
+		
 		eat_factor = 0.2;
 		time_fine = 1.0;
 	
@@ -264,17 +271,26 @@ public:
 
 class Carnivore : public Animal {
 public:
-	Carnivore(const Mind *ms = nullptr) : Animal(ms) {
-		max_speed = 120.0;
+	double eat_energy = 0.2;
 	
-		eat_factor = 0.3;
-		time_fine = 0.4;
+	Carnivore(const Mind *ms = nullptr) : Animal(ms) {
+		max_speed = 100.0;
+		
+		max_age = 1000;
+		
+		eat_factor = 0.2;
+		time_fine = 0.5;
 	
 		breed_energy = 1000.0;
 	}
 	
 	bool edible(const Organism *e) const override {
-		return dynamic_cast<const Herbivore*>(e) != nullptr;
+		auto h = dynamic_cast<const Herbivore*>(e);
+		if(h == nullptr)
+			return false;
+		if(eat_energy*h->energy > energy)
+			return false;
+		return true;
 	}
 	
 	Carnivore *instance() const override {

@@ -4,9 +4,13 @@
 #include <cmath>
 
 static std::minstd_rand rand_engine;
+static std::uniform_int_distribution<> int_dist;
 static std::uniform_real_distribution<> unif_dist;
 static std::normal_distribution<> norm_dist;
 
+int rand_int() {
+	return int_dist(rand_engine);
+}
 
 double rand_unif() {
 	return unif_dist(rand_engine);

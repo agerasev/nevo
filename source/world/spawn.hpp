@@ -80,6 +80,8 @@ public:
 
 class SpawnAnimal : public Spawn {
 public:
+	std::function<const Mind*()> mindgen = [](){return nullptr;};
+	
 	template <typename ... Args>
 	SpawnAnimal(Args ... args) : Spawn(args...) {}
 	
@@ -94,10 +96,16 @@ public:
 	SpawnHerbivore(Args ... args) : SpawnAnimal(args...) {}
 	
 	Herbivore *instance() const override {
-		Herbivore *a = new Herbivore();
+		const Mind *m = mindgen();
+		Herbivore *a = new Herbivore(m);
+		
+		if(m != nullptr) {
+			a->mind.vary(rand_norm, a->mind_delta);
+		} else {
+			a->mind.randomize(rand_norm);
+		}
 		
 		a->pos = rand_pos();
-		a->mind.randomize(rand_norm);
 		
 		return a;
 	}
@@ -113,10 +121,16 @@ public:
 	SpawnCarnivore(Args ... args) : SpawnAnimal(args...) {}
 	
 	Carnivore *instance() const override {
-		Carnivore *a = new Carnivore();
+		const Mind *m = mindgen();
+		Carnivore *a = new Carnivore(m);
+		
+		if(m != nullptr) {
+			a->mind.vary(rand_norm, a->mind_delta);
+		} else {
+			a->mind.randomize(rand_norm);
+		}
 		
 		a->pos = rand_pos();
-		a->mind.randomize(rand_norm);
 		
 		return a;
 	}

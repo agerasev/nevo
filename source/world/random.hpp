@@ -2,6 +2,7 @@
 
 #include <la/vec.hpp>
 
+int rand_int();
 double rand_unif();
 double rand_norm();
 

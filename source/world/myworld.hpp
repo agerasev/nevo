@@ -5,10 +5,12 @@
 #include <core/world.hpp>
 
 #include "organism.hpp"
-
+#include "selector.hpp"
 
 class MyWorld : public World {
 public:
+	Selector hsel, csel;
+	
 	MyWorld(const vec2 &s) : World(s) {}
 	
 	std::vector<PG> potential(Organism *e, std::vector<std::function<bool(Organism*)>> selectors) {
@@ -65,6 +67,11 @@ public:
 				++ii;
 			} else {
 				entities.erase(ii++);
+				if(auto h = dynamic_cast<Herbivore*>(e)) {
+					hsel.add(h);
+				} else if(auto c = dynamic_cast<Carnivore*>(e)) {
+					csel.add(c);
+				}
 				delete e;
 			}
 		}
@@ -93,6 +100,8 @@ public:
 		reproduce();
 		
 		remove_dead();
+		hsel.select();
+		csel.select();
 		
 		move();
 	}

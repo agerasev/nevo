@@ -12,7 +12,7 @@ public:
 
 	QHBoxLayout layout;
 	
-	Window(World *w) : QWidget(), scene(w), panel(w) {
+	Window(MyWorld *w) : QWidget(), scene(w), panel(w) {
 		view.setScene(&scene);
 		
 		layout.addWidget(&view, 2);
