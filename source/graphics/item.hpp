@@ -4,8 +4,10 @@
 
 #include <la/vec.hpp>
 
-#include <world/entity.hpp>
+#include <world/organism.hpp>
 #include <world/spawn.hpp>
+
+#include <view/item.hpp>
 
 
 class ItemPlant : public Item {

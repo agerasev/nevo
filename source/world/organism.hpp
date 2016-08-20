@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cmath>
+#include <list>
+
 #include <la/vec.hpp>
 #include <la/mat.hpp>
 
@@ -7,53 +10,78 @@
 #include "random.hpp"
 #include "mind.hpp"
 
+#include <core/entity.hpp>
+
+class Organism : public Entity {
+public:
+	double _score = 0.0;
+	
+	double energy = 0.0;
+	bool alive = true;
+	
+	long total_age = 0;
+	int age = 0, anc = 0;
+	
+	virtual double size() const {
+		return 0.5*sqrt(energy);
+	}
+	
+	virtual double score() const {
+		return _score;
+	}
+	
+	virtual void process() {
+		age += 1;
+		total_age += 1;
+	}
+	
+	virtual std::list<Organism*> produce() {
+		return std::list<Organism*>();
+	}
+};
 
 struct PG {
 	double pot = 0.0;
 	vec2 grad = nullvec2;
 };
 
-class Plant : public Entity {
+class Plant : public Organism {
 public:
 	static const double constexpr
-		init_score = 0.1,
-		lower_score = 300.0,
-		upper_score = 700.0,
+		init_energy = 0.1,
+		lower_energy = 300.0,
+		upper_energy = 700.0,
 		score_fine = 1.0,
 		grow_speed = 2.0,
 		grow_exp = 0.0, //0.001,
 		max_age = 2000;
 	
-	double max_score = lower_score;
+	double max_score = lower_energy;
 	
 	Plant() {
-		max_score = lower_score + (upper_score - lower_score)*rand_unif();
+		max_score = lower_energy + (upper_energy - lower_energy)*rand_unif();
 	}
 	
 	virtual void interact(Entity *e) override {}
 	
 	void process() override {
-		Entity::process();
+		Organism::process();
 		// die
-		if(score <= 0.0 || age + score_fine*(score - lower_score) > max_age) {
+		if(energy <= 0.0 || age + score_fine*(energy - lower_energy) > max_age) {
 			alive = false;
 			return;
 		}
 		// grow
-		if(score < max_score) {
-			score += grow_speed + grow_exp*score;
-			if(score > max_score) {
-				score = max_score;
+		if(energy < max_score) {
+			energy += grow_speed + grow_exp*energy;
+			if(energy > max_score) {
+				energy = max_score;
 			}
 		}
 	}
-	
-	std::list<Entity*> produce() override {
-		return std::list<Entity*>();
-	}
 };
 
-class Animal : public Entity {
+class Animal : public Organism {
 public:
 	double 
 		max_speed,
@@ -62,8 +90,12 @@ public:
 		eat_factor,
 		time_fine,
 	
-		breed_score,
-		max_age;
+		breed_energy,
+		max_age,
+	
+		breed_price;
+	
+	int child_count = 2;
 	
 	vec2 dir = vec2(1, 0);
 	double spin = 0.0;
@@ -84,6 +116,11 @@ public:
 		th(nh)
 	{
 		active = true;
+		
+		max_spin = 10.0;
+		max_age = 500;
+		energy = 100.0;
+		breed_price = 500.0;
 		
 		if(esrc != nullptr) {
 			mind = *esrc;
@@ -111,14 +148,19 @@ public:
 		vh = slice<float>(mind.memory.data(), nh);
 	}
 	
-	virtual bool edible(const Entity *e) const = 0;
+	double score() const override {
+		return _score + (max_age - age);
+	}
+	
+	virtual bool edible(const Organism *e) const = 0;
 	
 	void interact(Entity *e) override {
 		// eat
-		if(edible(e)) {
-			if(e->alive && length(e->pos - pos) < 0.8*(e->size() + size())) {
-				score += e->score*eat_factor;
-				e->score = 0.0;
+		Organism *o = static_cast<Organism*>(e);
+		if(edible(o)) {
+			if(o->alive && length(o->pos - pos) < 0.8*(o->size() + size())) {
+				energy += o->energy*eat_factor;
+				o->energy = 0.0;
 			}
 		}
 	}
@@ -137,13 +179,13 @@ public:
 	}
 	
 	void process() override {
-		Entity::process();
+		Organism::process();
 		
 		// update scores
-		score -= time_fine;
+		energy -= time_fine;
 		
 		// check able to live
-		if(score < 0.0 || age > max_age) {
+		if(energy < 0.0 || age > max_age) {
 			// die
 			alive = false;
 			return;
@@ -166,32 +208,33 @@ public:
 	
 	virtual Animal *instance() const = 0;
 	
-	std::list<Entity*> produce() override {
-		std::list<Entity*> list;
+	std::list<Organism*> produce() override {
+		std::list<Organism*> list;
 		
-		if(score > breed_score) {
-			Animal *anim = instance();
+		if(energy > breed_energy) {
+			for(int i = 0; i < child_count; ++i) {
+				Animal *anim = instance();
+				
+				anim->energy = energy/child_count;
+				anim->total_age = total_age;
+				anim->anc = (anc += 1);
+				
+				anim->pos = pos + 0.5*rand_disk()*size();
+				
+				anim->mind.vary(rand_norm, 0.01);
+				
+				list.push_back(anim);
+			}
 			
-			score /= 2;
-			anim->score = score;
-			age = 0;
-			anim->total_age = total_age;
-			anim->anc = (anc += 1);
-			
-			vec2 dir = normalize(rand_unif2() - vec2(0.5, 0.5));
-			anim->pos = pos + 0.5*dir*size();
-			pos -= 0.5*dir*size();
-			
-			anim->mind.vary(rand_norm, 0.01);
-			
-			list.push_back(anim);
+			_score += breed_price;
+			alive = false;
 		}
 		
 		return list;
 	}
 	
 	void move(double dt) override {
-		Entity::move(dt);
+		Organism::move(dt);
 		double da = dt*spin;
 		double sda = sin(da), cda = cos(da);
 		mat2 rot(cda, sda, -sda, cda);
@@ -203,18 +246,14 @@ class Herbivore : public Animal {
 public:
 	Herbivore(const Mind *ms = nullptr) : Animal(ms) {
 		max_speed = 100.0;
-		max_spin = 10.0;
 	
 		eat_factor = 0.2;
 		time_fine = 1.0;
 	
-		breed_score = 800.0;
-		max_age = 500;
-		
-		score = 100.0;
+		breed_energy = 800.0;
 	}
 	
-	bool edible(const Entity *e) const override {
+	bool edible(const Organism *e) const override {
 		return dynamic_cast<const Plant*>(e) != nullptr;
 	}
 	
@@ -226,19 +265,15 @@ public:
 class Carnivore : public Animal {
 public:
 	Carnivore(const Mind *ms = nullptr) : Animal(ms) {
-		max_speed = 200.0;
-		max_spin = 10.0;
+		max_speed = 120.0;
 	
 		eat_factor = 0.3;
 		time_fine = 0.4;
 	
-		breed_score = 1000.0;
-		max_age = 500;
-		
-		score = 100.0;
+		breed_energy = 1000.0;
 	}
 	
-	bool edible(const Entity *e) const override {
+	bool edible(const Organism *e) const override {
 		return dynamic_cast<const Herbivore*>(e) != nullptr;
 	}
 	

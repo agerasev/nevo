@@ -1,8 +1,8 @@
 #pragma once
 
-#include "entity.hpp"
+#include "organism.hpp"
 
-class Spawn : public Entity {
+class Spawn : public Organism {
 public:
 	double rad = 0.0;
 	double timer = 0.0, max_time;
@@ -17,6 +17,7 @@ public:
 		if(max_time < 1e-8)
 			instant = true;
 		active = true;
+		interactive = false;
 	}
 	
 	double size() const override {
@@ -27,22 +28,23 @@ public:
 		return pos + rad*rand_disk();
 	}
 	
-	virtual Entity *instance() const = 0;
-	virtual bool own(const Entity *e) const = 0;
+	virtual Organism *instance() const = 0;
+	virtual bool own(const Organism *e) const = 0;
 	
 	void interact(Entity *e) override {
-		if(max_count > 0 && own(e) && length(pos - e->pos) < rad) {
+		Organism *o = static_cast<Organism*>(e);
+		if(max_count > 0 && own(o) && length(pos - o->pos) < rad) {
 			count += 1;
 		}
 	}
 	
 	virtual void process() override {
-		Entity::process();
+		Organism::process();
 		timer += 1;
 	}
 	
-	virtual std::list<Entity*> produce() override {
-		std::list<Entity*> list;
+	virtual std::list<Organism*> produce() override {
+		std::list<Organism*> list;
 		
 		while((count < max_count || max_count == 0) && (timer >= max_time || instant)) {
 			timer -= max_time;
@@ -66,12 +68,12 @@ public:
 		Plant *a = new Plant();
 		
 		a->pos = rand_pos();
-		a->score = Plant::init_score;
+		a->energy = Plant::init_energy;
 		
 		return a;
 	}
 	
-	bool own(const Entity *e) const override {
+	bool own(const Organism *e) const override {
 		return dynamic_cast<const Plant*>(e) != nullptr;
 	}
 };
@@ -81,7 +83,7 @@ public:
 	template <typename ... Args>
 	SpawnAnimal(Args ... args) : Spawn(args...) {}
 	
-	bool own(const Entity *e) const override {
+	bool own(const Organism *e) const override {
 		return dynamic_cast<const Animal*>(e) != nullptr;
 	}
 };
@@ -100,7 +102,7 @@ public:
 		return a;
 	}
 	
-	bool own(const Entity *e) const override {
+	bool own(const Organism *e) const override {
 		return dynamic_cast<const Herbivore*>(e) != nullptr;
 	}
 };
@@ -119,7 +121,7 @@ public:
 		return a;
 	}
 	
-	bool own(const Entity *e) const override {
+	bool own(const Organism *e) const override {
 		return dynamic_cast<const Carnivore*>(e) != nullptr;
 	}
 };

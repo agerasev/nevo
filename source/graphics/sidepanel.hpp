@@ -98,8 +98,8 @@ public:
 	}
 	
 	void sync() {
-		// step_duration.setText(("Step duration: " + std::to_string(world->step_duration) + " ms").c_str());
-		// steps_elapsed.setText(("Steps elapsed: " + std::to_string(world->steps_elapsed)).c_str());
+		step_duration.setText(("Step duration: " + std::to_string(world->step_duration) + " ms").c_str());
+		steps_elapsed.setText(("Steps elapsed: " + std::to_string(world->steps_elapsed)).c_str());
 		
 		// count_label.setText(("Animal count: " + std::to_string(world->anim_count)).c_str());
 		// age_label.setText(("Oldest animal age: " + std::to_string(world->anim_max_age)).c_str());

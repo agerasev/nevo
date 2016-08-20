@@ -1,7 +1,7 @@
 #pragma once
 
 #include "sidepanel.hpp"
-#include "scene.hpp"
+#include "myscene.hpp"
 
 class Window : public QWidget {
 public:

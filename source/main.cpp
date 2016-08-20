@@ -5,7 +5,7 @@
 #include <event.hpp>
 
 #include <graphics/window.hpp>
-#include <world/world.hpp>
+#include <world/myworld.hpp>
 
 #include "world/random.hpp"
 

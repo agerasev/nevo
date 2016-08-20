@@ -9,7 +9,7 @@ class MyScene : public Scene {
 public:
 	MyScene(World *w) : Scene(w) {}
 	
-	Item *instance(Entity *e) const {
+	Item *instance(Entity *e) const override {
 		if(auto p = dynamic_cast<Plant*>(e))
 			return new ItemPlant(p);
 		if(auto a = dynamic_cast<Animal*>(e))
