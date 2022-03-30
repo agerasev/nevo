@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use eframe::{
     egui::{self, pos2},
     emath, epaint, epi,

@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 pub trait Agent {
     type Input;
     type Output;

@@ -1,4 +1,4 @@
-use nevo::app::App;
+use nevo::gui::App;
 
 fn main() {
     let app = App::default();
