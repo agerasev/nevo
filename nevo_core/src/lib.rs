@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+pub mod neural;
 
 pub trait Agent {
     type Input;
