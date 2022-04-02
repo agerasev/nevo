@@ -1,14 +1,28 @@
+use crate::Variable;
 use ndarray::{linalg::general_mat_vec_mul, Array1, Array2};
 use rand::Rng;
 use rand_distr::Normal;
 use std::cell::RefCell;
 
-pub trait Layer {
-    fn process(&self, input: &Array1<f64>, output: &mut Array1<f64>);
+pub type Vector = Array1<f64>;
+
+pub trait Pack {
+    fn pack(&self, dst: &mut Vector);
 }
 
-pub trait Variable {
-    fn randomize<R: Rng>(&mut self, rng: &mut R, mag: f64);
+pub trait Unpack {
+    fn unpack(&mut self, src: &Vector);
+}
+
+pub trait Layer {
+    fn process(&self, input: &Vector, output: &mut Vector);
+}
+
+impl Variable for Vector {
+    type Rate = f64;
+    fn variate<R: Rng>(&mut self, rate: &f64, rng: &mut R) {
+        self.mapv_inplace(|x| x + rng.sample(Normal::new(0.0, *rate).unwrap()));
+    }
 }
 
 /// Fully-connected layer with bias.
@@ -35,8 +49,9 @@ impl Layer for Fc {
 }
 
 impl Variable for Fc {
-    fn randomize<R: Rng>(&mut self, rng: &mut R, mag: f64) {
-        let distr = Normal::new(0.0, mag).unwrap();
+    type Rate = f64;
+    fn variate<R: Rng>(&mut self, rate: &f64, rng: &mut R) {
+        let distr = Normal::new(0.0, *rate).unwrap();
         self.weight.mapv_inplace(|x| x + rng.sample(distr));
         self.bias.mapv_inplace(|x| x + rng.sample(distr));
     }
@@ -92,9 +107,10 @@ impl Rnn {
 }
 
 impl Variable for Rnn {
-    fn randomize<R: Rng>(&mut self, rng: &mut R, mag: f64) {
-        self.enter.randomize(rng, mag);
-        self.exit.randomize(rng, mag);
-        self.recurse.randomize(rng, mag);
+    type Rate = f64;
+    fn variate<R: Rng>(&mut self, rate: &f64, rng: &mut R) {
+        self.enter.variate(rate, rng);
+        self.exit.variate(rate, rng);
+        self.recurse.variate(rate, rng);
     }
 }
