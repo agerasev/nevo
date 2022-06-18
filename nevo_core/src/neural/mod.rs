@@ -38,7 +38,7 @@ impl Variable for Vector {
         self.mapv_inplace(|x| x + rng.sample(Normal::new(0.0, *rate).unwrap()));
     }
 
-    fn dof_count(&self) -> usize {
+    fn dof(&self) -> usize {
         self.shape()[0]
     }
 }
@@ -118,7 +118,7 @@ impl Variable for Linear {
         self.data.mapv_inplace(|x| x + rng.sample(distr));
     }
 
-    fn dof_count(&self) -> usize {
+    fn dof(&self) -> usize {
         let (input_size, output_size) = self.sizes();
         input_size * output_size
     }
@@ -166,7 +166,7 @@ impl Variable for Bias {
         self.data.mapv_inplace(|x| x + rng.sample(distr));
     }
 
-    fn dof_count(&self) -> usize {
+    fn dof(&self) -> usize {
         self.size()
     }
 }

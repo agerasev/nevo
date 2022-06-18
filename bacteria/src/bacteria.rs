@@ -34,12 +34,12 @@ impl Output {
     }
 }
 
-pub struct Bacteria {
+pub struct Bacterium {
     memory: Option<neural::Vector>,
     brain: Recurrent,
 }
 
-impl Agent for Bacteria {
+impl Agent for Bacterium {
     type Input = Input;
     type Output = Output;
 

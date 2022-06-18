@@ -53,6 +53,15 @@ impl Recurrent {
         &self.initial_memory
     }
 
+    pub fn resize_input(&mut self, action: ResizeAction) {
+        self.enter.resize_input(action);
+    }
+
+    pub fn resize_output(&mut self, action: ResizeAction) {
+        self.exit.resize_output(action);
+        self.exit_bias.resize(action);
+    }
+
     pub fn resize_memory(&mut self, action: ResizeAction) {
         resize_vector(&mut self.initial_memory, action);
         self.enter.resize_output(action);
@@ -111,7 +120,7 @@ impl ForEachVariable for DofCounter {
     type Rate = f64;
 
     fn call<V: Variable<Rate = Self::Rate>>(&mut self, variable: &V) {
-        self.0 += variable.dof_count();
+        self.0 += variable.dof();
     }
 }
 
@@ -141,7 +150,7 @@ impl Variable for Recurrent {
         });
     }
 
-    fn dof_count(&self) -> usize {
+    fn dof(&self) -> usize {
         let mut counter = DofCounter(0);
         self.for_each_variable(&mut counter);
         counter.0

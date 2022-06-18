@@ -8,7 +8,7 @@ pub trait Variable {
     fn variate<R: Rng>(&mut self, rate: &Self::Rate, rng: &mut R);
 
     /// Number of degrees of freedom.
-    fn dof_count(&self) -> usize;
+    fn dof(&self) -> usize;
 }
 
 pub trait Agent {

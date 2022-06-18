@@ -1,5 +1,6 @@
 mod app;
 mod bacteria;
+mod medium;
 
 fn main() {
     let app = app::App::default();
