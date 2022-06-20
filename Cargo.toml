@@ -5,5 +5,5 @@ members = [
     "nevo_gui",
     "nevo_nn",
     "nevo",
-    "bacteria",
+    "cells",
 ]

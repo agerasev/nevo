@@ -1,6 +1,7 @@
 use eframe::{
+    self,
     egui::{self, pos2},
-    emath, epaint, epi,
+    emath, epaint,
 };
 
 pub struct App {
@@ -17,12 +18,8 @@ impl Default for App {
     }
 }
 
-impl epi::App for App {
-    fn name(&self) -> &str {
-        "Bacteria"
-    }
-
-    fn update(&mut self, ctx: &egui::Context, _frame: &epi::Frame) {
+impl eframe::App for App {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.set_style(egui::Style::default());
 
         egui::SidePanel::left("left_panel").show(ctx, |ui| {
