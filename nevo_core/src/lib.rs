@@ -1,4 +1,4 @@
-pub mod neural;
+pub use rand;
 
 use rand::Rng;
 

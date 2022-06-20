@@ -1,6 +1,6 @@
-use nevo::core::{
-    neural::{self, recurrent::Recurrent, Layer},
-    Agent,
+use nevo::{
+    core::Agent,
+    nn::{self, recurrent::Recurrent, Layer},
 };
 use vecmat::Vector;
 
@@ -12,11 +12,11 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn pack(self) -> neural::Vector {
-        let mut dst = neural::Vector::zeros(5);
-        (dst[0], dst[1]) = self.food.into();
-        (dst[2], dst[3]) = self.neighbor.into();
-        dst[4] = self.obesity;
+    pub fn pack(self) -> nn::Vector {
+        let mut dst = nn::Vector::zeros(5);
+        (dst.data[0], dst.data[1]) = self.food.into();
+        (dst.data[2], dst.data[3]) = self.neighbor.into();
+        dst.data[4] = self.obesity;
         dst
     }
 }
@@ -26,16 +26,16 @@ pub struct Output {
 }
 
 impl Output {
-    pub fn unpack(src: neural::Vector) -> Self {
-        assert_eq!([2], src.shape());
+    pub fn unpack(src: nn::Vector) -> Self {
+        assert_eq!(2, src.len());
         Self {
-            movement: Vector::from([src[0], src[1]]),
+            movement: Vector::from([src.data[0], src.data[1]]),
         }
     }
 }
 
 pub struct Bacterium {
-    memory: Option<neural::Vector>,
+    memory: Option<nn::Vector>,
     brain: Recurrent,
 }
 

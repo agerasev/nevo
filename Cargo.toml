@@ -3,6 +3,7 @@
 members = [
     "nevo_core",
     "nevo_gui",
+    "nevo_nn",
     "nevo",
     "bacteria",
 ]

@@ -32,7 +32,7 @@ trait ForEachVariableMut {
 impl Recurrent {
     pub fn new(memory_size: usize, input_size: usize, output_size: usize) -> Self {
         Self {
-            initial_memory: Array1::zeros(memory_size),
+            initial_memory: Vector::new(Array1::zeros(memory_size)),
             enter: Linear::new(input_size, memory_size),
             enter_bias: Bias::new(memory_size),
             exit: Linear::new(memory_size, output_size),
@@ -45,7 +45,7 @@ impl Recurrent {
         Sizes {
             input: self.enter_bias.size(),
             output: self.exit_bias.size(),
-            memory: self.initial_memory.shape()[0],
+            memory: self.initial_memory.data.shape()[0],
         }
     }
 
@@ -63,7 +63,7 @@ impl Recurrent {
     }
 
     pub fn resize_memory(&mut self, action: ResizeAction) {
-        resize_vector(&mut self.initial_memory, action);
+        self.initial_memory.resize(action);
         self.enter.resize_output(action);
         self.enter_bias.resize(action);
         self.exit.resize_input(action);
@@ -95,7 +95,9 @@ impl Layer for Recurrent {
     type Output = (Vector, Vector);
 
     fn process(&self, (input, memory): (Vector, Vector)) -> (Vector, Vector) {
-        let new_memory = (input.apply(&self.enter) + memory.apply(&self.recurse))
+        let new_memory = input
+            .apply(&self.enter)
+            .add(&memory.apply(&self.recurse))
             .apply(&self.enter_bias)
             .apply(&Tanh);
 

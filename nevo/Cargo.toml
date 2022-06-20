@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 nevo_core = { path = "../nevo_core" }
 nevo_gui = { path = "../nevo_gui" }
+nevo_nn = { path = "../nevo_nn" }

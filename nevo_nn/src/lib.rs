@@ -1,11 +1,10 @@
+pub use ndarray;
+
 pub mod recurrent;
 
-use crate::Variable;
 use ndarray::{Array0, Array1, Array2, Axis};
-use rand::Rng;
+use nevo_core::{rand::Rng, Variable};
 use rand_distr::{Bernoulli, Normal, Uniform};
-
-pub type Vector = Array1<f64>;
 
 #[derive(Clone, Copy, Debug)]
 pub enum ResizeAction {
@@ -32,21 +31,52 @@ impl ResizeRate {
     }
 }
 
-impl Variable for Vector {
-    type Rate = f64;
-    fn variate<R: Rng>(&mut self, rate: &f64, rng: &mut R) {
-        self.mapv_inplace(|x| x + rng.sample(Normal::new(0.0, *rate).unwrap()));
+#[derive(Clone, Debug)]
+pub struct Vector {
+    pub data: Array1<f64>,
+}
+
+impl Vector {
+    pub fn new(data: Array1<f64>) -> Self {
+        Self { data }
     }
 
-    fn dof(&self) -> usize {
-        self.shape()[0]
+    pub fn zeros(len: usize) -> Self {
+        Self {
+            data: Array1::zeros(len),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        let shape = self.data.shape();
+        debug_assert_eq!(shape.len(), 1);
+        shape[0]
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn resize(&mut self, action: ResizeAction) {
+        match action {
+            ResizeAction::Add => self.data.push(Axis(0), Array0::zeros(()).view()).unwrap(),
+            ResizeAction::Remove(i) => self.data.remove_index(Axis(0), i),
+        }
+    }
+
+    pub fn add(&self, other: &Vector) -> Self {
+        Vector::new(&self.data + &other.data)
     }
 }
 
-pub fn resize_vector(vector: &mut Vector, action: ResizeAction) {
-    match action {
-        ResizeAction::Add => vector.push(Axis(0), Array0::zeros(()).view()).unwrap(),
-        ResizeAction::Remove(i) => vector.remove_index(Axis(0), i),
+impl Variable for Vector {
+    type Rate = f64;
+    fn variate<R: Rng>(&mut self, rate: &f64, rng: &mut R) {
+        self.data
+            .mapv_inplace(|x| x + rng.sample(Normal::new(0.0, *rate).unwrap()));
+    }
+
+    fn dof(&self) -> usize {
+        self.data.shape()[0]
     }
 }
 
@@ -102,11 +132,11 @@ impl Linear {
 }
 
 impl Layer for Linear {
-    type Input = Array1<f64>;
-    type Output = Array1<f64>;
+    type Input = Vector;
+    type Output = Vector;
 
-    fn process(&self, input: Array1<f64>) -> Array1<f64> {
-        self.data.dot(&input)
+    fn process(&self, input: Vector) -> Vector {
+        Vector::new(self.data.dot(&input.data))
     }
 }
 
@@ -149,11 +179,11 @@ impl Bias {
 }
 
 impl Layer for Bias {
-    type Input = Array1<f64>;
-    type Output = Array1<f64>;
+    type Input = Vector;
+    type Output = Vector;
 
-    fn process(&self, mut input: Array1<f64>) -> Array1<f64> {
-        input += &self.data;
+    fn process(&self, mut input: Vector) -> Vector {
+        input.data += &self.data;
         input
     }
 }
@@ -174,16 +204,16 @@ impl Variable for Bias {
 pub struct Tanh;
 
 impl Tanh {
-    fn process_inplace(data: &mut Array1<f64>) {
-        data.mapv_inplace(|x| x.tanh());
+    fn process_inplace(vector: &mut Vector) {
+        vector.data.mapv_inplace(|x| x.tanh());
     }
 }
 
 impl Layer for Tanh {
-    type Input = Array1<f64>;
-    type Output = Array1<f64>;
+    type Input = Vector;
+    type Output = Vector;
 
-    fn process(&self, mut input: Array1<f64>) -> Array1<f64> {
+    fn process(&self, mut input: Vector) -> Vector {
         Self::process_inplace(&mut input);
         input
     }
