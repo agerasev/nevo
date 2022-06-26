@@ -1,4 +1,5 @@
 pub use rand;
+pub use rand_pcg::Pcg64 as SmallRng;
 
 use rand::Rng;
 

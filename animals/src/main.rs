@@ -1,9 +1,9 @@
+mod animal;
 mod app;
-mod cell;
-mod medium;
+mod world;
 
 fn main() {
-    let app = app::App::default();
+    let app = app::App::new();
     eframe::run_native(
         "Cells",
         eframe::NativeOptions::default(),

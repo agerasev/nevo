@@ -45,7 +45,7 @@ impl Recurrent {
         Sizes {
             input: self.enter_bias.size(),
             output: self.exit_bias.size(),
-            memory: self.initial_memory.data.shape()[0],
+            memory: self.initial_memory.len(),
         }
     }
 
