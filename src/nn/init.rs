@@ -5,7 +5,7 @@ use std::{
 
 use candle::{DType, Device, Error, Result, Shape, Tensor, Var, WithDType};
 use candle_nn::{
-    init::{self, NormalOrUniform},
+    init::{Init, NormalOrUniform},
     var_builder::SimpleBackend,
     VarMap,
 };
@@ -92,20 +92,19 @@ pub fn rand_normal_f64<R: Rng + ?Sized>(
 
 fn init_var<R: Rng + ?Sized, S: Into<Shape>>(
     rng: &mut R,
-    init: init::Init,
+    init: Init,
     s: S,
     dtype: DType,
     device: &Device,
 ) -> Result<Var> {
-    use init::Init::*;
     let shape = s.into();
     Var::from_tensor(&match init {
-        Const(0.0) => Tensor::zeros(shape, dtype, device)?,
-        Const(1.0) => Tensor::ones(shape, dtype, device)?,
-        Const(v) => Tensor::ones(shape, dtype, device)?.affine(v, 0.0)?,
-        Uniform { lo, up } => rand_uniform_f64(rng, &shape, dtype, device, lo, up)?,
-        Randn { mean, stdev } => rand_normal_f64(rng, &shape, dtype, device, mean, stdev)?,
-        Kaiming {
+        Init::Const(0.0) => Tensor::zeros(shape, dtype, device)?,
+        Init::Const(1.0) => Tensor::ones(shape, dtype, device)?,
+        Init::Const(v) => Tensor::ones(shape, dtype, device)?.affine(v, 0.0)?,
+        Init::Uniform { lo, up } => rand_uniform_f64(rng, &shape, dtype, device, lo, up)?,
+        Init::Randn { mean, stdev } => rand_normal_f64(rng, &shape, dtype, device, mean, stdev)?,
+        Init::Kaiming {
             dist,
             fan,
             non_linearity,
@@ -157,7 +156,7 @@ impl<R: Rng + Send> SimpleBackend for DetVarMap<R> {
         &self,
         shape: Shape,
         name: &str,
-        init: init::Init,
+        init: Init,
         dtype: DType,
         device: &Device,
     ) -> Result<Tensor> {

@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "nn"]
+members = ["viewer"]
 
 [workspace.package]
 version = "0.2.0"
@@ -9,3 +9,16 @@ edition = "2021"
 rand = "0.8.5"
 candle = { package = "candle-core", version = "0.7.1" }
 candle-nn = "0.7.1"
+
+[package]
+name = "nevo"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+candle.workspace = true
+candle-nn.workspace = true
+rand.workspace = true
+rand_distr = "0.4.3"
+half = "2.3.1"
+anyhow = "1.0"
