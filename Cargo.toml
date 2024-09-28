@@ -1,5 +1,5 @@
 [workspace]
-members = ["base"]
+members = ["core", "nn"]
 
 [workspace.package]
 version = "0.2.0"
@@ -7,3 +7,5 @@ edition = "2021"
 
 [workspace.dependencies]
 rand = "0.8.5"
+candle = { package = "candle-core", version = "0.7.1" }
+candle-nn = "0.7.1"

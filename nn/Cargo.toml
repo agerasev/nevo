@@ -1,11 +1,12 @@
 [package]
-name = "nevo_nn"
-version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+name = "nevo-nn"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
+nevo = { path = "../core" }
+candle.workspace = true
+candle-nn.workspace = true
+rand.workspace = true
 rand_distr = "0.4.3"
-ndarray = "0.15.4"
-nevo_core = { path = "../nevo_core" }
+half = "2.3.1"
