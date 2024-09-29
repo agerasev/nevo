@@ -137,6 +137,9 @@ impl<R: Rng + Send> DetVarMap<R> {
             rng: Arc::new(Mutex::new(rng)),
         }
     }
+    pub fn into_inner(self) -> VarMap {
+        self.inner
+    }
 }
 
 impl<R: Rng + Send> Deref for DetVarMap<R> {

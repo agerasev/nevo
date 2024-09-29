@@ -1,7 +1,12 @@
-use candle::Tensor;
+mod agent;
+mod world;
 
-mod animal;
-//mod world;
+use agent::{MindConfig, VisionConfig, VisionLayerConfig};
+use anyhow::Result;
+use candle::{DType, Device, Tensor};
+use nevo::Cx;
+use rand::{rngs::SmallRng, SeedableRng};
+use world::{Pos, World, WorldConfig};
 
 #[derive(Clone, Debug)]
 pub struct AgentConfig {
@@ -25,4 +30,34 @@ pub struct AgentOutput {
     pub action: Tensor,
 }
 
-fn main() {}
+fn main() -> Result<()> {
+    let mut cx = Cx {
+        rng: SmallRng::seed_from_u64(0xdeadbeef),
+        dtype: DType::F32,
+        device: Device::Cpu,
+    };
+    let mind = MindConfig {
+        vision: VisionConfig {
+            layers: vec![
+                VisionLayerConfig {
+                    kernel_size: 3,
+                    out_channels: 8,
+                    max_pool: 2,
+                },
+                VisionLayerConfig {
+                    kernel_size: 3,
+                    out_channels: 8,
+                    max_pool: 2,
+                },
+            ],
+        },
+        mem_size: 256,
+    };
+    let config = WorldConfig {
+        size: Pos::from([256, 256]),
+        n_plants: 1000,
+        n_animals: 100,
+    };
+    let _world = World::new(&mut cx, config, mind)?;
+    Ok(())
+}

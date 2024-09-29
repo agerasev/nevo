@@ -6,10 +6,29 @@ use rand::Rng;
 
 /// Simulation context.
 pub trait Context {
-    type Rng: Rng + ?Sized;
+    type Rng: Rng + Send + ?Sized;
     fn rng(&mut self) -> &mut Self::Rng;
     fn dtype(&self) -> DType;
     fn device(&self) -> Device;
+}
+
+pub struct Cx<R: Rng + Send + ?Sized> {
+    pub dtype: DType,
+    pub device: Device,
+    pub rng: R,
+}
+
+impl<R: Rng + Send + ?Sized> Context for Cx<R> {
+    type Rng = R;
+    fn rng(&mut self) -> &mut Self::Rng {
+        &mut self.rng
+    }
+    fn dtype(&self) -> DType {
+        self.dtype
+    }
+    fn device(&self) -> Device {
+        self.device.clone()
+    }
 }
 
 /// Stateful agent.
@@ -34,9 +53,5 @@ pub trait Sexual: Genome {
 pub trait Evolving: Sized {
     type Genome: Genome;
     fn genome(&self) -> Self::Genome;
-    fn instance<C: Context>(genome: &Self::Genome, cx: &mut C) -> Result<Self>;
-}
-
-pub trait System {
-    fn step<C: Context>(&mut self, cx: &mut C) -> Result<()>;
+    fn instance<C: Context>(cx: &mut C, genome: &Self::Genome) -> Result<Self>;
 }

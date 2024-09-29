@@ -1,25 +1,94 @@
-use crate::animal::Animal;
+use crate::{
+    agent::{AnimalBrain, AnimalGenome, MindConfig, VisionConfig, VisionLayerConfig},
+    AgentConfig,
+};
+use anyhow::Result;
+use nevo::{Context, Evolving};
 use rand::{distributions::Uniform, Rng};
-use vecmat::vector::Vector2;
+use vecmat::Vector;
+
+pub type Pos = Vector<u32, 2>;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum Block {
+    Ground,
+}
+
+pub struct Plant {
+    pos: Pos,
+    mass: f32,
+}
+
+pub struct Animal {
+    pos: Pos,
+    mass: f32,
+    brain: AnimalBrain,
+}
+
+pub struct WorldConfig {
+    pub size: Pos,
+    pub n_plants: usize,
+    pub n_animals: usize,
+}
 
 pub struct World {
-    size: Vector2<f64>,
+    size: Pos,
+    blocks: Vec<Block>,
+    plants: Vec<Plant>,
     animals: Vec<Animal>,
 }
 
 impl World {
-    const ANIMAL_INIT_MEM_SIZE: usize = 4;
+    pub fn new<C: Context>(
+        cx: &mut C,
+        WorldConfig {
+            size,
+            n_plants,
+            n_animals,
+        }: WorldConfig,
+        mind: MindConfig,
+    ) -> Result<Self> {
+        let agent = AgentConfig {
+            vision_size: 16,
+            vision_channels: 3,
+            status_dim: 12,
+            out_dim: 8,
+        };
 
-    pub fn new<R: Rng>(rng: &mut R, size: Vector2<f64>, count: usize) -> Self {
-        let mut animals = Vec::new();
-        for _ in 0..count {
-            animals.push(Animal::new(
-                Genome::new(Self::ANIMAL_INIT_MEM_SIZE, 1.0, rng),
-                size * Vector2::init(|| rng.sample(Uniform::from(0.0..=1.0))),
-            ));
-        }
-        Self { size, animals }
+        let blocks = (0..(size.x() * size.y())).map(|_| Block::Ground).collect();
+        let plants = (0..n_plants)
+            .map(|_| Plant {
+                pos: sample_pos(cx.rng(), size),
+                mass: cx.rng().sample(Uniform::new(0.1, 10.0)),
+            })
+            .collect();
+        let animals = (0..n_animals)
+            .map(|_| {
+                let genome = AnimalGenome::new(cx, agent.clone(), mind.clone())?;
+                Ok(Animal {
+                    pos: sample_pos(cx.rng(), size),
+                    mass: cx.rng().sample(Uniform::new(0.1, 1.0)),
+                    brain: AnimalBrain::instance(cx, &genome)?,
+                })
+            })
+            .collect::<Result<_>>()?;
+        Ok(Self {
+            size,
+            blocks,
+            plants,
+            animals,
+        })
     }
 
-    pub fn step(&mut self) {}
+    pub fn step(&mut self) {
+        unimplemented!()
+    }
+}
+
+fn sample_pos<R: Rng + ?Sized>(rng: &mut R, size: Pos) -> Pos {
+    Pos::from([
+        rng.sample(Uniform::new(0, size.x())),
+        rng.sample(Uniform::new(0, size.y())),
+    ])
 }
