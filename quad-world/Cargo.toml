@@ -1,12 +1,13 @@
 [package]
-name = "animals"
-version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+name = "nevo-quad-world"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
+nevo.workspace = true
 vecmat = "0.7"
-ndarray = "0.15"
-eframe = "0.18"
-nevo = { path = "../nevo" }
+rand.workspace = true
+rand_distr.workspace = true
+candle.workspace = true
+candle-nn.workspace = true
+anyhow.workspace = true

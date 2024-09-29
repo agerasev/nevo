@@ -1,10 +1,5 @@
-use crate::animal::{Animal, Genome};
-use eframe::{
-    self,
-    egui::{self, pos2},
-    emath, epaint,
-};
-use nevo::core::rand::{distributions::Uniform, Rng};
+use crate::animal::Animal;
+use rand::{distributions::Uniform, Rng};
 use vecmat::vector::Vector2;
 
 pub struct World {
@@ -27,23 +22,4 @@ impl World {
     }
 
     pub fn step(&mut self) {}
-
-    pub fn draw(&self, ui: &mut egui::Ui) {
-        let size = {
-            let s = ui.available_size();
-            f32::min(s.x, s.y)
-        };
-        let (_id, rect) = ui.allocate_space(egui::Vec2::new(size, size));
-
-        let to_screen = emath::RectTransform::from_to(
-            egui::Rect::from_x_y_ranges(0.0..=(self.size.x() as f32), 0.0..=(self.size.y() as f32)),
-            rect,
-        );
-
-        let mut shapes = Vec::new();
-        for animal in &self.animals {
-            animal.draw_shapes(&mut shapes, to_screen);
-        }
-        ui.painter().extend(shapes);
-    }
 }

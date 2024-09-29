@@ -1,12 +1,15 @@
 pub mod nn;
 
 use anyhow::Result;
+use candle::{DType, Device};
 use rand::Rng;
 
 /// Simulation context.
 pub trait Context {
     type Rng: Rng + ?Sized;
     fn rng(&mut self) -> &mut Self::Rng;
+    fn dtype(&self) -> DType;
+    fn device(&self) -> Device;
 }
 
 /// Stateful agent.
@@ -18,8 +21,10 @@ pub trait Agent {
     fn process<C: Context>(&mut self, cx: &mut C, input: Self::Input) -> Result<Self::Output>;
 }
 
-pub trait Genome: Clone + Sized {
-    fn mutate<R: Rng + ?Sized>(&mut self, rate: f64, rng: &mut R) -> Result<()>;
+pub trait Genome: Clone + Sized {}
+
+pub trait Mutate<P: Clone> {
+    fn mutate<R: Rng + ?Sized>(&mut self, param: &P, rng: &mut R) -> Result<()>;
 }
 
 pub trait Sexual: Genome {

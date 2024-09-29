@@ -1,14 +1,17 @@
 [workspace]
-members = ["viewer"]
+members = ["viewer", "quad-world"]
 
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
 
 [workspace.dependencies]
+nevo = { path = "." }
 rand = "0.8.5"
+rand_distr = "0.4.3"
 candle = { package = "candle-core", version = "0.7.1" }
 candle-nn = "0.7.1"
+anyhow = "1.0"
 
 [package]
 name = "nevo"
@@ -19,6 +22,6 @@ edition.workspace = true
 candle.workspace = true
 candle-nn.workspace = true
 rand.workspace = true
-rand_distr = "0.4.3"
+rand_distr.workspace = true
 half = "2.3.1"
-anyhow = "1.0"
+anyhow.workspace = true
