@@ -1,10 +1,10 @@
 [package]
-name = "nevo-viewer"
+name = "nevo-api"
 version.workspace = true
 edition.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-eframe = "0.29.0"
 anyhow.workspace = true
+serde.workspace = true

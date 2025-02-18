@@ -1,5 +1,5 @@
 use eframe::{self, egui};
-use nevo_viewer::App;
+use nevo_ui::App;
 
 fn main() -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {

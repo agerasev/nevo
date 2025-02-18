@@ -81,7 +81,7 @@ impl World {
         })
     }
 
-    pub fn step(&mut self) {
+    pub fn step(&mut self, cx: &mut Cx) {
         unimplemented!()
     }
 }

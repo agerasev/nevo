@@ -1,5 +1,3 @@
-pub mod pipe;
-
 use anyhow::Result;
 use eframe::{self, egui, CreationContext};
 
