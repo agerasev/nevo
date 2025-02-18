@@ -4,7 +4,7 @@ use candle_nn::{
     conv2d, layer_norm, linear, lstm, rnn::LSTMState, Conv2d, Conv2dConfig, LSTMConfig, LayerNorm,
     LayerNormConfig, Linear, VarBuilder, VarMap, LSTM, RNN,
 };
-use nevo::{nn::init::DetVarMap, Agent, Candle as Cx, Context, Evolving, Genome, Mutate};
+use nevo_core::{nn::init::DetVarMap, Agent, Candle as Cx, Context, Evolving, Genome, Mutate};
 
 use crate::{AgentConfig, AgentInput, AgentOutput};
 use std::collections::HashMap;

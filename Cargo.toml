@@ -1,29 +1,17 @@
 [workspace]
-members = ["api", "ui", "quad-world"]
+members = ["api", "core", "ui", "worlds/quad"]
+resolver = "2"
 
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
 
 [workspace.dependencies]
-nevo = { path = "." }
+nevo-core = { path = "core" }
 nevo-api = { path = "api" }
 rand = "0.8.5"
 rand_distr = "0.4.3"
+glam = "0.29.2"
 candle = { package = "candle-core", version = "0.8.3" }
 candle-nn = "0.8.3"
 anyhow = "1.0"
-serde = { version = "1.0.217", features = ["derive"] }
-
-[package]
-name = "nevo"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-candle.workspace = true
-candle-nn.workspace = true
-rand.workspace = true
-rand_distr.workspace = true
-half = "2.3.1"
-anyhow.workspace = true

@@ -3,11 +3,9 @@ use crate::{
     AgentConfig,
 };
 use anyhow::Result;
-use nevo::{Candle as Cx, Context, Evolving};
+use glam::UVec2;
+use nevo_core::{Candle as Cx, Context, Evolving};
 use rand::{distributions::Uniform, Rng};
-use vecmat::Vector;
-
-pub type Pos = Vector<u32, 2>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
@@ -16,24 +14,24 @@ pub enum Block {
 }
 
 pub struct Plant {
-    pos: Pos,
+    pos: UVec2,
     mass: f32,
 }
 
 pub struct Animal {
-    pos: Pos,
+    pos: UVec2,
     mass: f32,
     brain: AnimalBrain,
 }
 
 pub struct WorldConfig {
-    pub size: Pos,
+    pub size: UVec2,
     pub n_plants: usize,
     pub n_animals: usize,
 }
 
 pub struct World {
-    size: Pos,
+    size: UVec2,
     blocks: Vec<Block>,
     plants: Vec<Plant>,
     animals: Vec<Animal>,
@@ -56,7 +54,7 @@ impl World {
             out_dim: 8,
         };
 
-        let blocks = (0..(size.x() * size.y())).map(|_| Block::Ground).collect();
+        let blocks = (0..(size.x * size.y)).map(|_| Block::Ground).collect();
         let plants = (0..n_plants)
             .map(|_| Plant {
                 pos: sample_pos(cx.rng(), size),
@@ -86,9 +84,9 @@ impl World {
     }
 }
 
-fn sample_pos<R: Rng + ?Sized>(rng: &mut R, size: Pos) -> Pos {
-    Pos::from([
-        rng.sample(Uniform::new(0, size.x())),
-        rng.sample(Uniform::new(0, size.y())),
+fn sample_pos<R: Rng + ?Sized>(rng: &mut R, size: UVec2) -> UVec2 {
+    UVec2::from([
+        rng.sample(Uniform::new(0, size.x)),
+        rng.sample(Uniform::new(0, size.y)),
     ])
 }

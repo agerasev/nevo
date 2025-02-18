@@ -4,10 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-nevo.workspace = true
-vecmat = { version = "0.7", features = ["rand"] }
+nevo-core.workspace = true
 rand = { workspace = true, features = ["small_rng"] }
 rand_distr.workspace = true
+glam.workspace = true
 candle.workspace = true
 candle-nn.workspace = true
 anyhow.workspace = true

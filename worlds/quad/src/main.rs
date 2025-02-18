@@ -4,10 +4,11 @@ mod world;
 use agent::{MindConfig, VisionConfig, VisionLayerConfig};
 use anyhow::Result;
 use candle::{DType, Device, Tensor};
+use glam::UVec2;
 use rand::{rngs::SmallRng, SeedableRng};
 
-use self::world::{Pos, World, WorldConfig};
-use nevo::Candle as Cx;
+use self::world::{World, WorldConfig};
+use nevo_core::Candle as Cx;
 
 #[derive(Clone, Debug)]
 pub struct AgentConfig {
@@ -55,7 +56,7 @@ fn main() -> Result<()> {
         mem_size: 256,
     };
     let config = WorldConfig {
-        size: Pos::from([256, 256]),
+        size: UVec2::from([256, 256]),
         n_plants: 1000,
         n_animals: 100,
     };
