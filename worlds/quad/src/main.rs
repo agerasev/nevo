@@ -1,36 +1,17 @@
 mod agent;
 mod world;
 
+use std::{net::TcpListener, sync::Mutex};
+
 use agent::{MindConfig, VisionConfig, VisionLayerConfig};
 use anyhow::Result;
-use candle::{DType, Device, Tensor};
+use candle::{DType, Device};
 use glam::UVec2;
+use nevo_api::{ControlMessage, MessageReader, MessageWriter};
 use rand::{rngs::SmallRng, SeedableRng};
 
 use self::world::{World, WorldConfig};
 use nevo_core::Candle as Cx;
-
-#[derive(Clone, Debug)]
-pub struct AgentConfig {
-    pub vision_channels: usize,
-    pub vision_size: usize,
-    pub status_dim: usize,
-    pub out_dim: usize,
-}
-
-#[derive(Clone, Debug)]
-pub struct AgentInput {
-    /// shape: (1, vision_channels, vision_size, vision_size)
-    pub vision: Tensor,
-    /// shape: (1, status_dim)
-    pub status: Tensor,
-}
-
-#[derive(Clone, Debug)]
-pub struct AgentOutput {
-    /// shape: (1, out_dim)
-    pub action: Tensor,
-}
 
 fn main() -> Result<()> {
     let mut cx = Cx {
@@ -60,6 +41,26 @@ fn main() -> Result<()> {
         n_plants: 1000,
         n_animals: 100,
     };
-    let _world = World::new(&mut cx, config, mind)?;
+    let world = Mutex::new(World::new(&mut cx, config, mind)?);
+    println!("World is created");
+
+    let addr = ("0.0.0.0", 3399);
+    println!("API is listening on {addr:?}");
+    for accept in TcpListener::bind(addr)?.incoming() {
+        match (|| -> Result<()> {
+            let mut socket = accept?;
+            match MessageReader::new(&mut socket).read_message()? {
+                ControlMessage::Show => {
+                    MessageWriter::new(&mut socket)
+                        .write_message(&world.lock().expect("World mutex is poisoned").view())?;
+                }
+            }
+            Ok(())
+        })() {
+            Ok(()) => (),
+            Err(e) => eprintln!("Communication through API error: {e}"),
+        }
+    }
+
     Ok(())
 }

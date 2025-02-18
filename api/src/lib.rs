@@ -9,7 +9,9 @@ use glam::{UVec2, Vec2};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
-pub struct ControlMessage;
+pub enum ControlMessage {
+    Show,
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct ViewMessage {
@@ -27,7 +29,7 @@ pub enum ViewContent {
     },
     Bitmap {
         shape: UVec2,
-        /// Flattened array of bytes of shape: (shape.y, shape.x, 3)
+        /// Flattened array of bytes of shape: `(shape.y, shape.x, 3)`
         #[serde(with = "Base64Standard")]
         data: Vec<u8>,
     },

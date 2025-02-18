@@ -1,11 +1,13 @@
-use crate::{
-    agent::{AnimalBrain, AnimalGenome, MindConfig, VisionConfig, VisionLayerConfig},
-    AgentConfig,
-};
+mod view;
+
 use anyhow::Result;
 use glam::UVec2;
-use nevo_core::{Candle as Cx, Context, Evolving};
 use rand::{distributions::Uniform, Rng};
+
+use crate::agent::{
+    AgentConfig, AnimalBrain, AnimalGenome, MindConfig, VisionConfig, VisionLayerConfig,
+};
+use nevo_core::{Candle as Cx, Context, Evolving};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
