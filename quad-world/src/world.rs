@@ -3,7 +3,7 @@ use crate::{
     AgentConfig,
 };
 use anyhow::Result;
-use nevo::{Context, Evolving};
+use nevo::{Candle as Cx, Context, Evolving};
 use rand::{distributions::Uniform, Rng};
 use vecmat::Vector;
 
@@ -40,8 +40,8 @@ pub struct World {
 }
 
 impl World {
-    pub fn new<C: Context>(
-        cx: &mut C,
+    pub fn new(
+        cx: &mut Cx,
         WorldConfig {
             size,
             n_plants,
@@ -69,7 +69,7 @@ impl World {
                 Ok(Animal {
                     pos: sample_pos(cx.rng(), size),
                     mass: cx.rng().sample(Uniform::new(0.1, 1.0)),
-                    brain: AnimalBrain::instance(cx, &genome)?,
+                    brain: AnimalBrain::instantiate(&genome, cx)?,
                 })
             })
             .collect::<Result<_>>()?;

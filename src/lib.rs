@@ -2,56 +2,62 @@ pub mod nn;
 
 use anyhow::Result;
 use candle::{DType, Device};
-use rand::Rng;
+use rand::{Rng, RngCore};
 
 /// Simulation context.
 pub trait Context {
     type Rng: Rng + Send + ?Sized;
     fn rng(&mut self) -> &mut Self::Rng;
-    fn dtype(&self) -> DType;
-    fn device(&self) -> Device;
+
+    type DType: Clone + Send + Sized;
+    type Device: Clone + Send + Sized;
+    fn dtype(&self) -> Self::DType;
+    fn device(&self) -> Self::Device;
 }
 
-pub struct Cx<R: Rng + Send + ?Sized> {
+pub struct Candle<R: Rng + Send + ?Sized = dyn RngCore + Send> {
     pub dtype: DType,
     pub device: Device,
     pub rng: R,
 }
 
-impl<R: Rng + Send + ?Sized> Context for Cx<R> {
+impl<R: Rng + Send + ?Sized> Context for Candle<R> {
     type Rng = R;
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
     }
-    fn dtype(&self) -> DType {
+
+    type DType = DType;
+    type Device = Device;
+    fn dtype(&self) -> Self::DType {
         self.dtype
     }
-    fn device(&self) -> Device {
+    fn device(&self) -> Self::Device {
         self.device.clone()
     }
 }
 
 /// Stateful agent.
-pub trait Agent {
+pub trait Agent<C: Context + ?Sized> {
     type Input;
     type Output;
 
     /// Perform single step of processing.
-    fn process<C: Context>(&mut self, cx: &mut C, input: Self::Input) -> Result<Self::Output>;
+    fn process(&mut self, cx: &mut C, input: Self::Input) -> Result<Self::Output>;
 }
 
-pub trait Genome: Clone + Sized {}
+pub trait Genome<C: Context + ?Sized>: Clone + Sized {}
 
-pub trait Mutate<P: Clone> {
-    fn mutate<R: Rng + ?Sized>(&mut self, param: &P, rng: &mut R) -> Result<()>;
+pub trait Mutate<C: Context + ?Sized, P: Clone>: Genome<C> {
+    fn mutate(&mut self, param: &P, cx: &mut C) -> Result<()>;
 }
 
-pub trait Sexual: Genome {
-    fn recombine<R: Rng + ?Sized>(&self, other: &Self, rng: &mut R) -> Result<Option<Self>>;
+pub trait Sexual<C: Context + ?Sized>: Genome<C> {
+    fn recombine(&self, other: &Self, cx: &mut C) -> Result<Option<Self>>;
 }
 
-pub trait Evolving: Sized {
-    type Genome: Genome;
+pub trait Evolving<C: Context + ?Sized>: Sized {
+    type Genome: Genome<C>;
     fn genome(&self) -> Self::Genome;
-    fn instance<C: Context>(cx: &mut C, genome: &Self::Genome) -> Result<Self>;
+    fn instantiate(gen: &Self::Genome, cx: &mut C) -> Result<Self>;
 }

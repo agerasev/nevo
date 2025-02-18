@@ -4,11 +4,10 @@ use candle_nn::{
     conv2d, layer_norm, linear, lstm, rnn::LSTMState, Conv2d, Conv2dConfig, LSTMConfig, LayerNorm,
     LayerNormConfig, Linear, VarBuilder, VarMap, LSTM, RNN,
 };
-use nevo::{nn::init::DetVarMap, Agent, Context, Evolving, Genome, Mutate};
-use rand::Rng;
-use std::collections::HashMap;
+use nevo::{nn::init::DetVarMap, Agent, Candle as Cx, Context, Evolving, Genome, Mutate};
 
 use crate::{AgentConfig, AgentInput, AgentOutput};
+use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 pub struct VisionLayerConfig {
@@ -159,20 +158,20 @@ pub struct AnimalBrain {
     state: LSTMState,
 }
 
-impl Genome for AnimalGenome {}
+impl Genome<Cx> for AnimalGenome {}
 
-impl Mutate<f64> for AnimalGenome {
-    fn mutate<R: Rng + ?Sized>(&mut self, rate: &f64, rng: &mut R) -> Result<()> {
-        self.weights.mutate(rate, rng)
+impl Mutate<Cx, f64> for AnimalGenome {
+    fn mutate(&mut self, rate: &f64, cx: &mut Cx) -> Result<()> {
+        self.weights.mutate(rate, cx)
     }
 }
 
-impl Evolving for AnimalBrain {
+impl Evolving<Cx> for AnimalBrain {
     type Genome = AnimalGenome;
     fn genome(&self) -> Self::Genome {
         self.genome.clone()
     }
-    fn instance<C: Context>(cx: &mut C, genome: &Self::Genome) -> Result<Self> {
+    fn instantiate(genome: &Self::Genome, cx: &mut Cx) -> Result<Self> {
         let vb = VarBuilder::from_tensors(genome.weights.clone(), cx.dtype(), &cx.device());
         let brain = genome.mind.clone().build(genome.world.clone(), vb)?;
         let brain_state = brain.rnn.zero_state(1)?;
@@ -184,10 +183,10 @@ impl Evolving for AnimalBrain {
     }
 }
 
-impl Agent for AnimalBrain {
+impl Agent<Cx> for AnimalBrain {
     type Input = AgentInput;
     type Output = AgentOutput;
-    fn process<C: Context>(&mut self, _cx: &mut C, input: Self::Input) -> Result<Self::Output> {
+    fn process(&mut self, _cx: &mut Cx, input: Self::Input) -> Result<Self::Output> {
         let out = self
             .mind
             .forward(&mut self.state, &input.vision, &input.status)?;
@@ -200,7 +199,7 @@ impl Agent for AnimalBrain {
 }
 
 impl AnimalGenome {
-    pub fn new<C: Context>(cx: &mut C, world: AgentConfig, mind: MindConfig) -> Result<Self> {
+    pub fn new(cx: &mut Cx, world: AgentConfig, mind: MindConfig) -> Result<Self> {
         let dtype = cx.dtype();
         let device = cx.device();
         let varmap = DetVarMap::new(VarMap::new(), cx.rng());

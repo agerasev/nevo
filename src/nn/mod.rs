@@ -2,29 +2,36 @@ pub mod init;
 
 use std::collections::HashMap;
 
-use crate::{Genome, Mutate};
 use anyhow::Result;
 use candle::Tensor;
 use init::rand_normal_f64;
-use rand::Rng;
 
-impl Genome for Tensor {}
+use crate::{Context, Genome, Mutate};
 
-impl Mutate<f64> for Tensor {
-    fn mutate<R: Rng + ?Sized>(&mut self, rate: &f64, rng: &mut R) -> Result<()> {
+impl<C: Context + ?Sized> Genome<C> for Tensor {}
+
+impl<C: Context + ?Sized> Mutate<C, f64> for Tensor {
+    fn mutate(&mut self, rate: &f64, cx: &mut C) -> Result<()> {
         *self = (&*self
-            + rand_normal_f64(rng, self.shape(), self.dtype(), self.device(), 0.0, *rate)?)?
+            + rand_normal_f64(
+                cx.rng(),
+                self.shape(),
+                self.dtype(),
+                self.device(),
+                0.0,
+                *rate,
+            )?)?
         .detach();
         Ok(())
     }
 }
 
-impl<K: Clone> Genome for HashMap<K, Tensor> {}
+impl<C: Context + ?Sized, K: Clone> Genome<C> for HashMap<K, Tensor> {}
 
-impl<K: Clone> Mutate<f64> for HashMap<K, Tensor> {
-    fn mutate<R: Rng + ?Sized>(&mut self, rate: &f64, rng: &mut R) -> Result<()> {
+impl<C: Context + ?Sized, K: Clone> Mutate<C, f64> for HashMap<K, Tensor> {
+    fn mutate(&mut self, rate: &f64, cx: &mut C) -> Result<()> {
         for var in self.values_mut() {
-            var.mutate(rate, rng)?;
+            var.mutate(rate, cx)?;
         }
         Ok(())
     }

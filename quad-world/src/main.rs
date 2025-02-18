@@ -4,9 +4,10 @@ mod world;
 use agent::{MindConfig, VisionConfig, VisionLayerConfig};
 use anyhow::Result;
 use candle::{DType, Device, Tensor};
-use nevo::Cx;
 use rand::{rngs::SmallRng, SeedableRng};
-use world::{Pos, World, WorldConfig};
+
+use self::world::{Pos, World, WorldConfig};
+use nevo::Candle as Cx;
 
 #[derive(Clone, Debug)]
 pub struct AgentConfig {
@@ -32,9 +33,9 @@ pub struct AgentOutput {
 
 fn main() -> Result<()> {
     let mut cx = Cx {
-        rng: SmallRng::seed_from_u64(0xdeadbeef),
         dtype: DType::F32,
         device: Device::Cpu,
+        rng: SmallRng::seed_from_u64(0xdeadbeef),
     };
     let mind = MindConfig {
         vision: VisionConfig {

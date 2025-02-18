@@ -9,8 +9,8 @@ edition = "2021"
 nevo = { path = "." }
 rand = "0.8.5"
 rand_distr = "0.4.3"
-candle = { package = "candle-core", version = "0.7.1" }
-candle-nn = "0.7.1"
+candle = { package = "candle-core", version = "0.8.3" }
+candle-nn = "0.8.3"
 anyhow = "1.0"
 
 [package]
