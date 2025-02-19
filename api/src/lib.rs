@@ -7,13 +7,14 @@ use anyhow::Error;
 use base64_serde::base64_serde_type;
 use glam::{UVec2, Vec2};
 use serde::{Deserialize, Serialize};
+use serde_json::{de::IoRead, Deserializer, StreamDeserializer};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ControlMessage {
     Show,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ViewMessage {
     pub name: String,
     pub content: ViewContent,
@@ -21,7 +22,7 @@ pub struct ViewMessage {
 
 base64_serde_type!(Base64Standard, base64::engine::general_purpose::STANDARD);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ViewContent {
     Text(String),
     Plot {
@@ -35,21 +36,19 @@ pub enum ViewContent {
     },
 }
 
-pub struct MessageReader<R: Read, M: for<'de> Deserialize<'de>> {
-    read: R,
-    _ghost: PhantomData<M>,
+pub struct MessageReader<R: Read, M: Deserialize<'static>> {
+    read: StreamDeserializer<'static, IoRead<R>, M>,
 }
 
-impl<R: Read, M: for<'de> Deserialize<'de>> MessageReader<R, M> {
+impl<R: Read, M: Deserialize<'static>> MessageReader<R, M> {
     pub fn new(read: R) -> Self {
         Self {
-            read,
-            _ghost: PhantomData,
+            read: Deserializer::from_reader(read).into_iter(),
         }
     }
 
-    pub fn read_message(&mut self) -> Result<M, Error> {
-        Ok(serde_json::from_reader(&mut self.read)?)
+    pub fn read_message(&mut self) -> Result<Option<M>, Error> {
+        Ok(self.read.next().transpose()?)
     }
 }
 
@@ -58,8 +57,8 @@ pub struct MessageWriter<W: Write, M: Serialize> {
     _ghost: PhantomData<M>,
 }
 
-impl<R: Write, M: Serialize> MessageWriter<R, M> {
-    pub fn new(write: R) -> Self {
+impl<W: Write, M: Serialize> MessageWriter<W, M> {
+    pub fn new(write: W) -> Self {
         Self {
             write,
             _ghost: PhantomData,

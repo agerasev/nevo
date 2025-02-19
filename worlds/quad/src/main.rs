@@ -1,7 +1,11 @@
 mod agent;
 mod world;
 
-use std::{net::TcpListener, sync::Mutex};
+use std::{
+    net::TcpListener,
+    sync::{Arc, Mutex},
+    thread::spawn,
+};
 
 use agent::{MindConfig, VisionConfig, VisionLayerConfig};
 use anyhow::Result;
@@ -41,25 +45,33 @@ fn main() -> Result<()> {
         n_plants: 1000,
         n_animals: 100,
     };
-    let world = Mutex::new(World::new(&mut cx, config, mind)?);
+    let world = Arc::new(Mutex::new(World::new(&mut cx, config, mind)?));
     println!("World is created");
 
     let addr = ("0.0.0.0", 3399);
     println!("API is listening on {addr:?}");
     for accept in TcpListener::bind(addr)?.incoming() {
-        match (|| -> Result<()> {
-            let mut socket = accept?;
-            match MessageReader::new(&mut socket).read_message()? {
-                ControlMessage::Show => {
-                    MessageWriter::new(&mut socket)
-                        .write_message(&world.lock().expect("World mutex is poisoned").view())?;
+        let world = world.clone();
+        spawn(move || {
+            match (|| -> Result<()> {
+                let socket = accept?;
+                let mut reader = MessageReader::new(socket.try_clone()?);
+                let mut writer = MessageWriter::new(socket);
+                while let Some(msg) = reader.read_message()? {
+                    match msg {
+                        ControlMessage::Show => {
+                            for view in world.lock().expect("World mutex is poisoned").view() {
+                                writer.write_message(&view)?;
+                            }
+                        }
+                    }
                 }
+                Ok(())
+            })() {
+                Ok(()) => (),
+                Err(e) => eprintln!("Communication through API error: {e}"),
             }
-            Ok(())
-        })() {
-            Ok(()) => (),
-            Err(e) => eprintln!("Communication through API error: {e}"),
-        }
+        });
     }
 
     Ok(())
