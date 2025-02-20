@@ -7,7 +7,7 @@ use candle_nn::{
     LayerNormConfig, Linear, VarBuilder, VarMap, LSTM, RNN,
 };
 
-use nevo_core::{nn::init::DetVarMap, Agent, Candle as Cx, Context, Evolving, Genome, Mutate};
+use nevo_core::{nn::init::DetermVarMap, Agent, Candle as Cx, Context, Genome, Mutate};
 
 #[derive(Clone, Debug)]
 pub struct AgentConfig {
@@ -188,12 +188,8 @@ impl Mutate<Cx, f64> for AnimalGenome {
     }
 }
 
-impl Evolving<Cx> for AnimalBrain {
-    type Genome = AnimalGenome;
-    fn genome(&self) -> Self::Genome {
-        self.genome.clone()
-    }
-    fn instantiate(genome: &Self::Genome, cx: &mut Cx) -> Result<Self> {
+impl AnimalBrain {
+    pub fn new(genome: &AnimalGenome, cx: &mut Cx) -> Result<Self> {
         let vb = VarBuilder::from_tensors(genome.weights.clone(), cx.dtype(), &cx.device());
         let brain = genome.mind.clone().build(genome.world.clone(), vb)?;
         let brain_state = brain.rnn.zero_state(1)?;
@@ -224,7 +220,7 @@ impl AnimalGenome {
     pub fn new(cx: &mut Cx, world: AgentConfig, mind: MindConfig) -> Result<Self> {
         let dtype = cx.dtype();
         let device = cx.device();
-        let varmap = DetVarMap::new(VarMap::new(), cx.rng());
+        let varmap = DetermVarMap::new(VarMap::new(), cx.rng());
         mind.clone().build(
             world.clone(),
             VarBuilder::from_backend(Box::new(varmap.clone()), dtype, device),

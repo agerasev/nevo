@@ -1,10 +1,10 @@
-mod agent;
+mod animal;
 mod ui;
 mod world;
 
 use std::sync::{Arc, RwLock};
 
-use agent::{MindConfig, VisionConfig, VisionLayerConfig};
+use animal::{MindConfig, VisionConfig, VisionLayerConfig};
 use anyhow::Result;
 use candle::{DType, Device};
 use glam::UVec2;

@@ -125,12 +125,12 @@ fn init_var<R: Rng + ?Sized, S: Into<Shape>>(
 
 /// Determined [`VarMap`]
 #[derive(Clone)]
-pub struct DetVarMap<R: Rng + Send> {
+pub struct DetermVarMap<R: Rng + Send> {
     inner: VarMap,
     rng: Arc<Mutex<R>>,
 }
 
-impl<R: Rng + Send> DetVarMap<R> {
+impl<R: Rng + Send> DetermVarMap<R> {
     pub fn new(inner: VarMap, rng: R) -> Self {
         Self {
             inner,
@@ -142,19 +142,19 @@ impl<R: Rng + Send> DetVarMap<R> {
     }
 }
 
-impl<R: Rng + Send> Deref for DetVarMap<R> {
+impl<R: Rng + Send> Deref for DetermVarMap<R> {
     type Target = VarMap;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
-impl<R: Rng + Send> DerefMut for DetVarMap<R> {
+impl<R: Rng + Send> DerefMut for DetermVarMap<R> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
     }
 }
 
-impl<R: Rng + Send> SimpleBackend for DetVarMap<R> {
+impl<R: Rng + Send> SimpleBackend for DetermVarMap<R> {
     fn get(
         &self,
         shape: Shape,

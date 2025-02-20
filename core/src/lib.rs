@@ -55,9 +55,3 @@ pub trait Mutate<C: Context + ?Sized, P: Clone>: Genome<C> {
 pub trait Sexual<C: Context + ?Sized>: Genome<C> {
     fn recombine(&self, other: &Self, cx: &mut C) -> Result<Option<Self>>;
 }
-
-pub trait Evolving<C: Context + ?Sized>: Sized {
-    type Genome: Genome<C>;
-    fn genome(&self) -> Self::Genome;
-    fn instantiate(gen: &Self::Genome, cx: &mut C) -> Result<Self>;
-}

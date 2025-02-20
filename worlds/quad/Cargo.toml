@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 nevo-core.workspace = true
+nevo-utils.workspace = true
 rand = { workspace = true, features = ["small_rng"] }
 rand_distr.workspace = true
 glam.workspace = true

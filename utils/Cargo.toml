@@ -1,0 +1,11 @@
+[package]
+name = "nevo-utils"
+version.workspace = true
+edition.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rand.workspace = true
+glam.workspace = true
+anyhow.workspace = true
