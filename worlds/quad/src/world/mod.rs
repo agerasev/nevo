@@ -3,6 +3,7 @@ mod view;
 use anyhow::Result;
 use glam::UVec2;
 use rand::{distributions::Uniform, Rng};
+use rand_distr::Distribution;
 
 use crate::agent::{
     AgentConfig, AnimalBrain, AnimalGenome, MindConfig, VisionConfig, VisionLayerConfig,
@@ -59,7 +60,7 @@ impl World {
         let blocks = (0..(size.x * size.y)).map(|_| Block::Ground).collect();
         let plants = (0..n_plants)
             .map(|_| Plant {
-                pos: sample_pos(cx.rng(), size),
+                pos: cx.rng().sample(AxisAlignedUniform(UVec2::ZERO, size)),
                 mass: cx.rng().sample(Uniform::new(0.1, 10.0)),
             })
             .collect();
@@ -67,7 +68,7 @@ impl World {
             .map(|_| {
                 let genome = AnimalGenome::new(cx, agent.clone(), mind.clone())?;
                 Ok(Animal {
-                    pos: sample_pos(cx.rng(), size),
+                    pos: cx.rng().sample(AxisAlignedUniform(UVec2::ZERO, size)),
                     mass: cx.rng().sample(Uniform::new(0.1, 1.0)),
                     brain: AnimalBrain::instantiate(&genome, cx)?,
                 })
@@ -86,9 +87,13 @@ impl World {
     }
 }
 
-fn sample_pos<R: Rng + ?Sized>(rng: &mut R, size: UVec2) -> UVec2 {
-    UVec2::from([
-        rng.sample(Uniform::new(0, size.x)),
-        rng.sample(Uniform::new(0, size.y)),
-    ])
+pub struct AxisAlignedUniform<T>(pub T, pub T);
+
+impl Distribution<UVec2> for AxisAlignedUniform<UVec2> {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> UVec2 {
+        UVec2::from([
+            rng.sample(Uniform::new(self.0.x, self.1.x)),
+            rng.sample(Uniform::new(self.0.y, self.1.y)),
+        ])
+    }
 }

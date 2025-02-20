@@ -5,10 +5,10 @@ edition.workspace = true
 
 [dependencies]
 nevo-core.workspace = true
-nevo-api.workspace = true
 rand = { workspace = true, features = ["small_rng"] }
 rand_distr.workspace = true
 glam.workspace = true
 candle.workspace = true
 candle-nn.workspace = true
 anyhow.workspace = true
+eframe.workspace = true

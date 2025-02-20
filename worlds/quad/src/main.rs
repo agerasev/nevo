@@ -1,20 +1,21 @@
 mod agent;
+mod ui;
 mod world;
 
-use std::{
-    net::TcpListener,
-    sync::{Arc, Mutex},
-    thread::spawn,
-};
+use std::sync::{Arc, RwLock};
 
 use agent::{MindConfig, VisionConfig, VisionLayerConfig};
 use anyhow::Result;
 use candle::{DType, Device};
 use glam::UVec2;
-use nevo_api::{ControlMessage, MessageReader, MessageWriter};
 use rand::{rngs::SmallRng, SeedableRng};
 
-use self::world::{World, WorldConfig};
+use eframe::egui;
+
+use self::{
+    ui::App,
+    world::{World, WorldConfig},
+};
 use nevo_core::Candle as Cx;
 
 fn main() -> Result<()> {
@@ -45,34 +46,24 @@ fn main() -> Result<()> {
         n_plants: 1000,
         n_animals: 100,
     };
-    let world = Arc::new(Mutex::new(World::new(&mut cx, config, mind)?));
+    let world = Arc::new(RwLock::new(World::new(&mut cx, config, mind)?));
     println!("World is created");
 
-    let addr = ("0.0.0.0", 3399);
-    println!("API is listening on {addr:?}");
-    for accept in TcpListener::bind(addr)?.incoming() {
-        let world = world.clone();
-        spawn(move || {
-            match (|| -> Result<()> {
-                let socket = accept?;
-                let mut reader = MessageReader::new(socket.try_clone()?);
-                let mut writer = MessageWriter::new(socket);
-                while let Some(msg) = reader.read_message()? {
-                    match msg {
-                        ControlMessage::Show => {
-                            for view in world.lock().expect("World mutex is poisoned").view() {
-                                writer.write_message(&view)?;
-                            }
-                        }
-                    }
-                }
-                Ok(())
-            })() {
-                Ok(()) => (),
-                Err(e) => eprintln!("Communication through API error: {e}"),
-            }
-        });
-    }
+    let native_options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([800.0, 600.0]),
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "Nevo Viewer",
+        native_options,
+        Box::new(|cc| {
+            // let ctx = cc.egui_ctx.clone();
+            // ctx.request_repaint();
+            Ok(Box::new(App::new(cc, world)?))
+        }),
+    )
+    .unwrap();
 
     Ok(())
 }
