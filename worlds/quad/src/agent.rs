@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use anyhow::Result;
 use candle::{Module, Tensor};
 use candle_nn::{
-    conv2d, layer_norm, linear, lstm, rnn::LSTMState, Conv2d, Conv2dConfig, LSTMConfig, LayerNorm,
-    LayerNormConfig, Linear, VarBuilder, VarMap, LSTM, RNN,
+    Conv2d, Conv2dConfig, LSTM, LSTMConfig, LayerNorm, LayerNormConfig, Linear, RNN, VarBuilder,
+    VarMap, conv2d, layer_norm, linear, lstm, rnn::LSTMState,
 };
 
-use nevo_core::{nn::init::DetermVarMap, Agent, Candle as Cx, Context, Genome, Mutate};
+use nevo_core::{Agent, Candle as Cx, Context, Genome, Mutate, nn::init::DetermVarMap};
 
 #[derive(Clone, Debug)]
-pub struct AgentConfig {
+pub struct InteractionConfig {
     pub vision_channels: usize,
     pub vision_size: usize,
     pub status_dim: usize,
@@ -18,7 +18,7 @@ pub struct AgentConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct AgentInput {
+pub struct Perception {
     /// shape: (1, vision_channels, vision_size, vision_size)
     pub vision: Tensor,
     /// shape: (1, status_dim)
@@ -26,7 +26,7 @@ pub struct AgentInput {
 }
 
 #[derive(Clone, Debug)]
-pub struct AgentOutput {
+pub struct Decision {
     /// shape: (1, out_dim)
     pub action: Tensor,
 }
@@ -112,12 +112,12 @@ impl Module for Vision {
 impl MindConfig {
     fn build(
         self,
-        AgentConfig {
+        InteractionConfig {
             vision_channels,
             vision_size,
             status_dim,
             out_dim,
-        }: AgentConfig,
+        }: InteractionConfig,
         vb: VarBuilder,
     ) -> candle::Result<Mind> {
         let (vision_out_size, out_channels) = self
@@ -168,32 +168,32 @@ impl Mind {
 }
 
 #[derive(Clone, Debug)]
-pub struct AnimalGenome {
-    pub world: AgentConfig,
+pub struct MindGenome {
+    pub world: InteractionConfig,
     pub mind: MindConfig,
     pub weights: HashMap<String, Tensor>,
 }
 
-pub struct AnimalBrain {
-    genome: AnimalGenome,
+pub struct Brain {
+    genome: MindGenome,
     mind: Mind,
     state: LSTMState,
 }
 
-impl Genome<Cx> for AnimalGenome {}
+impl Genome<Cx> for MindGenome {}
 
-impl Mutate<Cx, f64> for AnimalGenome {
+impl Mutate<Cx, f64> for MindGenome {
     fn mutate(&mut self, rate: &f64, cx: &mut Cx) -> Result<()> {
         self.weights.mutate(rate, cx)
     }
 }
 
-impl AnimalBrain {
-    pub fn new(genome: &AnimalGenome, cx: &mut Cx) -> Result<Self> {
+impl Brain {
+    pub fn new(genome: &MindGenome, cx: &mut Cx) -> Result<Self> {
         let vb = VarBuilder::from_tensors(genome.weights.clone(), cx.dtype(), &cx.device());
         let brain = genome.mind.clone().build(genome.world.clone(), vb)?;
         let brain_state = brain.rnn.zero_state(1)?;
-        Ok(AnimalBrain {
+        Ok(Brain {
             genome: genome.clone(),
             mind: brain,
             state: brain_state,
@@ -201,9 +201,9 @@ impl AnimalBrain {
     }
 }
 
-impl Agent<Cx> for AnimalBrain {
-    type Input = AgentInput;
-    type Output = AgentOutput;
+impl Agent<Cx> for Brain {
+    type Input = Perception;
+    type Output = Decision;
     fn process(&mut self, _cx: &mut Cx, input: Self::Input) -> Result<Self::Output> {
         let out = self
             .mind
@@ -212,12 +212,12 @@ impl Agent<Cx> for AnimalBrain {
         // Detach state
         self.state = LSTMState::new(self.state.h().detach(), self.state.c().detach());
 
-        Ok(AgentOutput { action: out })
+        Ok(Decision { action: out })
     }
 }
 
-impl AnimalGenome {
-    pub fn new(cx: &mut Cx, world: AgentConfig, mind: MindConfig) -> Result<Self> {
+impl MindGenome {
+    pub fn new(cx: &mut Cx, world: InteractionConfig, mind: MindConfig) -> Result<Self> {
         let dtype = cx.dtype();
         let device = cx.device();
         let varmap = DetermVarMap::new(VarMap::new(), cx.rng());

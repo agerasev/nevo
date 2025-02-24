@@ -1,15 +1,13 @@
-mod animal;
+mod agent;
 mod ui;
 mod world;
 
-use std::sync::{Arc, RwLock};
-
-use animal::{MindConfig, VisionConfig, VisionLayerConfig};
+use agent::{MindConfig, VisionConfig, VisionLayerConfig};
 use anyhow::Result;
 use candle::{DType, Device};
 use eframe::egui;
 use glam::UVec2;
-use rand::{rngs::SmallRng, SeedableRng};
+use rand::{SeedableRng, rngs::SmallRng};
 use world::view::WorldView;
 
 use self::{
@@ -50,7 +48,7 @@ fn main() -> Result<()> {
     println!("World is created");
 
     let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([800.0, 600.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([1200.0, 900.0]),
         ..Default::default()
     };
 
@@ -60,7 +58,7 @@ fn main() -> Result<()> {
         Box::new(|cc| {
             // let ctx = cc.egui_ctx.clone();
             // ctx.request_repaint();
-            Ok(Box::new(App::new(cc, WorldView::new(&world))?))
+            Ok(Box::new(App::new(cc, WorldView::new(&world.model))?))
         }),
     )
     .unwrap();

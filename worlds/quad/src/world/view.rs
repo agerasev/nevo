@@ -8,8 +8,9 @@ use eframe::egui::{
 };
 use glam::UVec2;
 
-use super::{AnimalModel, Block, Plant, World, WorldModel};
+use super::model::{AnimalModel, Block, Plant, WorldModel};
 
+#[derive(Default)]
 pub struct WorldView {
     model: Weak<RwLock<WorldModel>>,
     texture: Option<TextureHandle>,
@@ -17,9 +18,9 @@ pub struct WorldView {
 }
 
 impl WorldView {
-    pub fn new(world: &World) -> Self {
+    pub fn new(world: &Arc<RwLock<WorldModel>>) -> Self {
         Self {
-            model: Arc::downgrade(&world.model),
+            model: Arc::downgrade(&world),
             texture: None,
             last_hash: u64::MAX,
         }
@@ -75,7 +76,7 @@ impl WorldView {
     pub fn draw(&mut self, ui: &mut Ui) -> Response {
         if let Some(model) = self.model.upgrade() {
             let model = model.read().unwrap();
-            if mem::replace(&mut self.last_hash, model.hash()) != self.last_hash {
+            if mem::replace(&mut self.last_hash, model.state_hash()) != self.last_hash {
                 let image = model.bitmap();
                 self.texture = Some(ui.ctx().load_texture(
                     "Map",
