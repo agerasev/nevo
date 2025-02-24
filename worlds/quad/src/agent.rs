@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use anyhow::Result;
 use candle::{Module, Tensor};
 use candle_nn::{
-    Conv2d, Conv2dConfig, LSTM, LSTMConfig, LayerNorm, LayerNormConfig, Linear, RNN, VarBuilder,
-    VarMap, conv2d, layer_norm, linear, lstm, rnn::LSTMState,
+    Conv2d, Conv2dConfig, LSTM, LSTMConfig, Linear, RNN, VarBuilder, VarMap, conv2d, linear, lstm,
+    rnn::LSTMState,
 };
 
 use nevo_core::{Agent, Candle as Cx, Context, Genome, Mutate, nn::init::DetermVarMap};
@@ -60,10 +60,7 @@ struct Vision {
 
 struct Mind {
     vision: Vision,
-    vision_norm: LayerNorm,
-    status_norm: LayerNorm,
     rnn: LSTM,
-    out_norm: LayerNorm,
     out: Linear,
 }
 
@@ -130,19 +127,12 @@ impl MindConfig {
         let vision_out_dim = vision_out_size * vision_out_size * out_channels;
         Ok(Mind {
             vision: self.vision.build(vision_channels, vb.pp("vision"))?,
-            vision_norm: layer_norm(
-                vision_out_dim,
-                LayerNormConfig::default(),
-                vb.pp("vision_norm"),
-            )?,
-            status_norm: layer_norm(status_dim, LayerNormConfig::default(), vb.pp("status_norm"))?,
             rnn: lstm(
                 vision_out_dim + status_dim,
                 self.mem_size,
                 LSTMConfig::default(),
                 vb.pp("rnn"),
             )?,
-            out_norm: layer_norm(self.mem_size, LayerNormConfig::default(), vb.pp("out_norm"))?,
             out: linear(self.mem_size, out_dim, vb.pp("out"))?,
         })
     }
@@ -155,15 +145,11 @@ impl Mind {
         vision: &Tensor,
         status: &Tensor,
     ) -> candle::Result<Tensor> {
-        let vision_out = vision
-            .apply(&self.vision)?
-            .reshape((1, ()))?
-            .apply(&self.vision_norm)?;
-        let status_out = status.apply(&self.status_norm)?;
-        let rnn_in = Tensor::cat(&[vision_out, status_out], 1)?;
+        let vision = vision.apply(&self.vision)?.reshape((1, ()))?;
+        let rnn_in = Tensor::cat(&[&vision, status], 1)?;
         *mem = self.rnn.step(&rnn_in, mem)?;
         let rnn_out = mem.h();
-        rnn_out.apply(&self.out_norm)?.apply(&self.out)
+        rnn_out.apply(&self.out)
     }
 }
 

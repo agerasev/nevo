@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use glam::{IVec2, UVec2};
-use rand::{Rng, distributions::Uniform};
+use rand::Rng;
 
 use crate::agent::{InteractionConfig, MindConfig, MindGenome};
 use nevo_core::{Candle as Cx, Context};
@@ -18,7 +18,13 @@ pub enum Block {
 #[derive(Default, Debug)]
 pub struct Plant {
     pub pos: UVec2,
-    pub mass: f32,
+    pub growth: f32,
+}
+
+impl Plant {
+    pub fn new(pos: UVec2) -> Self {
+        Plant { pos, growth: 0.0 }
+    }
 }
 
 #[derive(Default, Debug)]
@@ -27,10 +33,27 @@ pub struct AnimalAction {
 }
 
 pub struct AnimalModel {
-    pub pos: UVec2,
-    pub mass: f32,
     pub genome: MindGenome,
+    pub pos: UVec2,
+    pub age: f32,
+    pub hunger: f32,
     pub action: Arc<Mutex<Option<AnimalAction>>>,
+}
+
+impl AnimalModel {
+    pub fn new(pos: UVec2, genome: MindGenome) -> Result<Self> {
+        Ok(AnimalModel {
+            genome,
+            pos,
+            age: 0.0,
+            hunger: 0.0,
+            action: Default::default(),
+        })
+    }
+
+    pub fn key(&self) -> usize {
+        Arc::as_ptr(&self.action).addr()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -52,31 +75,28 @@ impl WorldModel {
         InteractionConfig {
             vision_size: 16,
             vision_channels: 3,
-            status_dim: 12,
-            out_dim: 8,
+            status_dim: 1,
+            out_dim: 5,
         }
     }
 
     pub fn new(cx: &mut Cx, config: WorldConfig, mind: MindConfig) -> Result<Self> {
         let blocks = Grid2::fill(config.size, Block::Ground);
         let plants = (0..config.n_plants)
-            .map(|_| Plant {
-                pos: cx
-                    .rng()
-                    .sample(AxisAlignedUniform(UVec2::ZERO, config.size)),
-                mass: cx.rng().sample(Uniform::new(0.1, 10.0)),
+            .map(|_| {
+                Plant::new(
+                    cx.rng()
+                        .sample(AxisAlignedUniform(UVec2::ZERO, config.size)),
+                )
             })
             .collect();
         let animals = (0..config.n_animals)
             .map(|_| {
-                Ok(AnimalModel {
-                    pos: cx
-                        .rng()
+                AnimalModel::new(
+                    cx.rng()
                         .sample(AxisAlignedUniform(UVec2::ZERO, config.size)),
-                    mass: cx.rng().sample(Uniform::new(0.1, 1.0)),
-                    genome: MindGenome::new(cx, Self::animal_config(), mind.clone())?,
-                    action: Default::default(),
-                })
+                    MindGenome::new(cx, Self::animal_config(), mind.clone())?,
+                )
             })
             .collect::<Result<_>>()?;
 
