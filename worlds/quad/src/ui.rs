@@ -1,16 +1,14 @@
-use std::sync::{Arc, RwLock};
-
 use anyhow::Result;
-use eframe::{self, egui, CreationContext};
+use eframe::{self, CreationContext, egui};
 
-use crate::world::World;
+use crate::world::view::WorldView;
 
 pub struct App {
-    world: Arc<RwLock<World>>,
+    world: WorldView,
 }
 
 impl App {
-    pub fn new(_cc: &CreationContext, world: Arc<RwLock<World>>) -> Result<Self> {
+    pub fn new(_cc: &CreationContext, world: WorldView) -> Result<Self> {
         Ok(Self { world })
     }
 }
@@ -29,8 +27,8 @@ impl eframe::App for App {
         });
 
         egui::CentralPanel::default().show(ctx, |_ui| {
-            egui::Window::new("Window").show(ctx, |ui| {
-                ui.heading("My egui Application");
+            egui::Window::new("Map").show(ctx, |ui| {
+                self.world.draw(ui);
             });
         });
     }

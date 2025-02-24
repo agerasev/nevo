@@ -7,10 +7,10 @@ use std::sync::{Arc, RwLock};
 use animal::{MindConfig, VisionConfig, VisionLayerConfig};
 use anyhow::Result;
 use candle::{DType, Device};
+use eframe::egui;
 use glam::UVec2;
 use rand::{rngs::SmallRng, SeedableRng};
-
-use eframe::egui;
+use world::view::WorldView;
 
 use self::{
     ui::App,
@@ -46,7 +46,7 @@ fn main() -> Result<()> {
         n_plants: 1000,
         n_animals: 100,
     };
-    let world = Arc::new(RwLock::new(World::new(&mut cx, config, mind)?));
+    let world = World::new(&mut cx, config, mind)?;
     println!("World is created");
 
     let native_options = eframe::NativeOptions {
@@ -60,7 +60,7 @@ fn main() -> Result<()> {
         Box::new(|cc| {
             // let ctx = cc.egui_ctx.clone();
             // ctx.request_repaint();
-            Ok(Box::new(App::new(cc, world)?))
+            Ok(Box::new(App::new(cc, WorldView::new(&world))?))
         }),
     )
     .unwrap();

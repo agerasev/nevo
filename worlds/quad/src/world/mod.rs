@@ -1,4 +1,4 @@
-mod view;
+pub mod view;
 
 use std::{
     collections::hash_map::Entry,
@@ -8,7 +8,7 @@ use std::{
 use anyhow::Result;
 use eframe::egui::ahash::HashMap;
 use glam::UVec2;
-use rand::{distributions::Uniform, Rng};
+use rand::{Rng, distributions::Uniform};
 
 use crate::animal::{AgentConfig, AgentOutput, AnimalBrain, AnimalGenome, MindConfig};
 use nevo_core::{Candle as Cx, Context};
@@ -51,6 +51,7 @@ pub struct WorldConfig {
 }
 
 pub struct WorldModel {
+    n_steps: u64,
     blocks: Grid2<Block>,
     plants: Vec<Plant>,
     animals: Vec<AnimalModel>,
@@ -65,6 +66,12 @@ pub struct World {
     config: WorldConfig,
     model: Arc<RwLock<WorldModel>>,
     control: WorldControl,
+}
+
+impl WorldModel {
+    pub fn hash(&self) -> u64 {
+        self.n_steps
+    }
 }
 
 impl World {
@@ -99,6 +106,7 @@ impl World {
                 })
                 .collect::<Result<_>>()?;
             WorldModel {
+                n_steps: 0,
                 blocks,
                 plants,
                 animals,
