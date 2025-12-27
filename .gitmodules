@@ -1,0 +1,3 @@
+[submodule "wgame"]
+	path = wgame
+	url = ../wgame

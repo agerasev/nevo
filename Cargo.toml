@@ -1,0 +1,12 @@
+[package]
+name = "nevo"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wgame = { path = "wgame/wgame" }
+rand = { version = "0.9.2", features = [
+    "std",
+    "small_rng",
+], default-features = false }
+glam = { version = "0.30.9", features = ["rand"] }
