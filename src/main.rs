@@ -1,15 +1,14 @@
 #![forbid(unsafe_code)]
 
 use glam::Vec2;
-use rand::{Rng, SeedableRng, distr::Uniform, rngs::SmallRng};
+use rand::{Rng, RngExt, SeedableRng, distr::Uniform, rngs::SmallRng};
 use wgame::{
-    Event, Library, Result, Window,
+    Library, Result, Window,
     gfx::{
-        Camera, Scene,
+        Scene,
         types::{Color, color},
     },
     prelude::*,
-    shapes::ShapeExt,
 };
 
 pub struct WorldConfig {
@@ -49,7 +48,7 @@ impl Drawable for Animal {
                 .unit_circle()
                 .scale(self.mass.sqrt())
                 .move_to(self.pos)
-                .with_color(color::RED.mix(color::YELLOW, 0.25))
+                .fill_color(color::RED.mix(color::YELLOW, 0.25))
                 .order(3),
         );
         scene.add(
@@ -57,7 +56,7 @@ impl Drawable for Animal {
                 .unit_circle()
                 .scale(self.mass.sqrt() + BORDER_WIDTH)
                 .move_to(self.pos)
-                .with_color(color::BLACK)
+                .fill_color(color::BLACK)
                 .order(2),
         );
     }
@@ -70,7 +69,7 @@ impl Drawable for Plant {
                 .unit_circle()
                 .scale(self.mass.sqrt())
                 .move_to(self.pos)
-                .with_color(color::GREEN)
+                .fill_color(color::GREEN)
                 .order(1),
         );
         scene.add(
@@ -78,7 +77,7 @@ impl Drawable for Plant {
                 .unit_circle()
                 .scale(self.mass.sqrt() + BORDER_WIDTH)
                 .move_to(self.pos)
-                .with_color(color::BLACK)
+                .fill_color(color::BLACK)
                 .order(0),
         );
     }
@@ -89,7 +88,7 @@ impl Drawable for World {
         scene.add(
             &lib.shapes()
                 .rectangle((Vec2::ZERO, self.config.size))
-                .with_color(color::GREEN.mix(color::BLACK, 0.75))
+                .fill_color(color::GREEN.mix(color::BLACK, 0.75))
                 .order(-1),
         );
 
@@ -136,24 +135,23 @@ async fn main(mut window: Window<'_>) -> Result<()> {
         &mut rng,
     );
 
-    let mut input = window.input();
     let lib = Library::new(window.graphics());
+    let smoke = std::env::args().any(|arg| arg == "--smoke");
+    let mut frames = 0;
 
     while let Some(mut frame) = window.next_frame().await? {
-        while let Some(event) = input.try_next() {
-            match event {
-                Event::MouseInput { state, button, .. } => (),
-                Event::MouseWheel { delta, phase, .. } => (),
-                Event::CursorMoved { position, .. } => (),
-                _ => (),
-            }
-        }
-
         frame.clear(color::BLACK);
 
         let mut scene = frame.scene();
         scene.camera = scene.camera.scale(0.018).move_to(-world.config.size / 2.0);
         world.draw(&lib, &mut scene);
+        scene.render();
+        frame.present();
+
+        frames += 1;
+        if smoke && frames == 12 {
+            break;
+        }
     }
 
     Ok(())
