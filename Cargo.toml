@@ -2,8 +2,19 @@
 name = "nevo"
 version = "0.1.0"
 edition = "2024"
+default-run = "nevo"
+
+[features]
+default = ["viewer"]
+viewer = ["dep:wgame"]
+
+[[bin]]
+name = "nevo"
+path = "src/main.rs"
+required-features = ["viewer"]
 
 [dependencies]
-wgame = { path = "wgame/wgame" }
+wgame = { path = "wgame/wgame", optional = true }
 rand = { version = "0.10.2", default-features = false, features = ["std"] }
+rand_xoshiro = "0.8.1"
 glam = { version = "0.33.7", features = ["rand"] }

@@ -6,12 +6,23 @@ and recorded experiments, with no final endpoint for the research program.
 
 ## Current implementation
 
-The simulation code on `novel` as of `88cf113` draws a seeded 100 x 100 world with 1,000 plants
-and 100 animals. [src/main.rs](src/main.rs) initializes and redraws the scene;
-movement, perception, reproduction, and evolution are not implemented here yet.
+The headless Rust baseline runs the July 26 foraging rules with a 3–4–3 recurrent
+herbivore controller. Both trials and continuous runs advance the same fixed tick.
+A fresh checkout needs `git submodule update --init` for the Cargo path dependency.
 
-The stack is Rust 2024, `glam`, `rand`, and the [wgame](wgame/README.md) graphics
-submodule. The existing `--smoke` option exits after 12 rendered frames.
+```sh
+cargo run --locked --no-default-features --bin forage -- trial --scenario debug --seed 1 --ticks 1
+cargo run --locked --no-default-features --bin forage -- check --scenario debug --seed 1 --ticks 128
+cargo run --locked --no-default-features --bin forage -- continuous --scenario baseline --seed 1 --ticks 256
+```
+
+Omit `--ticks` in continuous mode to run until interrupted. Use `trial --focal 1`
+to trace a founder and stop on its death or the tick budget. The `debug` layout
+exercises a meal and a birth on tick one. The `baseline` starts 20 herbivores
+among 500 mature plants. See the [tick and runner contracts](docs/foraging.md).
+
+The default `nevo` binary is the separate [static wgame viewer](src/main.rs).
+The headless commands above build with graphics disabled.
 
 ## Agreed direction
 
@@ -28,7 +39,7 @@ Decisions from 2026-11-03:
   investigate a 1D angular retina with color and distance, and possibly gradient
   sensing as smell, with modality ablations.
 - Begin with the minimum evolutionary degrees of freedom needed to demonstrate
-  adaptation. Exact genome parameters and controller architecture remain open.
+  adaptation. The first baseline evolves weights and biases with fixed topology.
 - Keep a concise history of experiments in [experiments/](experiments/README.md).
 
 ## Proposed design
@@ -37,12 +48,6 @@ These are working proposals, not implemented interfaces or settled parameters.
 
 - Retain the current graphics stack; use `wgame-egui` for controls. Keep the
   simulation CPU-based, fixed-step, and runnable without a window.
-- Let the world own the tick, the population own genomes and controllers, and the
-  runner choose when to start or stop a run. The [foraging interface proposal](docs/foraging.md)
-  connects all three and gives a concrete debug trial.
-- Initially evolve only weights of a small fixed-topology network. Keep body,
-  sensor geometry, and action meanings fixed within each experiment. Inheritance
-  should distinguish genome data from an individual's transient neural memory.
 - A simple retina can use fixed body-relative rays, reporting the nearest surface's
   color and normalized distance with an explicit miss value. Specify field of
   view, range, resolution, and occlusion before implementing it.
