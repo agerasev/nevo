@@ -5,6 +5,8 @@ experiment. It may contain several runs, seeds, and comparisons.
 
 - [The first NEvo foraging experiment](2016-07-26-herbivore-foraging/README.md) reconstructs
   the 2016 C++ experiment from source and links to the author's long-run recordings.
+- [Headless trial and continuous-run comparison](2026-11-03-foraging-prefix/README.md)
+  checks the first Rust birth trace and seeded replay through population turnover.
 
 Each experiment needs a short `README.md` recording:
 
