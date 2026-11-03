@@ -1,8 +1,10 @@
 # Experiments
 
 Keep the research history here. Use one `YYYY-MM-DD-short-name/` directory per
-experiment; it may contain several runs, seeds, and comparisons. No experimental
-results have been recorded yet.
+experiment. It may contain several runs, seeds, and comparisons.
+
+- [The first NEvo foraging experiment](2016-07-26-herbivore-foraging/README.md) reconstructs
+  the 2016 C++ experiment from source and links to the author's long-run recordings.
 
 Each experiment needs a short `README.md` recording:
 
