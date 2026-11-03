@@ -21,8 +21,9 @@ Decisions from 2026-11-03:
   long-running continuous ecology, sharing the simulation machinery.
 - Make agents (genomes, brains, control mappings) and environments (worlds, bodies,
   physical rules) generic and replaceable through compatible contracts/adapters.
-- Start with continuous 2D space, wrapping boundaries, replenishing food, and one
-  herbivore body type. Expand the ecosystem through later experiments.
+- Use the [July 26 foraging experiment](experiments/2016-07-26-herbivore-foraging/README.md)
+  as the Rust baseline. Start with continuous 2D space, replenishing food, and one
+  herbivore body type. Wrapping boundaries remain part of the planned Rust world.
 - Include internal-state perception. World perception remains an open design:
   investigate a 1D angular retina with color and distance, and possibly gradient
   sensing as smell, with modality ablations.
@@ -36,14 +37,9 @@ These are working proposals, not implemented interfaces or settled parameters.
 
 - Retain the current graphics stack; use `wgame-egui` for controls. Keep the
   simulation CPU-based, fixed-step, and runnable without a window.
-- Separate environment/body state, observation encoding, controller/brain memory,
-  action decoding, inherited genome, and experiment orchestration. A world owns
-  its physical semantics; a controller need not know its concrete world or body.
-  Small typed contracts should enable replacement without making every field
-  generic or requiring all environments to expose energy or a fitness score.
-- Separate reset policy from selection policy: episodic trials may test unchanged
-  agents or evaluate genomes for generational selection; continuous ecology may
-  select through births and deaths. An episode is not necessarily a generation.
+- Let the world own the tick, the population own genomes and controllers, and the
+  runner choose when to start or stop a run. The [foraging interface proposal](docs/foraging.md)
+  connects all three and gives a concrete debug trial.
 - Initially evolve only weights of a small fixed-topology network. Keep body,
   sensor geometry, and action meanings fixed within each experiment. Inheritance
   should distinguish genome data from an individual's transient neural memory.
@@ -57,8 +53,8 @@ These are working proposals, not implemented interfaces or settled parameters.
 - Record code/configuration/seeds with results. Target repeatability within the
   same build/platform first; a seeded `SmallRng` alone is not a portability promise.
 
-Next discussion: observation/action contracts, retina and smell definitions,
-smallest useful brain/genome, and trial selection and ecological energy rules.
+Open choices include retina and smell definitions, which internal signals to
+expose, and how to select genomes across trials.
 
 ## Historical context
 
