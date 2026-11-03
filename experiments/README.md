@@ -7,6 +7,8 @@ experiment. It may contain several runs, seeds, and comparisons.
   the 2016 C++ experiment from source and links to the author's long-run recordings.
 - [Headless trial and continuous-run comparison](2026-11-03-foraging-prefix/README.md)
   checks the first Rust birth trace and seeded replay through population turnover.
+- [Viewer and headless playback](2026-11-03-viewer-playback/README.md) checks
+  seeded state after presenting frames, pausing, resuming, and single-stepping.
 
 Each experiment needs a short `README.md` recording:
 
