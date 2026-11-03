@@ -73,13 +73,7 @@ impl Options {
                     .map_err(|_| format!("{flag} expects an unsigned integer, got '{value}'"))
             };
             match flag.as_str() {
-                "--scenario" => {
-                    options.scenario = match value()? {
-                        "debug" => Scenario::Debug,
-                        "baseline" => Scenario::Baseline,
-                        name => return Err(format!("unknown scenario '{name}'")),
-                    };
-                }
+                "--scenario" => options.scenario = value()?.parse()?,
                 "--seed" => options.seed = number()?,
                 "--ticks" => options.ticks = Some(number()?),
                 "--focal" if mode == Mode::Trial => options.focal = Some(AgentId(number()?)),

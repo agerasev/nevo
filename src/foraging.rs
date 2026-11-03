@@ -20,6 +20,18 @@ pub enum Scenario {
     Baseline,
 }
 
+impl std::str::FromStr for Scenario {
+    type Err = String;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        match name {
+            "debug" => Ok(Self::Debug),
+            "baseline" => Ok(Self::Baseline),
+            _ => Err(format!("unknown scenario '{name}'")),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Origin {
     Founder,

@@ -6,7 +6,7 @@ default-run = "nevo"
 
 [features]
 default = ["viewer"]
-viewer = ["dep:wgame"]
+viewer = ["dep:wgame", "dep:wgame-egui"]
 
 [[bin]]
 name = "nevo"
@@ -15,6 +15,7 @@ required-features = ["viewer"]
 
 [dependencies]
 wgame = { path = "wgame/wgame", optional = true }
+wgame-egui = { path = "wgame/wgame-egui", optional = true }
 rand = { version = "0.10.2", default-features = false, features = ["std"] }
 rand_xoshiro = "0.8.1"
 glam = { version = "0.33.7", features = ["rand"] }

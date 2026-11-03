@@ -6,9 +6,21 @@ and recorded experiments, with no final endpoint for the research program.
 
 ## Current implementation
 
-The headless Rust baseline runs the July 26 foraging rules with a 3–4–3 recurrent
-herbivore controller. Both trials and continuous runs advance the same fixed tick.
+The Rust baseline runs the July 26 foraging rules with a 3–4–3 recurrent
+herbivore controller. The desktop viewer and headless runs share the same fixed tick.
 A fresh checkout needs `git submodule update --init` for the Cargo path dependency.
+
+```sh
+cargo run --locked --bin nevo -- --scenario baseline --seed 1
+cargo run --locked --bin nevo -- --scenario debug --seed 1 --paused
+```
+
+Use **Pause / Resume** to control playback and **Single step** to advance one tick
+and pause. With the arena focused, Space toggles playback and Right Arrow steps.
+The toolbar shows the seed, scenario, tick, and population counts for the displayed
+world. Green circles are plants and yellow circles are herbivores.
+
+For headless runs:
 
 ```sh
 cargo run --locked --no-default-features --bin forage -- trial --scenario debug --seed 1 --ticks 1
@@ -21,8 +33,9 @@ to trace a founder and stop on its death or the tick budget. The `debug` layout
 exercises a meal and a birth on tick one. The `baseline` starts 20 herbivores
 among 500 mature plants. See the [tick and runner contracts](docs/foraging.md).
 
-The default `nevo` binary is the separate [static wgame viewer](src/main.rs).
-The headless commands above build with graphics disabled.
+The headless commands build with graphics disabled. To verify the viewer on a
+desktop, add `--smoke` to either viewer command. It presents twelve frames with a
+scripted sequence of controls and checks the run against headless at each tick.
 
 ## Agreed direction
 
@@ -46,8 +59,6 @@ Decisions from 2026-11-03:
 
 These are working proposals, not implemented interfaces or settled parameters.
 
-- Retain the current graphics stack; use `wgame-egui` for controls. Keep the
-  simulation CPU-based, fixed-step, and runnable without a window.
 - A simple retina can use fixed body-relative rays, reporting the nearest surface's
   color and normalized distance with an explicit miss value. Specify field of
   view, range, resolution, and occlusion before implementing it.

@@ -1,7 +1,7 @@
 # Foraging interfaces
 
-The headless simulation uses one world tick for short herbivore trials and
-continuous ecology. The three [Rust traits](../src/lib.rs) separate a controller's
+The simulation uses one world tick for short herbivore trials, continuous ecology,
+and the viewer. The three [Rust traits](../src/lib.rs) separate a controller's
 decision, a population's lifecycle, and an environment's rules.
 [Historical rules and recordings](../experiments/2016-07-26-herbivore-foraging/README.md)
 
@@ -42,6 +42,13 @@ To continue the exact trial trajectory, call `tick` again on the same pair.
 `check` initializes independent runs, compares reports and complete state after
 every trial tick, then resumes the trial and compares one additional tick.
 [Runners and comparison](../src/run.rs)
+
+**Viewer.** The desktop binary constructs the same `Run` from a scenario and seed.
+Playback schedules 25 ticks per second and limits catch-up to four per update.
+Pausing clears fractional time. Single step advances exactly once and leaves the
+run paused. The toolbar queues commands and displays a snapshot of the same tick
+that the arena draws. Redraws while paused preserve the complete run state.
+[Playback and parity tests](../src/playback.rs) · [Window and rendering](../src/viewer.rs)
 
 **Debug fixture.** A herbivore with 390 energy starts in contact with one ripe
 plant. Immigration is disabled in this fixture. Its meal adds 40, the split
