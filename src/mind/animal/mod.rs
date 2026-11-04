@@ -10,7 +10,14 @@ use super::{
 use crate::{
     context::Context,
     ecosystem::{FoodObservation, MoveAction},
+    metrics::Metrics,
 };
+
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Config<B = super::rnn::Config> {
+    pub brain: B,
+}
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -53,19 +60,22 @@ where
     type Input = FoodObservation;
     type Output = MoveAction;
     type Update = M::Update;
+    type Config = Config<M::Config>;
 
-    fn prepare(
+    fn compute_update(
         &self,
-        cx: &mut C,
         observation: FoodObservation,
+        config: &Self::Config,
+        cx: &mut C,
     ) -> Result<(MoveAction, Self::Update)> {
-        let (output, update) = self.brain.prepare(
-            cx,
+        let (output, update) = self.brain.compute_update(
             [
                 observation.gradient.x as f32,
                 observation.gradient.y as f32,
                 observation.strength as f32,
             ],
+            &config.brain,
+            cx,
         )?;
         Ok((
             MoveAction {
@@ -76,12 +86,20 @@ where
         ))
     }
 
-    fn apply(&mut self, update: Self::Update) {
-        self.brain.apply(update);
+    fn apply_update(&mut self, update: Self::Update) {
+        self.brain.apply_update(update);
     }
 
     fn validate(&self) -> Result<()> {
         self.brain.validate()
+    }
+}
+
+impl<M: Metrics> Metrics for AnimalMind<M> {
+    type Summary = M::Summary;
+
+    fn collect_metrics(&self, summary: &mut Self::Summary) {
+        self.brain.collect_metrics(summary);
     }
 }
 

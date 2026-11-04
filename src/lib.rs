@@ -3,6 +3,7 @@
 pub mod context;
 pub mod ecosystem;
 pub mod genome;
+pub mod metrics;
 pub mod mind;
 pub mod run;
 pub mod universe;

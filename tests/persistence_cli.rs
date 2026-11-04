@@ -79,6 +79,24 @@ impl Directory {
         toml::from_str(&text).unwrap()
     }
 
+    fn metrics_logs(&self, run: &str) -> Vec<(PathBuf, Vec<serde_json::Value>)> {
+        let mut logs: Vec<_> = fs::read_dir(self.0.join(run).join("metrics"))
+            .unwrap()
+            .map(|entry| {
+                let path = entry.unwrap().path();
+                assert_eq!(path.extension().unwrap(), "jsonl");
+                let records = fs::read_to_string(&path)
+                    .unwrap()
+                    .lines()
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+                (path, records)
+            })
+            .collect();
+        logs.sort_by(|a, b| a.0.cmp(&b.0));
+        logs
+    }
+
     fn saved_at(&self, run: &str, seconds: u64) {
         for checkpoint in self.checkpoints(run) {
             fs::OpenOptions::new()
@@ -125,24 +143,27 @@ impl Drop for Running {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
-struct Counts {
-    meals: u64,
-    births: u64,
-    deaths: u64,
-    immigrants: u64,
+#[derive(Debug, Deserialize)]
+struct CheckpointConfig {
+    ecosystem: nevo::ecosystem::Config,
 }
 
 #[derive(Debug, Deserialize)]
 struct Checkpoint {
     format_version: u32,
-    counts: Counts,
+    config: CheckpointConfig,
     state: Universe,
+}
+
+impl Checkpoint {
+    fn restore(self) -> Run {
+        self.state.restore(self.config.ecosystem).unwrap()
+    }
 }
 
 fn read_checkpoint(path: &Path) -> Checkpoint {
     let checkpoint: Checkpoint = ciborium::from_reader(fs::File::open(path).unwrap()).unwrap();
-    assert_eq!(checkpoint.format_version, 6);
+    assert_eq!(checkpoint.format_version, 7);
     checkpoint
 }
 
@@ -151,7 +172,7 @@ fn checkpoint_tick(path: &Path) -> u64 {
 }
 
 #[test]
-fn a_new_process_resumes_the_complete_seeded_state_and_counts() {
+fn a_new_process_resumes_the_complete_seeded_state() {
     let directory = Directory::new();
     directory.success(&["full", "--seed", "1", "--ticks", "256"]);
     directory.success(&["split", "--seed", "1", "--ticks", "128"]);
@@ -161,14 +182,163 @@ fn a_new_process_resumes_the_complete_seeded_state_and_counts() {
     let full = directory.latest("full");
     let split = directory.latest("split");
     assert_eq!(full.state.step(), 256);
-    assert_eq!(full.counts, split.counts);
     assert_eq!(full.state, split.state);
-    let mut full = full.state.restore().unwrap();
-    let mut split = split.state.restore().unwrap();
+    let mut full = full.restore();
+    let mut split = split.restore();
     for _ in 0..64 {
         assert_eq!(full.tick().unwrap(), split.tick().unwrap());
     }
     assert_eq!(full, split);
+}
+
+#[test]
+fn metrics_logs_complete_windows_and_the_exit_partial_without_duplicate_endpoints() {
+    let directory = Directory::new();
+    let metrics = directory.overlay("windows.toml", "[ecosystem.metrics]\nwindow_ticks = 3\n");
+    for (run, ticks) in [("partial", "8"), ("complete", "6"), ("zero", "0")] {
+        directory.success(&[
+            run,
+            "--config",
+            &support::preset("debug"),
+            "--config",
+            &support::preset("metrics"),
+            "--config",
+            &metrics,
+            "--ticks",
+            ticks,
+        ]);
+    }
+    let logs = directory.metrics_logs("partial");
+    assert_eq!(logs.len(), 1);
+    let records = &logs[0].1;
+    assert_eq!(records.len(), 3);
+    for (record, (start, end, samples, complete)) in
+        records
+            .iter()
+            .zip([(0, 3, 3, true), (3, 6, 3, true), (6, 8, 2, false)])
+    {
+        assert_eq!(
+            record["window"],
+            serde_json::json!({
+                "start_tick": start, "end_tick": end, "samples": samples, "complete": complete,
+            })
+        );
+        assert!(record["events"]["active_animal_ticks"].as_u64().unwrap() > 0);
+        assert!(record["animal"]["body"]["energy"]["mean"].is_number());
+        assert!(record["genome"].is_object());
+    }
+    let complete = directory.metrics_logs("complete");
+    assert_eq!(complete.len(), 1);
+    assert_eq!(
+        complete[0].1.len(),
+        2,
+        "exit must not repeat the final full window"
+    );
+    let zero = directory.metrics_logs("zero");
+    assert_eq!(zero.len(), 1);
+    assert!(zero[0].1.is_empty(), "zero ticks have no samples to report");
+
+    directory.success(&[
+        "disabled",
+        "--config",
+        &support::preset("debug"),
+        "--ticks",
+        "8",
+    ]);
+    assert!(!directory.0.join("disabled/metrics").exists());
+    assert_eq!(
+        directory.latest("partial").state,
+        directory.latest("disabled").state
+    );
+    let value: ciborium::Value = ciborium::from_reader(
+        fs::File::open(directory.checkpoints("partial").last().unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        value
+            .as_map()
+            .unwrap()
+            .iter()
+            .all(|(key, _)| key.as_text() != Some("counts"))
+    );
+}
+
+#[test]
+fn resumed_metrics_start_a_fresh_window_and_allow_changed_selections() {
+    let directory = Directory::new();
+    directory.success(&[
+        "resumed",
+        "--config",
+        &support::preset("debug"),
+        "--config",
+        &support::preset("metrics"),
+        "--config",
+        &directory.overlay("first.toml", "[ecosystem.metrics]\nwindow_ticks = 3\n"),
+        "--ticks",
+        "2",
+    ]);
+    let initial = directory.metrics_logs("resumed");
+    assert_eq!(initial.len(), 1);
+    assert_eq!(
+        initial[0].1[0]["window"],
+        serde_json::json!({
+            "start_tick": 0, "end_tick": 2, "samples": 2, "complete": false,
+        })
+    );
+    assert!(
+        directory
+            .latest("resumed")
+            .state
+            .world()
+            .metrics_window()
+            .is_none()
+    );
+    let original_log = fs::read(&initial[0].0).unwrap();
+    directory.success(&[
+        "resumed", "--ticks", "5", "--config",
+        &directory.overlay("changed.toml", "[ecosystem.metrics]\nwindow_ticks = 4\ngenetic_diversity = false\n[ecosystem.animal.body.metrics.energy]\nmean = false\n"),
+    ]);
+    let logs = directory.metrics_logs("resumed");
+    assert_eq!(logs.len(), 2, "each invocation gets its own metrics log");
+    assert_eq!(fs::read(&initial[0].0).unwrap(), original_log);
+    let resumed = &logs
+        .iter()
+        .find(|(path, _)| path != &initial[0].0)
+        .unwrap()
+        .1;
+    assert_eq!(resumed.len(), 2);
+    for (record, (start, end, samples, complete)) in
+        resumed.iter().zip([(2, 6, 4, true), (6, 7, 1, false)])
+    {
+        assert_eq!(
+            record["window"],
+            serde_json::json!({
+                "start_tick": start, "end_tick": end, "samples": samples, "complete": complete,
+            })
+        );
+        assert!(record.get("genome").is_none());
+        assert!(record["animal"]["body"]["energy"].get("mean").is_none());
+        assert!(record["animal"]["body"]["energy"]["sum"].is_number());
+    }
+    directory.success(&[
+        "resumed",
+        "--ticks",
+        "1",
+        "--config",
+        &directory.overlay("disabled.toml", "[ecosystem.metrics]\nenabled = false\n"),
+    ]);
+    assert_eq!(directory.metrics_logs("resumed").len(), 2);
+    directory.success(&[
+        "reference",
+        "--config",
+        &support::preset("debug"),
+        "--ticks",
+        "8",
+    ]);
+    assert_eq!(
+        directory.latest("resumed").state,
+        directory.latest("reference").state
+    );
 }
 
 #[test]
@@ -243,7 +413,7 @@ fn exit_only_and_zero_tick_runs_are_resumable() {
         "0",
     ]);
     assert_eq!(
-        directory.latest("zero").state.restore().unwrap(),
+        directory.latest("zero").restore(),
         Run::new(support::ecosystem("debug"), 7).unwrap()
     );
     directory.success(&["zero", "--ticks", "3"]);
@@ -251,7 +421,7 @@ fn exit_only_and_zero_tick_runs_are_resumable() {
     for _ in 0..3 {
         reference.tick().unwrap();
     }
-    assert_eq!(directory.latest("zero").state.restore().unwrap(), reference);
+    assert_eq!(directory.latest("zero").restore(), reference);
 }
 
 #[test]
@@ -285,10 +455,7 @@ fn default_directory_records_entropy_and_full_range_seeds() {
     directory.success(&["maximum", "--ticks", "1"]);
     let mut reference = Run::new(support::ecosystem("baseline"), u64::MAX).unwrap();
     reference.tick().unwrap();
-    assert_eq!(
-        directory.latest("maximum").state.restore().unwrap(),
-        reference
-    );
+    assert_eq!(directory.latest("maximum").restore(), reference);
 }
 
 #[test]
@@ -327,10 +494,7 @@ fn latest_resumes_by_save_time_with_saved_config_and_explicit_overrides() {
     for _ in 0..3 {
         reference.tick().unwrap();
     }
-    assert_eq!(
-        directory.latest("runs/a-newer").state.restore().unwrap(),
-        reference
-    );
+    assert_eq!(directory.latest("runs/a-newer").restore(), reference);
     assert_eq!(directory.latest("runs/z-older").state.step(), 9);
     let config = directory.config("runs/a-newer");
     assert_eq!(config["viewer"]["vsync"].as_bool(), Some(false));
@@ -479,10 +643,7 @@ fn checkpoint_recovers_missing_config_and_ignores_an_interrupted_write() {
     for _ in 0..12 {
         reference.tick().unwrap();
     }
-    assert_eq!(
-        directory.latest("recover").state.restore().unwrap(),
-        reference
-    );
+    assert_eq!(directory.latest("recover").restore(), reference);
     let config = directory.config("recover");
     assert_eq!(config["ecosystem"]["initial_animals"].as_integer(), Some(1));
     assert_eq!(config["seed"].as_str(), Some("42"));
@@ -550,7 +711,7 @@ fn a_live_run_rejects_another_writer_and_saves_on_ctrl_c() {
     for _ in 0..saved.state.step() {
         reference.tick().unwrap();
     }
-    assert_eq!(saved.state.restore().unwrap(), reference);
+    assert_eq!(saved.restore(), reference);
     // The process released the OS lock; a subsequent invocation can continue.
     directory.success(&["live", "--ticks", "1", "--tick-hz", "0"]);
 }

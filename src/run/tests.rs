@@ -21,6 +21,17 @@ struct Probe {
     inspect_apply: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
+// Deliberately neither Clone nor serializable: execution configuration is borrowed.
+struct ProbeConfig {
+    increment: u64,
+}
+
+impl Default for ProbeConfig {
+    fn default() -> Self {
+        Self { increment: 1 }
+    }
+}
+
 struct ProbeUpdate {
     value: u64,
     memory: u64,
@@ -30,23 +41,25 @@ struct ProbeUpdate {
 }
 
 impl Simulation for Probe {
+    type Config = ProbeConfig;
     type Update = ProbeUpdate;
     type Report = u64;
 
-    fn prepare_step(&self, _: u64) -> Result<(ProbeUpdate, u64)> {
+    fn compute_update(&self, _: u64, config: &ProbeConfig) -> Result<(u64, ProbeUpdate)> {
         if let Some(inspect) = &self.inspect {
             inspect();
         }
         let mut rng = self.rng.clone();
         let memory = rng.next_u64();
         ensure!(self.fail_phase != 1, "mind failed");
-        let value = self.value + 1;
+        let value = self.value + config.increment;
         let births = self.births + 1;
         ensure!(self.fail_phase != 2, "physical update failed");
         let interventions = self.interventions + 1;
         ensure!(self.fail_phase != 3, "intervention failed");
         ensure!(self.fail_phase != 4, "invalid prepared state");
         Ok((
+            value,
             ProbeUpdate {
                 value,
                 memory,
@@ -54,11 +67,10 @@ impl Simulation for Probe {
                 births,
                 interventions,
             },
-            value,
         ))
     }
 
-    fn apply_step(&mut self, update: ProbeUpdate) {
+    fn apply_update(&mut self, update: ProbeUpdate) {
         if let Some(inspect) = &self.inspect_apply {
             inspect();
         }
@@ -103,7 +115,7 @@ fn encoded(state: &TestUniverse) -> Vec<u8> {
 
 #[test]
 fn preparation_holds_read_lock_and_callback_runs_after_atomic_publication() {
-    let mut run = TestRun::from_universe(universe());
+    let mut run = TestRun::from_universe(universe(), ProbeConfig::default());
     let observed = Arc::new(AtomicUsize::new(0));
     let view = run.universe.clone();
     let count = observed.clone();
@@ -159,12 +171,12 @@ fn preparation_holds_read_lock_and_callback_runs_after_atomic_publication() {
 fn discarding_an_update_preserves_state_and_randomness() {
     let mut state = universe();
     let before = encoded(&state);
-    let _ = state.prepare_step().unwrap();
+    let _ = state.compute_update(&ProbeConfig::default()).unwrap();
     assert_eq!(encoded(&state), before);
 
     let mut expected_rng = state.world.rng.clone();
     let expected_memory = expected_rng.next_u64();
-    assert_eq!(state.advance().unwrap(), 1);
+    assert_eq!(state.advance(&ProbeConfig::default()).unwrap(), 1);
     assert_eq!(state.step(), 1);
     assert_eq!(state.world.memory, expected_memory);
     assert_eq!(state.world.rng, expected_rng);
@@ -176,13 +188,13 @@ fn exhausted_step_counter_fails_before_model_preparation() {
     state.step = u64::MAX - 1;
     state.world.inspect = Some(Arc::new(|| panic!("must check counter before preparation")));
     let before = encoded(&state);
-    assert!(state.advance().is_err());
+    assert!(state.advance(&ProbeConfig::default()).is_err());
     assert_eq!(encoded(&state), before);
 }
 
 #[test]
 fn readers_can_hold_back_publication_while_preparation_runs() {
-    let mut run = TestRun::from_universe(universe());
+    let mut run = TestRun::from_universe(universe(), ProbeConfig::default());
     let view = run.universe.clone();
     let (entered, acting) = mpsc::channel();
     let (release, proceed) = mpsc::channel();
@@ -225,7 +237,7 @@ fn failed_preparation_preserves_all_experiment_state() {
         let mut state = universe();
         state.world.fail_phase = phase;
         let before = encoded(&state);
-        let mut run = TestRun::from_universe(state);
+        let mut run = TestRun::from_universe(state, ProbeConfig::default());
         let (control, commands) = Control::channel(false);
         assert!(
             run.execute(
@@ -246,4 +258,13 @@ fn failed_preparation_preserves_all_experiment_state() {
             "failure phase {phase}"
         );
     }
+}
+
+#[test]
+fn execution_borrows_the_runs_component_configuration() {
+    let mut run = TestRun::from_universe(universe(), ProbeConfig { increment: 7 });
+    assert_eq!(run.tick().unwrap(), 7);
+    assert_eq!(run.tick().unwrap(), 14);
+    assert_eq!(run.universe().read().world().value, 14);
+    assert_eq!(run.config().increment, 7);
 }

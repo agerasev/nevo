@@ -69,6 +69,12 @@ plants, preserving the random draw order.
 tracing. Tracing, checkpoint policy, and `smoke` are config-only settings.
 The [smoke preset](../configs/smoke.toml) enables the viewer's twelve-frame check.
 Runtime options such as viewing,
-pacing, tracing, tick budget, and checkpoint policy can change on resume. Seed and
-ecosystem settings must match the checkpoint; conflicting overrides fail before
+pacing, tracing, tick budget, checkpoint policy, and metric selections can change
+on resume. Seed and ecosystem initialization settings must match the checkpoint; conflicting overrides fail before
 replacing saved files. See [persistence](persistence.md) for format and recovery.
+
+Metrics configuration follows component ownership: `ecosystem.metrics`,
+`ecosystem.animal.metrics`, `ecosystem.animal.body.metrics`,
+`ecosystem.animal.mind.brain.metrics`, and `ecosystem.plant.metrics`.
+The [metrics preset](../configs/metrics.toml) is an overlay; see
+[selection syntax and window semantics](metrics.md).

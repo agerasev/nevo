@@ -1,5 +1,6 @@
 mod cli;
 mod config;
+mod metrics;
 mod persistence;
 
 #[cfg(feature = "viewer")]
@@ -21,49 +22,23 @@ use std::{
 use anyhow::{Context, Result, anyhow, ensure};
 use clap::Parser;
 use nevo::{
-    ecosystem::{Event, TickReport},
+    ecosystem::TickReport,
     run::{Command, Control, Run, StopReason},
 };
-use serde::{Deserialize, Serialize};
 
 use cli::Cli;
+use metrics::MetricsLog;
 use persistence::RunDirectory;
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Counts {
-    meals: u64,
-    births: u64,
-    deaths: u64,
-    immigrants: u64,
-}
-
-impl Counts {
-    fn record(&mut self, report: &TickReport) {
-        for event in &report.events {
-            match event {
-                Event::Meal { .. } => self.meals += 1,
-                Event::Birth { .. } => self.births += 1,
-                Event::Death { .. } => self.deaths += 1,
-                Event::Immigrant { .. } => self.immigrants += 1,
-            }
-        }
-    }
-
-    fn print(&self, run: &Run) {
-        let universe = run.universe().read();
-        let world = universe.world();
-        println!(
-            "tick={} animals={} plants={} meals={} births={} deaths={} immigrants={}",
-            universe.step(),
-            world.animals().len(),
-            world.plants().len(),
-            self.meals,
-            self.births,
-            self.deaths,
-            self.immigrants,
-        );
-    }
+fn print_progress(run: &Run) {
+    let universe = run.universe().read();
+    let world = universe.world();
+    println!(
+        "tick={} animals={} plants={}",
+        universe.step(),
+        world.animals().len(),
+        world.plants().len(),
+    );
 }
 
 fn print_trace(report: &TickReport) {
@@ -177,30 +152,32 @@ fn execute(mut cli: Cli) -> Result<()> {
     if cli.directory.is_some() {
         options = cli.load_config(None)?;
     }
-    let (mut run, mut counts) = match directory.load_latest()? {
+    let mut run = match directory.load_latest()? {
         Some(checkpoint) => {
             options = cli.load_config(Some(&checkpoint.config))?;
             ensure!(
-                options.ecosystem == checkpoint.config.ecosystem
+                options
+                    .ecosystem
+                    .same_initialization(&checkpoint.config.ecosystem)
                     && options.seed == checkpoint.config.seed,
-                "cannot change the seed or ecosystem settings of an existing run"
+                "cannot change the seed or ecosystem initialization of an existing run"
             );
-            let run = checkpoint.state.restore().context("restoring checkpoint")?;
+            let run = checkpoint
+                .state
+                .restore(options.ecosystem.clone())
+                .context("restoring checkpoint")?;
             eprintln!(
                 "resuming={} tick={}",
                 directory.path().display(),
                 run.universe().read().step()
             );
-            (run, checkpoint.counts)
+            run
         }
         None => {
             ensure!(!cli.latest, "selected run no longer contains a checkpoint");
             directory.check_new()?;
             options.seed = Some(options.resolved_seed()?);
-            (
-                Run::new(options.ecosystem, options.seed.unwrap())?,
-                Counts::default(),
-            )
+            Run::new(options.ecosystem.clone(), options.seed.unwrap())?
         }
     };
     let limits = options.loop_options()?;
@@ -209,6 +186,7 @@ fn execute(mut cli: Cli) -> Result<()> {
         .expect("new and restored runs have a resolved seed");
     // No configuration is overwritten until the checkpoint is decoded and validated.
     directory.save_config(&options)?;
+    let mut metrics = MetricsLog::new(directory.path(), options.ecosystem.metrics.enabled)?;
     eprintln!("run={}", directory.path().display());
     println!(
         "seed={} ticks={:?} interval={:?}",
@@ -231,39 +209,53 @@ fn execute(mut cli: Cli) -> Result<()> {
     let worker_exit = Arc::clone(&exit_requested);
     let thread = thread::spawn(move || {
         let options = worker_options;
-        counts.print(&run);
+        print_progress(&run);
         let mut last_report = Instant::now();
         let mut save_error = None;
+        let mut metrics_error = None;
         let stop = run.execute(limits, commands, |state, report| {
-            counts.record(report);
             if report.tick <= options.trace_ticks {
                 print_trace(report);
             }
             if last_report.elapsed() >= Duration::from_secs(2) {
-                counts.print(state);
+                print_progress(state);
                 last_report = Instant::now();
+            }
+            if let Some(metrics) = &mut metrics
+                && let Err(error) = metrics.record(state, false)
+            {
+                metrics_error = Some(error);
+                return true;
             }
             if options.checkpoint_every != 0
                 && report.tick.is_multiple_of(options.checkpoint_every)
-                && let Err(error) = directory.save(state, &options, &counts)
+                && let Err(error) = directory.save(state, &options)
             {
                 save_error = Some(error);
                 return true;
             }
             false
         });
-        counts.print(&run);
+        print_progress(&run);
         if let Ok(reason) = &stop {
             println!("stop={reason:?}");
         }
         let saved = match save_error {
             Some(error) => Err(error),
-            None => directory.save(&run, &options, &counts),
+            None => directory.save(&run, &options),
         };
-        if saved.is_err() || stop.is_err() {
+        let logged = match metrics_error {
+            Some(error) => Err(error),
+            None => match &mut metrics {
+                Some(metrics) => metrics.record(&run, true),
+                None => Ok(()),
+            },
+        };
+        if saved.is_err() || logged.is_err() || stop.is_err() {
             worker_exit.store(true, Ordering::Relaxed);
         }
         saved?;
+        logged?;
         stop
     });
     let worker = Worker {

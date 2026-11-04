@@ -1,22 +1,45 @@
 //! Scalar 3–4–3 recurrent network with a fixed topology and evolved parameters.
 
 mod genome;
+mod metrics;
 mod weights;
 
 pub use genome::{RnnGenome, WeightMutation};
+pub use metrics::{GenomeStatistics, GenomeSummary, MetricsConfig, Statistics, Summary};
 
 use std::array;
 
 use anyhow::{Result, ensure};
 
 use super::Mind;
-use crate::context::Context;
+use crate::{context::Context, metrics::Metrics};
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Config {
+    pub metrics: MetricsConfig,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rnn {
     pub genome: RnnGenome,
     pub memory: [f32; 4],
+    #[serde(skip)]
+    metrics: Summary,
+}
+
+// Observation caches do not participate in simulation-state equality.
+impl PartialEq for Rnn {
+    fn eq(&self, other: &Self) -> bool {
+        self.genome == other.genome && self.memory == other.memory
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Update {
+    pub memory: [f32; 4],
+    metrics: Summary,
 }
 
 impl Rnn {
@@ -24,6 +47,7 @@ impl Rnn {
         Self {
             genome,
             memory: [0.0; 4],
+            metrics: Summary::default(),
         }
     }
 }
@@ -57,9 +81,15 @@ fn matrix_vector<const IN: usize, const OUT: usize>(
 impl<C: Context + ?Sized> Mind<C> for Rnn {
     type Input = [f32; 3];
     type Output = [f32; 3];
-    type Update = [f32; 4];
+    type Update = Update;
+    type Config = Config;
 
-    fn prepare(&self, _cx: &mut C, input: Self::Input) -> Result<(Self::Output, Self::Update)> {
+    fn compute_update(
+        &self,
+        input: Self::Input,
+        config: &Config,
+        _cx: &mut C,
+    ) -> Result<(Self::Output, Update)> {
         <Self as Mind<C>>::validate(self)?;
         let weights = &self.genome.weights;
         let sensed: [f32; 4] = matrix_vector(&weights[..12], &input);
@@ -77,11 +107,13 @@ impl<C: Context + ?Sized> Mind<C> for Rnn {
             *value += bias;
         }
 
-        Ok((output, memory))
+        let metrics = Summary::from_memory(&memory, &config.metrics);
+        Ok((output, Update { memory, metrics }))
     }
 
-    fn apply(&mut self, memory: Self::Update) {
-        self.memory = memory;
+    fn apply_update(&mut self, update: Update) {
+        self.memory = update.memory;
+        self.metrics = update.metrics;
     }
 
     fn validate(&self) -> Result<()> {
@@ -94,6 +126,14 @@ impl<C: Context + ?Sized> Mind<C> for Rnn {
             "non-finite recurrent memory"
         );
         Ok(())
+    }
+}
+
+impl Metrics for Rnn {
+    type Summary = Summary;
+
+    fn collect_metrics(&self, summary: &mut Summary) {
+        summary.merge(&self.metrics);
     }
 }
 

@@ -35,30 +35,40 @@ impl<U: fmt::Debug> fmt::Debug for UniverseView<U> {
 
 /// The sole writer applies complete updates; observers only receive readers.
 #[derive(Debug)]
-pub struct Run<S = Ecosystem> {
+pub struct Run<S: Simulation = Ecosystem> {
     universe: UniverseView<Universe<S>>,
+    config: S::Config,
 }
 
-impl<S> Run<S> {
+impl<S: Simulation> Run<S> {
     pub fn universe(&self) -> &UniverseView<Universe<S>> {
         &self.universe
     }
 
-    pub fn from_universe(universe: Universe<S>) -> Self {
+    pub fn config(&self) -> &S::Config {
+        &self.config
+    }
+
+    pub fn from_universe(universe: Universe<S>, config: S::Config) -> Self {
         Self {
             universe: UniverseView(Arc::new(RwLock::new(universe))),
+            config,
         }
     }
 }
 
 /// Cloning a run makes an independent simulation, unlike cloning its view.
-impl<S: Clone> Clone for Run<S> {
+impl<S: Simulation + Clone> Clone for Run<S>
+where
+    S::Config: Clone,
+{
     fn clone(&self) -> Self {
-        Self::from_universe(self.universe.read().clone())
+        Self::from_universe(self.universe.read().clone(), self.config.clone())
     }
 }
 
-impl<S: PartialEq> PartialEq for Run<S> {
+// Compare canonical simulation state, excluding execution config and metric caches.
+impl<S: Simulation + PartialEq> PartialEq for Run<S> {
     fn eq(&self, other: &Self) -> bool {
         *self.universe.read() == *other.universe.read()
     }
@@ -66,7 +76,10 @@ impl<S: PartialEq> PartialEq for Run<S> {
 
 impl Run {
     pub fn new(config: Config, seed: u64) -> Result<Self> {
-        Ok(Self::from_universe(Universe::new(config, seed)?))
+        Ok(Self::from_universe(
+            Universe::new(config.clone(), seed)?,
+            config,
+        ))
     }
 }
 
@@ -197,15 +210,14 @@ where
     S: Simulation,
 {
     pub fn tick(&mut self) -> Result<S::Report> {
-        // Keep the read lock for preparation: viewers may read the old complete
+        // Keep the read lock for computation: viewers may read the old complete
         // state concurrently. Drop it before acquiring the publication lock.
-        let update = self.universe.read().prepare_step()?;
-        let report = self
-            .universe
+        let (report, update) = self.universe.read().compute_update(&self.config)?;
+        self.universe
             .0
             .write()
             .expect("universe publication panicked")
-            .apply_step(update);
+            .apply_update(update);
         Ok(report)
     }
 

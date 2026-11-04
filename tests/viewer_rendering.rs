@@ -116,16 +116,9 @@ fn entities_collect_owned_geometry_without_mind_traits() {
     let library = Library::new(&graphics);
     let mut drawing = Drawing::new(&library);
     {
-        let plant = Plant {
-            id: 1,
-            position: DVec2::new(-0.5, 0.0),
-            energy: 0.04,
-        };
+        let plant = Plant::new(1, DVec2::new(-0.5, 0.0), 0.04);
         let animal = Animal {
-            body: Body {
-                position: DVec2::new(0.5, 0.0),
-                energy: 0.16,
-            },
+            body: Body::new(DVec2::new(0.5, 0.0), 0.16),
             mind: UnrelatedMind,
         };
         plant.draw(&mut drawing);
@@ -151,15 +144,8 @@ fn entities_collect_owned_geometry_without_mind_traits() {
 fn overlapping_circles_hide_borders_inside_their_fills() {
     let graphics = graphics();
     let library = Library::new(&graphics);
-    let plant = |x| Plant {
-        id: 1,
-        position: DVec2::new(x, 0.0),
-        energy: 1.0,
-    };
-    let body = |x| Body {
-        position: DVec2::new(x, 0.0),
-        energy: 1.0,
-    };
+    let plant = |x| Plant::new(1, DVec2::new(x, 0.0), 1.0);
+    let body = |x| Body::new(DVec2::new(x, 0.0), 1.0);
     let green = [51, 189, 82, 255];
     let yellow = [255, 217, 64, 255];
     let cases: [(&dyn Draw, &dyn Draw, _, _); 3] = [
@@ -203,14 +189,15 @@ struct Marker {
 }
 
 impl Simulation for Marker {
+    type Config = ();
     type Update = f32;
     type Report = ();
 
-    fn prepare_step(&self, _: u64) -> anyhow::Result<(f32, ())> {
-        Ok((self.x + 1.0, ()))
+    fn compute_update(&self, _: u64, _: &()) -> anyhow::Result<((), f32)> {
+        Ok(((), self.x + 1.0))
     }
 
-    fn apply_step(&mut self, x: f32) {
+    fn apply_update(&mut self, x: f32) {
         self.x = x;
     }
 }
@@ -239,7 +226,7 @@ impl Draw for Marker {
 fn a_second_world_can_advance_while_its_previous_drawing_is_rendered() {
     let graphics = graphics();
     let library = Library::new(&graphics);
-    let mut run = Run::from_universe(Universe::from_world(Marker { x: 10.5 }).unwrap());
+    let mut run = Run::from_universe(Universe::from_world(Marker { x: 10.5 }).unwrap(), ());
     let state = run.universe().clone();
     let mut drawing = Drawing::new(&library);
     state.read().draw(&mut drawing);
@@ -274,9 +261,12 @@ fn a_second_world_can_advance_while_its_previous_drawing_is_rendered() {
 fn ecosystem_drawing_preserves_complete_state_and_same_tick_labels() {
     let graphics = graphics();
     let library = Library::new(&graphics);
-    for config in [support::ecosystem("debug"), support::ecosystem("baseline")] {
+    for config in [
+        support::ecosystem::<nevo::ecosystem::Config>("debug"),
+        support::ecosystem::<nevo::ecosystem::Config>("baseline"),
+    ] {
         for seed in [1, 42] {
-            let mut universe = Universe::new(config, seed).unwrap();
+            let mut universe = Universe::new(config.clone(), seed).unwrap();
             for tick in 0..3 {
                 let before = universe.clone();
                 let mut drawing = Drawing::new(&library);
@@ -297,7 +287,7 @@ fn ecosystem_drawing_preserves_complete_state_and_same_tick_labels() {
                     universe, before,
                     "drawing changed model state or consumed randomness"
                 );
-                universe.advance().unwrap();
+                universe.advance(&config).unwrap();
             }
         }
     }

@@ -11,6 +11,7 @@ pub struct EcosystemUpdate<M, U> {
     next_plant: u64,
     animals: BTreeMap<AnimalId, Animal<Body, PreparedMind<M, U>>>,
     plants: Vec<Plant>,
+    metrics: metrics::Cache,
 }
 
 enum PreparedMind<M, U> {
@@ -29,7 +30,7 @@ where
                 PreparedMind::Existing(update) => {
                     let animal = world.animals.get_mut(&id).expect("prepared animal exists");
                     animal.body = body;
-                    animal.mind.apply(update);
+                    animal.mind.apply_update(update);
                 }
                 PreparedMind::New(mind) => {
                     world.animals.insert(id, Animal { body, mind: *mind });
@@ -41,6 +42,7 @@ where
         world.next_animal = self.next_animal;
         world.next_plant = self.next_plant;
         world.plants = self.plants;
+        world.metrics = self.metrics;
     }
 }
 
@@ -51,10 +53,16 @@ where
     G: RandomInit<GeneticContext> + Mutate<GeneticContext, P>,
     P: Clone,
 {
-    pub(super) fn prepare_update(
+    pub(super) fn compute_tick(
         &self,
         tick: u64,
-    ) -> Result<(EcosystemUpdate<M, M::Update>, TickReport)> {
+        config: &Config<M::Config>,
+    ) -> Result<(TickReport, EcosystemUpdate<M, M::Update>)> {
+        ensure!(
+            !config.metrics.enabled || config.metrics.window_ticks > 0,
+            "metrics window_ticks must be positive"
+        );
+        let (metrics, reset_metrics) = self.metrics.begin(tick, config);
         let mut update = EcosystemUpdate {
             rng: self.rng.clone(),
             context: self.context.clone(),
@@ -62,6 +70,7 @@ where
             next_plant: self.next_plant,
             animals: BTreeMap::new(),
             plants: self.plants.clone(),
+            metrics,
         };
         let mut actions = Vec::with_capacity(self.animals.len());
         for (&id, animal) in &self.animals {
@@ -69,16 +78,22 @@ where
                 continue;
             }
             let observation = self.sense(animal.body.position);
-            let (action, mind) = animal.mind.prepare(&mut update.context, observation)?;
+            let (action, mind) = animal.mind.compute_update(
+                observation,
+                &config.animal.mind,
+                &mut update.context,
+            )?;
             ensure!(
                 action.direction.is_finite() && action.speed_fraction.is_finite(),
                 "non-finite movement action"
             );
             actions.push((id, observation, action));
+            let mut body = animal.body.clone();
+            body.metrics.configure(config, reset_metrics);
             update.animals.insert(
                 id,
                 Animal {
-                    body: animal.body.clone(),
+                    body,
                     mind: PreparedMind::Existing(mind),
                 },
             );
@@ -99,6 +114,12 @@ where
                 position_before: body.position,
                 position_after: position,
             });
+            let distance = if body.metrics.animal.distance.enabled() {
+                body.position.distance(position)
+            } else {
+                0.0
+            };
+            body.metrics.observe_action(distance);
             body.position = position;
         }
 
@@ -111,6 +132,9 @@ where
                 if distance < 0.8 * (body.radius() + plant.radius()) {
                     let gain = plant.energy * 0.1;
                     body.energy += gain;
+                    if body.metrics.animal.food_gained.enabled() {
+                        body.metrics.food_gained += gain;
+                    }
                     events.push(Event::Meal {
                         id,
                         plant: plant.id,
@@ -125,6 +149,13 @@ where
         for (&id, animal) in &self.animals {
             if animal.body.energy < 0.0 {
                 events.push(Event::Death { id });
+                if update.metrics.observed_survival.enabled() {
+                    update.metrics.observed_survival.push(if reset_metrics {
+                        0.0
+                    } else {
+                        animal.body.metrics.active_ticks as f64
+                    });
+                }
             }
         }
         while update.plants.len() < self.plant_target {
@@ -133,12 +164,13 @@ where
         }
         let count = self.minimum_population.saturating_sub(update.animals.len());
         for _ in 0..count {
-            let Animal { body, mind } = Self::immigrant(
+            let Animal { mut body, mind } = Self::immigrant(
                 self.immigrant_genome.as_ref(),
                 Admission::default(),
                 &mut update.rng,
                 &mut update.context,
             )?;
+            body.metrics.configure(config, true);
             let id = allocate_animal(&mut update.next_animal)?;
             update.animals.insert(
                 id,
@@ -158,6 +190,9 @@ where
         while let Some(parent) = parents.pop_front() {
             let animal = update.animals.get_mut(&parent).expect("parent exists");
             let body = &mut animal.body;
+            if body.metrics.animal.offspring.enabled() {
+                body.metrics.offspring += 1;
+            }
             body.energy *= 0.5;
             let energy = body.energy;
             let direction = DVec2::new(
@@ -177,13 +212,12 @@ where
             genome.mutate(&self.mutation, &mut update.context)?;
             let mind = Self::develop(genome)?;
             let child = allocate_animal(&mut update.next_animal)?;
+            let mut body = Body::new(child_position, energy);
+            body.metrics.configure(config, true);
             update.animals.insert(
                 child,
                 Animal {
-                    body: Body {
-                        position: child_position,
-                        energy,
-                    },
+                    body,
                     mind: PreparedMind::New(Box::new(mind)),
                 },
             );
@@ -201,6 +235,11 @@ where
             validate_body(body)?;
         }
         for plant in &mut update.plants {
+            plant.metrics.energy = if config.metrics.enabled {
+                config.plant.metrics.energy
+            } else {
+                Default::default()
+            };
             plant.energy = (plant.energy + 1.0).min(RIPE_ENERGY);
             plant.position = clamp_position(plant.position, plant.radius());
         }
@@ -214,13 +253,12 @@ where
             "invalid next ID"
         );
         validate_plants(&update.plants, self.plant_target, update.next_plant)?;
-        Ok((
-            update,
-            TickReport {
-                tick,
-                events,
-                decisions,
-            },
-        ))
+        let report = TickReport {
+            tick,
+            events,
+            decisions,
+        };
+        update.metrics.observe(&report);
+        Ok((report, update))
     }
 }

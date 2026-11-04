@@ -68,6 +68,10 @@ including Ctrl-C; their interval and retention count
 are configurable. `--ticks N` always means N additional ticks for that invocation.
 See [persistence options, format, and recovery](docs/persistence.md).
 
+Layer `--config configs/metrics.toml` to collect population, behavior, brain, and
+genetic statistics. Finalized windows go to `metrics/*.jsonl` inside the run directory;
+accumulators reset on resume. See [metrics and aggregation](docs/metrics.md).
+
 Build with `--no-default-features` when graphics are unnecessary; the executable
 and runner stay the same. Add `--config configs/smoke.toml` to verify twelve
 displayed snapshots and pause/step/pacing controls against a seeded reference run.
@@ -84,7 +88,8 @@ Multi-file modules use `mod.rs` inside their directory.
 | [context](src/context/mod.rs) | Execution context contract and CPU implementation. |
 | [ecosystem](src/ecosystem/mod.rs) | Plants and complete animals with body and mind; foraging, reproduction, and immigration rules. |
 | [universe](src/universe/mod.rs) | Complete serializable state and the small Simulation stepping contract. |
-| [run](src/run/mod.rs) | Shared read/prepare/write loop and controls. |
+| [run](src/run/mod.rs) | Shared read/compute/write loop and controls. |
+| [metrics](src/metrics/mod.rs) | Typed collection and selected, mergeable reductions. |
 | [viewer](src/viewer/mod.rs) | Optional Draw contract, wgame scenes, and generic window controls. |
 | [app](src/app/mod.rs) | CLI configuration, run storage, worker and viewer startup. |
 
@@ -94,7 +99,7 @@ The concrete experiment is `ecosystem::Ecosystem`. Each animal owns its `body` a
 both bounded and unlimited runs use `run::Run`. Initialization and later immigration
 share one admission path. Minds receive typed observations and return actions;
 there is no separate environment–actor storage or lifecycle synchronization.
-Each tick prepares component updates under a read lock and applies them under a
+Each tick computes component updates under a read lock and applies them under a
 write lock, without cloning the Universe or existing minds.
 See [simulation contracts](docs/simulation.md) for the implemented boundaries.
 
@@ -121,7 +126,8 @@ conclusions in [history](docs/history/README.md). Run configurations live in
   sensing as smell, with modality ablations.
 - Begin with the minimum evolutionary degrees of freedom needed to demonstrate
   adaptation. The first baseline evolves weights and biases with fixed topology.
-- Follow the [planned statistics and resume policy](docs/simulation.md#planned-statistics).
+- Use [windowed statistics](docs/metrics.md) to study behavior and evolution;
+  establish adaptation through controlled comparisons, not population survival alone.
 - Record concise conclusions from major research milestones in [history](docs/history/README.md).
 
 ## Proposed design

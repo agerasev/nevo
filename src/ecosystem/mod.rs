@@ -1,12 +1,19 @@
 //! The foraging experiment: physical bodies and their minds share one lifetime.
 
 mod config;
+mod metrics;
 mod update;
 
 #[cfg(feature = "viewer")]
 mod draw;
 
-pub use config::{Config, Placement};
+pub use config::{
+    AnimalConfig, AnimalMetricsConfig, BodyConfig, BodyMetricsConfig, Config, MetricsConfig,
+    Placement, PlantConfig, PlantMetricsConfig,
+};
+pub use metrics::{
+    AnimalSummary, BodySummary, EventSummary, PlantSummary, PopulationSummary, Summary, Window,
+};
 pub use update::EcosystemUpdate;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -71,26 +78,45 @@ impl MoveAction {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Plant {
     pub id: u64,
     pub position: DVec2,
     pub energy: f64,
+    #[serde(skip)]
+    metrics: metrics::PlantCache,
 }
 impl Plant {
+    pub fn new(id: u64, position: DVec2, energy: f64) -> Self {
+        Self {
+            id,
+            position,
+            energy,
+            metrics: Default::default(),
+        }
+    }
     pub fn radius(&self) -> f64 {
         radius(self.energy)
     }
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Body {
     pub position: DVec2,
     pub energy: f64,
+    #[serde(skip)]
+    metrics: metrics::BodyCache,
 }
 impl Body {
+    pub fn new(position: DVec2, energy: f64) -> Self {
+        Self {
+            position,
+            energy,
+            metrics: Default::default(),
+        }
+    }
     pub fn radius(&self) -> f64 {
         radius(self.energy)
     }
@@ -177,11 +203,7 @@ fn add_plant(
     let next = next_plant
         .checked_add(1)
         .ok_or_else(|| anyhow::anyhow!("plant ID allocator exhausted"))?;
-    plants.push(Plant {
-        id: *next_plant,
-        position,
-        energy,
-    });
+    plants.push(Plant::new(*next_plant, position, energy));
     *next_plant = next;
     Ok(())
 }
@@ -218,7 +240,7 @@ fn validate_plants(plants: &[Plant], target: usize, next_plant: u64) -> Result<(
 
 /// Foraging with genetic minds whose inherited `AsRef<G>` genome stays unchanged
 /// during inference; memory and other learned state belong to `Mind::Update`.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Ecosystem<M = AnimalMind, G = RnnGenome, P = WeightMutation> {
     rng: Xoshiro256PlusPlus,
@@ -231,6 +253,8 @@ pub struct Ecosystem<M = AnimalMind, G = RnnGenome, P = WeightMutation> {
     minimum_population: usize,
     immigrant_genome: Option<G>,
     mutation: P,
+    #[serde(skip)]
+    metrics: metrics::Cache,
 }
 
 impl Ecosystem {
@@ -261,6 +285,7 @@ impl<M, G, P> Ecosystem<M, G, P> {
             minimum_population,
             immigrant_genome,
             mutation,
+            metrics: Default::default(),
         }
     }
 
@@ -334,7 +359,7 @@ where
     P: Clone,
 {
     pub fn with_genetics(
-        config: Config,
+        config: Config<M::Config>,
         seed: u64,
         immigrant_genome: Option<G>,
         mutation: P,
@@ -393,10 +418,7 @@ where
             None => G::random(context)?,
         };
         Ok(Animal {
-            body: Body {
-                position,
-                energy: admission.energy,
-            },
+            body: Body::new(position, admission.energy),
             mind: Self::develop(genome)?,
         })
     }
@@ -415,14 +437,19 @@ where
     G: RandomInit<GeneticContext> + Mutate<GeneticContext, P>,
     P: Clone,
 {
+    type Config = Config<M::Config>;
     type Report = TickReport;
     type Update = EcosystemUpdate<M, M::Update>;
 
-    fn prepare_step(&self, tick: u64) -> Result<(Self::Update, TickReport)> {
-        self.prepare_update(tick)
+    fn compute_update(
+        &self,
+        tick: u64,
+        config: &Self::Config,
+    ) -> Result<(TickReport, Self::Update)> {
+        self.compute_tick(tick, config)
     }
 
-    fn apply_step(&mut self, update: Self::Update) {
+    fn apply_update(&mut self, update: Self::Update) {
         update.apply(self);
     }
 
@@ -450,3 +477,28 @@ where
 
 #[cfg(test)]
 mod tests;
+
+impl PartialEq for Body {
+    fn eq(&self, other: &Self) -> bool {
+        self.position == other.position && self.energy == other.energy
+    }
+}
+impl PartialEq for Plant {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.position == other.position && self.energy == other.energy
+    }
+}
+impl<M: PartialEq, G: PartialEq, P: PartialEq> PartialEq for Ecosystem<M, G, P> {
+    fn eq(&self, other: &Self) -> bool {
+        self.rng == other.rng
+            && self.context == other.context
+            && self.next_animal == other.next_animal
+            && self.next_plant == other.next_plant
+            && self.animals == other.animals
+            && self.plants == other.plants
+            && self.plant_target == other.plant_target
+            && self.minimum_population == other.minimum_population
+            && self.immigrant_genome == other.immigrant_genome
+            && self.mutation == other.mutation
+    }
+}

@@ -33,9 +33,9 @@ error; it never silently starts fresh or falls back to another run.
 entropy seed. Ordered `--config PATH` files override individual settings, then CLI
 values override the files. See [configuration precedence](configuration.md).
 If `config.toml` is missing, the checkpoint's embedded configuration is recovered.
-Resume rejects changed seeds or ecosystem settings. Runtime settings such as pacing,
-viewer attachment, tracing, and save policy can change. A tick budget always applies to
-the current invocation: a saved budget of 256 means another 256 ticks on bare
+Resume rejects changed seeds or ecosystem initialization settings. Runtime settings
+such as pacing, viewer attachment, tracing, save policy, and metrics can change.
+A tick budget always applies to the current invocation: a saved budget of 256 means another 256 ticks on bare
 resume. Remove `ticks` from `config.toml` for an unlimited continuation.
 
 Checkpoint policy belongs in config files. For example, load this with `--config PATH`
@@ -55,7 +55,7 @@ The worker also saves when its budget ends, the viewer closes, or a stop signal
 arrives (Ctrl-C; also SIGTERM/SIGHUP on Unix). Saving the same tick replaces that
 checkpoint. A zero-tick invocation still saves. There is no automatic initial
 checkpoint; if interrupted before its first save, a directory with only a config
-reinitializes from that saved seed.
+and optional metrics logs reinitializes from that saved seed. Existing logs remain.
 
 ## Layout and consistency
 
@@ -63,14 +63,15 @@ reinitializes from that saved seed.
 runs/baseline/
   config.toml
   .lock
+  metrics/                 # when enabled; a new JSONL file per invocation
   checkpoints/
     00000000000000000100.cbor
     00000000000000000200.cbor
     00000000000000000256.cbor
 ```
 
-Each checkpoint is one CBOR file containing the effective configuration, cumulative
-event counts, model identifiers, and the directly serialized
+Each checkpoint is one CBOR file containing the effective configuration,
+model identifiers, and the directly serialized
 [Universe](../src/universe/mod.rs): step and complete experiment model. The ecosystem
 owns ordered plants and animals (each with body and mind), both RNG states, genomes,
 recurrent memories, the immigrant genome template, mutation parameters, population
@@ -80,11 +81,12 @@ the remaining experiment state. Native CBOR arrays hold weights;
 no safetensors payload is used.
 
 Locks, channels, pacing clocks, and viewer/device resources live outside Universe.
-Reconstructible caches may be omitted from serialization; recurrent memory and RNG
-positions are required state. Core simulation and genetics contracts have no
-persistence bounds.
+Metric caches are omitted from serialization and start fresh after loading;
+recurrent memory and RNG positions are required state. Finalized statistics remain
+in separate [JSONL logs](metrics.md), which are never replayed into checkpoints.
+Core simulation and genetics contracts have no persistence bounds.
 
-The current format is checkpoint version 6, with `foraging-sense-first-v1` and
+The current format is checkpoint version 7, with `foraging-sense-first-v1` and
 `animal-rnn-3-4-3-v1` model identifiers. Only this format is accepted;
 compatibility and migrations are intentionally unsupported. Rust module/type names
 are not part of the format.

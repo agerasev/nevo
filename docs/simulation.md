@@ -8,13 +8,14 @@ serializes directly to CBOR; locks and the viewer live outside it.
 
 | Contract or type | Responsibility |
 | --- | --- |
-| [Simulation](../src/universe/mod.rs) | Prepare an owned update, apply it, and validate an experiment, without prescribing its entities or sensing. |
+| [Simulation](../src/universe/mod.rs) | Compute an owned update, apply it, and validate an experiment, without prescribing its entities or sensing. |
 | [Ecosystem](../src/ecosystem/mod.rs) | The foraging model: plants, complete animals, perception, physics, population support, and random streams. |
 | `Animal<B, M>` | Own a body and its mind together: `body: B`, `mind: M`. |
-| [Mind](../src/mind/mod.rs) | Prepare typed output and a state update from input; apply the update and validate mind state. |
+| [Mind](../src/mind/mod.rs) | Compute typed output and a state update from input; apply the update and validate mind state. |
 | [Genome / Mutate](../src/genome/mod.rs) | Clone inherited representations and mutate them using an execution context. |
 | [RandomInit](../src/genome/mod.rs) | Initialize a value from the context RNG, independently of Genome. |
 | [Context](../src/context/mod.rs) | Supply RNG and execution resources; the CPU context owns the genetic RNG. |
+| [Metrics / Aggregate](metrics.md) | Collect typed component summaries and reduce scalar observations. |
 
 `Ecosystem<M, G, P>` can use another compatible mind, genome, and mutation parameter
 type. Genetic minds expose their genome through `AsRef<G>` and construct fresh minds
@@ -42,7 +43,7 @@ Immigration clones the optional genome template or calls `RandomInit::random`, t
 constructs a fresh mind. Reproduction clones the parent's genome, calls `Mutate` with
 the experiment's stored parameters, and constructs the offspring's mind. There is no
 separate inheritance-policy object. Both paths propagate initialization, mutation,
-and conversion errors through Universe preparation.
+and conversion errors through Universe computation.
 
 For the baseline, random genomes draw 47 weights in [-0.5, 0.5). Default mutation
 adds independent noise in [-0.02, 0.02), and new brains start with zero recurrent
@@ -53,25 +54,36 @@ genetic random draws.
 
 ## A complete step
 
-The [runner](../src/run/mod.rs) holds a Universe read lock while `prepare_step`
+The [runner](../src/run/mod.rs) holds a Universe read lock while `compute_update`
 computes an owned update. It releases that lock, then installs the update and step
 counter under a write lock. Other readers can inspect the previous complete state
 during computation. The runner is the sole writer; `UniverseView` exposes only reads.
 
-`Simulation::Update` and `Mind::Update` describe their component's changes.
-Preparation performs all fallible work, validates the proposed state, and uses
+`Simulation` and `Mind` remain separate contracts with consistent method names.
+`compute_update(input, &config, context)` returns `(output, update)`; Simulation
+uses the tick as input and owns its execution context internally. `apply_update`
+consumes the update. `Simulation::Report` and `Mind::Output` are observations of the
+computation; their `Update` types contain changes to commit.
+
+Each contract has an associated `Config`. Run owns the experiment configuration;
+Universe and the experiment borrow it during computation. The ecosystem passes
+`config.animal.mind` to each mind, and the food adapter passes its `brain` subtree
+to the brain. Configuration follows component ownership without a per-entity map.
+Direct `Universe::advance(&config)` and `Universe::restore(config)` take it explicitly.
+
+Computation performs all fallible work, validates the proposed state, and uses
 private RNG copies. Failure or a discarded update leaves published state unchanged.
 Application consumes a successful update on its unchanged source state; it cannot
-fail, draw randomness, or run further model computation. Preparation must not change
+fail, draw randomness, or run further model computation. Computation must not change
 simulation state through interior mutability. Stepping requires no `Clone` bound on
 the model or mind.
 
 The ecosystem works on body and plant copies to preserve sequential feeding and
 birth rules. Its update carries final physical state, mind updates, new animals,
 deaths, RNG positions, and ID counters. Existing minds and genomes stay in place:
-the RNN prepares only four recurrent values, and reproduction copies a genome only
-for the child. Immutable experiment parameters are borrowed during preparation.
-Updates are transient; the serialized Universe layout is unchanged.
+the RNN computes recurrent memory and optional diagnostics, and reproduction copies
+a genome only for the child. Immutable experiment parameters are borrowed during computation.
+Updates are transient; metric caches are omitted from the serialized Universe.
 
 Cloning a Run still creates an independent simulation; cloning its view attaches a
 reader. Persistence copies complete state; viewing collects drawing instances.
@@ -116,24 +128,8 @@ run and checks pause/step/pacing commands.
 [Viewer contract](viewer.md) · [Locking and failure checks](../src/run/tests.rs) ·
 [Continuation checks](../tests/simulation_runs.rs) · [Persistence](persistence.md)
 
-## Planned statistics
+## Statistics
 
-The generic metrics system is not implemented yet. Existing checkpoint event counts
-are described in [persistence](persistence.md).
-
-The proposed design uses separate metrics and aggregation contracts, typed caches
-owned by their components, and component-first configuration such as
-`ecosystem.animal.metrics`. Computation borrows the relevant configuration section;
-metric changes are applied with the component update. Keep Mind and Simulation
-separate, with consistent `compute_update` / `apply_update` naming and
-`(output, update)` results.
-
-**Agreed resume policy:** statistics accumulators are excluded from checkpoints
-and start a fresh observation window at the restored tick. Collect recent statistics
-over short, configurable tick windows, filled from new observations. Report actual
-window bounds and sample counts, mark incomplete windows, and normalize rates by
-the observed exposure. Empty mean/min/max are unavailable; observed event counts
-can legitimately be zero.
-Reset historical measurements describe the observed window or period since resume,
-not the animal's full lifetime or the entire run. No statistics-history recovery
-or replay is required.
+Independent [Metrics and Aggregate contracts](metrics.md) compose typed summaries.
+Components own optional caches, computed with their updates and omitted from CBOR.
+Windows restart after resume; metrics never change simulation rules or random draws.

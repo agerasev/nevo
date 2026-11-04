@@ -6,7 +6,7 @@ use nevo::{
     genome::{Mutate, RandomInit},
     mind::{
         Mind,
-        animal::AnimalMind,
+        animal::{AnimalMind, Config},
         rnn::{RnnGenome, WeightMutation},
     },
 };
@@ -21,13 +21,19 @@ fn animal_accepts_another_mind_and_propagates_its_errors() {
         type Input = [f32; 3];
         type Output = [f32; 3];
         type Update = ();
+        type Config = ();
 
-        fn prepare(&self, _: &mut C, input: Self::Input) -> Result<(Self::Output, ())> {
+        fn compute_update(
+            &self,
+            input: Self::Input,
+            _: &(),
+            _: &mut C,
+        ) -> Result<(Self::Output, ())> {
             anyhow::ensure!(input.iter().all(|v| v.is_finite()), "invalid signal");
             Ok((input, ()))
         }
 
-        fn apply(&mut self, _: ()) {}
+        fn apply_update(&mut self, _: ()) {}
     }
 
     let mut cx = Cpu {
@@ -36,11 +42,12 @@ fn animal_accepts_another_mind_and_propagates_its_errors() {
     let mut agent = AnimalMind::from_brain(EchoMind);
     let action = agent
         .process(
-            &mut cx,
             FoodObservation {
                 gradient: DVec2::new(0.25, -0.5),
                 strength: -1.0,
             },
+            &Config::default(),
+            &mut cx,
         )
         .unwrap();
     assert_eq!(action.direction, DVec2::new(0.25, -0.5));
@@ -48,11 +55,12 @@ fn animal_accepts_another_mind_and_propagates_its_errors() {
     assert_eq!(
         agent
             .process(
-                &mut cx,
                 FoodObservation {
                     strength: f64::NAN,
                     ..FoodObservation::default()
                 },
+                &Config::default(),
+                &mut cx,
             )
             .unwrap_err()
             .to_string(),
@@ -109,7 +117,9 @@ fn mind_and_genome_accept_an_alternate_unsized_context() {
 
     let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
         &mut context;
-    let action = agent.process(cx, FoodObservation::default()).unwrap();
+    let action = agent
+        .process(FoodObservation::default(), &Config::default(), cx)
+        .unwrap();
     assert_eq!(action.direction, DVec2::X * f64::from(0.5_f32.tanh()));
     assert_eq!(action.speed_fraction, 1.0_f64.tanh());
     assert_ne!(agent.brain.memory, [0.0; 4]);

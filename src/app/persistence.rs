@@ -11,9 +11,9 @@ use anyhow::{Context, Result, bail, ensure};
 use nevo::{run::Run, universe::Universe};
 use serde::{Deserialize, Serialize};
 
-use super::{Counts, config::Config};
+use super::config::Config;
 
-const FORMAT_VERSION: u32 = 6;
+const FORMAT_VERSION: u32 = 7;
 const WORLD_MODEL: &str = "foraging-sense-first-v1";
 const AGENT_MODEL: &str = "animal-rnn-3-4-3-v1";
 
@@ -24,7 +24,6 @@ pub struct Checkpoint {
     world_model: String,
     agent_model: String,
     pub config: Config,
-    pub counts: Counts,
     pub state: Universe,
 }
 
@@ -141,7 +140,7 @@ impl RunDirectory {
         })
     }
 
-    pub fn save(&self, run: &Run, options: &Config, counts: &Counts) -> Result<()> {
+    pub fn save(&self, run: &Run, options: &Config) -> Result<()> {
         ensure!(
             options.keep_checkpoints > 0,
             "keep-checkpoints must be positive"
@@ -151,7 +150,6 @@ impl RunDirectory {
             world_model: WORLD_MODEL.into(),
             agent_model: AGENT_MODEL.into(),
             config: options.clone(),
-            counts: counts.clone(),
             state: run.universe().read().clone(),
         };
         let tick = checkpoint.state.step();
@@ -180,7 +178,7 @@ impl RunDirectory {
             let entry = entry?;
             if !matches!(
                 entry.file_name().to_str(),
-                Some(".lock" | "checkpoints" | "config.toml" | ".config.toml.tmp")
+                Some(".lock" | "checkpoints" | "config.toml" | ".config.toml.tmp" | "metrics")
             ) {
                 bail!(
                     "run directory contains an unrecognized file: {}",
@@ -345,7 +343,6 @@ mod tests {
                 seed: Some(1),
                 ..Config::default()
             },
-            counts: Counts::default(),
             state: Universe::new(nevo::ecosystem::Config::default(), 1).unwrap(),
         };
         for (name, invalid) in [
@@ -378,13 +375,13 @@ mod tests {
             ..Config::default()
         };
         let mut run = Run::new(nevo::ecosystem::Config::default(), 1).unwrap();
-        directory.save(&run, &options, &Counts::default()).unwrap();
+        directory.save(&run, &options).unwrap();
         let previous = path.join("checkpoints/00000000000000000000.cbor");
         let bytes = fs::read(&previous).unwrap();
         run.tick().unwrap();
         let blocked = path.join("checkpoints/00000000000000000001.cbor");
         fs::create_dir(&blocked).unwrap();
-        assert!(directory.save(&run, &options, &Counts::default()).is_err());
+        assert!(directory.save(&run, &options).is_err());
         assert_eq!(fs::read(previous).unwrap(), bytes);
         assert!(
             !path

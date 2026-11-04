@@ -19,7 +19,9 @@ fn genome_conversion_creates_a_fresh_mind_without_cloning_memory() {
     };
     let mut reference_cx = cx.clone();
     let mut parent = AnimalMind::from(genome.clone());
-    parent.process(&mut cx, FoodObservation::default()).unwrap();
+    parent
+        .process(FoodObservation::default(), &Config::default(), &mut cx)
+        .unwrap();
     assert_eq!(
         cx, reference_cx,
         "construction and inference consume no draws"

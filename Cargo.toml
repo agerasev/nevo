@@ -17,6 +17,7 @@ anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
 toml = "1.1.8"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.154"
 ciborium = "0.2.2"
 ctrlc = { version = "3.5.2", features = ["termination"] }
 jiff = "0.2.37"

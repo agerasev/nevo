@@ -1,4 +1,4 @@
-//! Parameters for initializing the ecosystem; presets live in `configs/`.
+//! Initialization and component metrics settings; presets live in `configs/`.
 
 use std::{fmt, str::FromStr};
 
@@ -7,6 +7,10 @@ use glam::DVec2;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use super::{Admission, HALF_SIZE, START_ENERGY};
+use crate::{
+    metrics::Selection,
+    mind::{animal, rnn},
+};
 
 /// Random placement or an explicit world-space point.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -86,8 +90,12 @@ impl<'de> Deserialize<'de> for Placement {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Config {
+#[serde(
+    default,
+    deny_unknown_fields,
+    bound(deserialize = "MC: Deserialize<'de> + Default")
+)]
+pub struct Config<MC = animal::Config<rnn::Config>> {
     /// Number of animals admitted at initialization.
     pub initial_animals: usize,
 
@@ -105,9 +113,13 @@ pub struct Config {
 
     /// Initial plant placement; replacement plants remain random.
     pub initial_plant_position: Placement,
+
+    pub metrics: MetricsConfig,
+    pub animal: AnimalConfig<MC>,
+    pub plant: PlantConfig,
 }
 
-impl Default for Config {
+impl<MC: Default> Default for Config<MC> {
     fn default() -> Self {
         Self {
             initial_animals: 20,
@@ -116,12 +128,19 @@ impl Default for Config {
             initial_animal_energy: START_ENERGY,
             initial_animal_position: Placement::Random,
             initial_plant_position: Placement::Random,
+            metrics: MetricsConfig::default(),
+            animal: AnimalConfig::default(),
+            plant: PlantConfig::default(),
         }
     }
 }
 
-impl Config {
+impl<MC> Config<MC> {
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            !self.metrics.enabled || self.metrics.window_ticks > 0,
+            "metrics window_ticks must be positive"
+        );
         ensure!(
             self.initial_animal_energy.is_finite(),
             "initial animal energy must be finite"
@@ -130,10 +149,81 @@ impl Config {
         self.initial_plant_position.validate()
     }
 
+    /// Metrics settings may change when a checkpoint is resumed.
+    pub fn same_initialization<Other>(&self, other: &Config<Other>) -> bool {
+        self.initial_animals == other.initial_animals
+            && self.plants == other.plants
+            && self.minimum_population == other.minimum_population
+            && self.initial_animal_energy == other.initial_animal_energy
+            && self.initial_animal_position == other.initial_animal_position
+            && self.initial_plant_position == other.initial_plant_position
+    }
+
     pub(super) fn admission(&self) -> Admission {
         Admission {
             position: self.initial_animal_position.position(),
             energy: self.initial_animal_energy,
         }
     }
+}
+
+/// Enables collection/output windows; component selectors choose their contents.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MetricsConfig {
+    pub enabled: bool,
+    pub window_ticks: u64,
+    pub population: bool,
+    pub event_rates: bool,
+    pub genetic_diversity: bool,
+}
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            window_ticks: 100,
+            population: false,
+            event_rates: false,
+            genetic_diversity: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AnimalConfig<MC = animal::Config<rnn::Config>> {
+    pub metrics: AnimalMetricsConfig,
+    pub body: BodyConfig,
+    pub mind: MC,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AnimalMetricsConfig {
+    /// Recent totals per currently present animal, not lifetime fitness.
+    pub food_gained: Selection,
+    pub offspring: Selection,
+    pub distance: Selection,
+    /// Active ticks observed in this window for animals that died.
+    pub observed_survival: Selection,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BodyConfig {
+    pub metrics: BodyMetricsConfig,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BodyMetricsConfig {
+    pub energy: Selection,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PlantConfig {
+    pub metrics: PlantMetricsConfig,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PlantMetricsConfig {
+    pub energy: Selection,
 }

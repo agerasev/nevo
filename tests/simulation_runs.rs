@@ -18,8 +18,9 @@ fn initialization_settings_control_independent_parts_of_the_world() {
         initial_animal_energy: 90.0,
         initial_animal_position: Placement::Fixed(glam::DVec2::new(10.0, 20.0)),
         initial_plant_position: Placement::Fixed(glam::DVec2::new(-20.0, 12.0)),
+        ..Config::default()
     };
-    let universe = Universe::new(config, 7).unwrap();
+    let universe = Universe::new(config.clone(), 7).unwrap();
     let world = universe.world();
     assert_eq!(world.animals().len(), 2);
     assert_eq!(world.plants().len(), 7);
@@ -132,8 +133,11 @@ fn agents_sense_before_feeding_and_newborns_act_next_tick() {
 
 #[test]
 fn limits_and_stop_conditions_preserve_every_tick_and_continuation() {
-    for config in [support::ecosystem("debug"), support::ecosystem("baseline")] {
-        let mut limited = Run::new(config, 42).unwrap();
+    for config in [
+        support::ecosystem::<Config>("debug"),
+        support::ecosystem::<Config>("baseline"),
+    ] {
+        let mut limited = Run::new(config.clone(), 42).unwrap();
         let mut reports = Vec::new();
         let (_control, commands) = Control::channel(false);
         assert_eq!(
@@ -146,7 +150,7 @@ fn limits_and_stop_conditions_preserve_every_tick_and_continuation() {
             StopReason::TickLimit,
         );
 
-        let mut conditional = Run::new(config, 42).unwrap();
+        let mut conditional = Run::new(config.clone(), 42).unwrap();
         let (_control, commands) = Control::channel(false);
         assert_eq!(
             conditional
@@ -212,8 +216,8 @@ fn minimum_population_is_an_experiment_setting() {
     assert_eq!(unsupported.world().plants(), supported_world.plants());
     let mut supported = Universe::from_world(supported_world).unwrap();
 
-    let unsupported_report = unsupported.advance().unwrap();
-    let supported_report = supported.advance().unwrap();
+    let unsupported_report = unsupported.advance(&Config::default()).unwrap();
+    let supported_report = supported.advance(&Config::default()).unwrap();
     assert!(
         !unsupported_report
             .events

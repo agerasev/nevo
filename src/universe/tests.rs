@@ -17,7 +17,7 @@ fn round_trip(run: &Run) -> Run {
     let mut reencoded = Vec::new();
     ciborium::into_writer(&decoded, &mut reencoded).unwrap();
     assert_eq!(reencoded, bytes);
-    let restored = decoded.restore().unwrap();
+    let restored = decoded.restore(run.config().clone()).unwrap();
     assert_eq!(&restored, run);
     restored
 }
@@ -39,11 +39,11 @@ fn field<'a>(value: &'a mut Value, path: &[&str]) -> &'a mut Value {
 #[test]
 fn cbor_continuation_matches_every_report_and_complete_state() {
     for config in [
-        crate::test_support::ecosystem("debug"),
-        crate::test_support::ecosystem("baseline"),
+        crate::test_support::ecosystem::<Config>("debug"),
+        crate::test_support::ecosystem::<Config>("baseline"),
     ] {
         for seed in [1, 42] {
-            let mut uninterrupted = Run::new(config, seed).unwrap();
+            let mut uninterrupted = Run::new(config.clone(), seed).unwrap();
             for _ in 0..73 {
                 uninterrupted.tick().unwrap();
             }
@@ -97,7 +97,7 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
         field(&mut value, &["world", "immigrant_genome"]),
         Value::Null
     ));
-    let mut run = Run::from_universe(universe);
+    let mut run = Run::from_universe(universe, Config::default());
     assert_eq!(round_trip(&run), run);
     run.tick().unwrap();
     assert!(
@@ -162,7 +162,13 @@ fn zero_rngs_and_wrong_weight_dimensions_are_rejected() {
         let mut value = Value::serialized(&universe).unwrap();
         *field(&mut value, path) = Value::Array(vec![Value::from(0); 4]);
         let invalid: Universe = value.deserialized().unwrap();
-        assert!(invalid.restore().unwrap_err().to_string().contains("RNG"));
+        assert!(
+            invalid
+                .restore(Config::default())
+                .unwrap_err()
+                .to_string()
+                .contains("RNG")
+        );
     }
     let mut value = Value::serialized(&universe).unwrap();
     let animal = &mut field(&mut value, &["world", "animals"])

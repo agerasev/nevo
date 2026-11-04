@@ -7,24 +7,30 @@ use anyhow::{Result, ensure};
 
 use crate::{
     ecosystem::{Config, Ecosystem},
+    metrics::Metrics,
     run::Run,
 };
 
 /// An experiment owns its physical state, minds, random streams, and rules.
-/// Preparation reads published state and returns an owned, validated update.
+/// Computation reads published state and returns an owned, validated update.
 /// It must not change simulation state through interior mutability. All fallible
 /// work and random draws belong here, using private working state as needed.
 /// Applying an update to its unchanged source state must not fail or draw randomness.
 pub trait Simulation {
+    type Config: Default;
     type Update;
     type Report;
 
-    fn prepare_step(&self, step: u64) -> Result<(Self::Update, Self::Report)>;
-    fn apply_step(&mut self, update: Self::Update);
+    fn compute_update(
+        &self,
+        step: u64,
+        config: &Self::Config,
+    ) -> Result<(Self::Report, Self::Update)>;
+    fn apply_update(&mut self, update: Self::Update);
 
-    fn advance(&mut self, step: u64) -> Result<Self::Report> {
-        let (update, report) = self.prepare_step(step)?;
-        self.apply_step(update);
+    fn advance(&mut self, step: u64, config: &Self::Config) -> Result<Self::Report> {
+        let (report, update) = self.compute_update(step, config)?;
+        self.apply_update(update);
         Ok(report)
     }
 
@@ -44,10 +50,9 @@ pub struct Universe<S = Ecosystem> {
 }
 
 /// Confined to the stepping path, which applies it to the unchanged source Universe.
-pub(crate) struct PreparedStep<S: Simulation> {
+pub(crate) struct UniverseUpdate<S: Simulation> {
     step: u64,
     world: S::Update,
-    report: S::Report,
 }
 
 impl<S> Universe<S> {
@@ -76,34 +81,41 @@ impl<S: Simulation> Universe<S> {
         self.world.validate()
     }
 
-    pub fn restore(self) -> Result<Run<S>> {
+    pub fn restore(self, config: S::Config) -> Result<Run<S>> {
         self.validate()?;
-        Ok(Run::from_universe(self))
+        Ok(Run::from_universe(self, config))
     }
 
-    pub(crate) fn prepare_step(&self) -> Result<PreparedStep<S>> {
+    pub(crate) fn compute_update(
+        &self,
+        config: &S::Config,
+    ) -> Result<(S::Report, UniverseUpdate<S>)> {
         let step = self
             .step
             .checked_add(1)
             .ok_or_else(|| anyhow::anyhow!("universe step counter is exhausted"))?;
         ensure!(step < u64::MAX, "universe step counter is exhausted");
-        let (world, report) = self.world.prepare_step(step)?;
-        Ok(PreparedStep {
-            step,
-            world,
-            report,
-        })
+        let (report, world) = self.world.compute_update(step, config)?;
+        Ok((report, UniverseUpdate { step, world }))
     }
 
-    pub(crate) fn apply_step(&mut self, update: PreparedStep<S>) -> S::Report {
-        self.world.apply_step(update.world);
+    pub(crate) fn apply_update(&mut self, update: UniverseUpdate<S>) {
+        self.world.apply_update(update.world);
         self.step = update.step;
-        update.report
     }
 
-    pub fn advance(&mut self) -> Result<S::Report> {
-        let update = self.prepare_step()?;
-        Ok(self.apply_step(update))
+    pub fn advance(&mut self, config: &S::Config) -> Result<S::Report> {
+        let (report, update) = self.compute_update(config)?;
+        self.apply_update(update);
+        Ok(report)
+    }
+}
+
+impl<S: Metrics> Metrics for Universe<S> {
+    type Summary = S::Summary;
+
+    fn collect_metrics(&self, summary: &mut Self::Summary) {
+        self.world.collect_metrics(summary);
     }
 }
 
