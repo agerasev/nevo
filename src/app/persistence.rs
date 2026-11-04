@@ -4,7 +4,6 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{BufReader, BufWriter, Read, Write},
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result, bail, ensure};
@@ -63,22 +62,7 @@ impl RunDirectory {
                     .with_context(|| format!("creating run directory {}", path.display()))?;
                 path.to_owned()
             }
-            None => {
-                let root = Path::new("runs");
-                fs::create_dir_all(root)?;
-                let time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-                let mut attempt = 0_u64;
-                loop {
-                    let path = root.join(format!("run-{time}-{}-{attempt}", std::process::id()));
-                    match fs::create_dir(&path) {
-                        Ok(()) => break path,
-                        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                            attempt += 1;
-                        }
-                        Err(error) => return Err(error.into()),
-                    }
-                }
-            }
+            None => create_run_directory(Path::new("runs"), &jiff::Zoned::now())?,
         };
         let lock = OpenOptions::new()
             .read(true)
@@ -209,6 +193,28 @@ impl RunDirectory {
     }
 }
 
+fn create_run_directory(root: &Path, time: &jiff::Zoned) -> Result<PathBuf> {
+    fs::create_dir_all(root)?;
+    let name = time.strftime("%Y-%m-%d_%H-%M-%S").to_string();
+    let mut attempt = 1_u64;
+    loop {
+        let path = root.join(if attempt == 1 {
+            name.clone()
+        } else {
+            format!("{name}-{attempt}")
+        });
+        // Atomically reserve the name, including when simultaneous runs start.
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => attempt += 1,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("creating run directory {}", path.display()));
+            }
+        }
+    }
+}
+
 fn atomic_write(path: &Path, write: impl FnOnce(&mut BufWriter<File>) -> Result<()>) -> Result<()> {
     let parent = path.parent().context("output path has no parent")?;
     let name = path
@@ -246,6 +252,28 @@ fn sync_directory(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_directories_preserve_existing_names() {
+        let root = std::env::temp_dir().join(format!("nevo-run-names-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let time = "2026-11-04T19:20:30+07:00[+07:00]".parse().unwrap();
+        let first = create_run_directory(&root, &time).unwrap();
+        assert_eq!(first, root.join("2026-11-04_19-20-30"));
+        fs::write(first.join("config.toml"), "seed = 1").unwrap();
+        let occupied = root.join("2026-11-04_19-20-30-2");
+        fs::write(&occupied, "unrelated file").unwrap();
+
+        let next = create_run_directory(&root, &time).unwrap();
+        assert_eq!(next, root.join("2026-11-04_19-20-30-3"));
+        assert!(next.is_dir());
+        assert_eq!(
+            fs::read_to_string(first.join("config.toml")).unwrap(),
+            "seed = 1"
+        );
+        assert_eq!(fs::read_to_string(occupied).unwrap(), "unrelated file");
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn checkpoint_version_and_models_are_checked_before_restore() {

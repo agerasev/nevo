@@ -259,6 +259,9 @@ fn default_directory_records_entropy_and_full_range_seeds() {
         .unwrap()
         .unwrap()
         .path();
+    let name = run.file_name().unwrap().to_str().unwrap();
+    assert_eq!(name.len(), 19);
+    jiff::civil::DateTime::strptime("%Y-%m-%d_%H-%M-%S", name).unwrap();
     let config: toml::Value =
         toml::from_str(&fs::read_to_string(run.join("config.toml")).unwrap()).unwrap();
     assert_eq!(

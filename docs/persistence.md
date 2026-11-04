@@ -1,9 +1,11 @@
 # Run persistence
 
 Each invocation uses a run directory. Supply its path as the positional argument;
-omit it to create a unique directory under `runs/`. The chosen path is printed to
-stderr. Keep screenshots and other run outputs alongside checkpoints in that
-directory, for example under `screenshots/`. All generated run data stays out of Git.
+omit it to create `runs/YYYY-MM-DD_HH-MM-SS/` using the local date and time.
+If the name is taken, append `-2`, `-3`, etc. to create a fresh directory.
+The chosen path is printed to stderr. Keep screenshots and other run outputs
+alongside checkpoints in that directory, for example under `screenshots/`.
+All generated run data stays out of Git.
 
 ```sh
 # Create a run with the default checkpoint policy.
