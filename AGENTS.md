@@ -18,7 +18,7 @@
   contracts. Keep experiment-specific body, sensing, action, and genome semantics
   out of universal interfaces. Discuss consequential design choices before coding.
 - Prefer biological names for simulation components, such as `Animal.body` and
-  `Animal.mind`.
+  `Animal.mind`. Use `Animal` and `AnimalMind` for the current baseline.
 - Group component contracts and implementations in their own Rust modules. If a
   module spans more than one file (including its root), put the root at
   `module/mod.rs`, never beside the directory as `module.rs`.

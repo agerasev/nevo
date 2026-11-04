@@ -6,7 +6,7 @@ and recorded experiments, with no final endpoint for the research program.
 
 ## Current implementation
 
-The ecosystem has replenishing plants and herbivores with 3–4–3 recurrent
+The ecosystem has replenishing plants and animals with 3–4–3 recurrent
 brains. One configurable loop runs every experiment; an optional desktop
 viewer reads the shared Universe. Sensing precedes movement, feeding, and births.
 A fresh checkout needs `git submodule update --init` for the Cargo path dependency.
@@ -23,14 +23,14 @@ cargo run --locked --bin nevo -- runs/baseline
 Use **Pause / Resume** to control playback and **Single step** to advance one tick
 and pause. With the arena focused, Space toggles playback and Right Arrow steps.
 The toolbar shows the seed, scenario, tick, and population counts for the displayed
-world. Green circles are plants and yellow circles are herbivores.
+world. Green circles are plants and yellow circles are animals.
 
 Runs default to full speed (`--hz 0`) and a seed drawn from system entropy.
 The resolved seed is printed before the run starts; supply `--seed N` to replay it.
 Use `--hz 25` for paced viewing and `--ticks N` for a reproducible budget. Omit
 the budget to run until interrupted. A trial simply supplies initialization and
 a tick limit. The `debug` layout exercises a meal and a birth on tick one. The
-`baseline` starts 20 herbivores among 500 mature plants.
+`baseline` starts 20 animals among 500 mature plants.
 See the [tick and runner contracts](docs/simulation.md).
 
 CLI and TOML configuration share one [conf](https://docs.rs/conf/0.4.5/conf/)
@@ -102,7 +102,7 @@ conclusions in [history](docs/history/README.md). Run configurations live in
 - Use wgame as the drawing backend, with one default presentation per object.
 - Use the [July 26 foraging experiment](docs/history/2016-07-26-ecosystem.md)
   as the Rust baseline. Start with continuous 2D space, replenishing food, and one
-  herbivore body type. Wrapping boundaries remain part of the planned Rust world.
+  animal body type. Wrapping boundaries remain part of the planned Rust world.
 - Include internal-state perception. World perception remains an open design:
   investigate a 1D angular retina with color and distance, and possibly gradient
   sensing as smell, with modality ablations.

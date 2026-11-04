@@ -1,6 +1,6 @@
 //! Stateful thought through explicit input/output types.
 
-pub mod herbivore;
+pub mod animal;
 pub mod rnn;
 
 use anyhow::Result;

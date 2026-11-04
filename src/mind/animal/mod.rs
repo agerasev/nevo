@@ -14,29 +14,29 @@ use crate::{
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct HerbivoreMind<M = Rnn> {
+pub struct AnimalMind<M = Rnn> {
     pub brain: M,
 }
 
-impl HerbivoreMind {
+impl AnimalMind {
     pub fn new(genome: RnnGenome) -> Self {
         Self::from_brain(Rnn::new(genome))
     }
 }
 
-impl<M> HerbivoreMind<M> {
+impl<M> AnimalMind<M> {
     pub fn from_brain(brain: M) -> Self {
         Self { brain }
     }
 }
 
-impl From<RnnGenome> for HerbivoreMind {
+impl From<RnnGenome> for AnimalMind {
     fn from(genome: RnnGenome) -> Self {
         Self::new(genome)
     }
 }
 
-impl<M, G: ?Sized> AsRef<G> for HerbivoreMind<M>
+impl<M, G: ?Sized> AsRef<G> for AnimalMind<M>
 where
     M: AsRef<G>,
 {
@@ -45,7 +45,7 @@ where
     }
 }
 
-impl<C, M> Mind<C> for HerbivoreMind<M>
+impl<C, M> Mind<C> for AnimalMind<M>
 where
     C: Context + ?Sized,
     M: Mind<C, Input = [f32; 3], Output = [f32; 3]>,

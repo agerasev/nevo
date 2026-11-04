@@ -31,7 +31,7 @@ are never reused. They identify events, parents, and animals, without joining
 separate body and mind stores. Population is this collection, with no separate
 Actor, Environment, lifecycle-message protocol, or universal intervention callback.
 
-Explicit mind inputs still define what an animal perceives. `HerbivoreMind<M>` maps
+Explicit mind inputs still define what an animal perceives. `AnimalMind<M>` maps
 food observations to three neural signals and three brain outputs to movement;
 its `brain` can be any compatible Mind. The scalar RNN owns 47 inherited parameters
 and four recurrent units, all reading the previous hidden state. Minds receive

@@ -6,7 +6,7 @@ use nevo::{
     genome::{Mutate, RandomInit},
     mind::{
         Mind,
-        herbivore::HerbivoreMind,
+        animal::AnimalMind,
         rnn::{RnnGenome, WeightMutation},
     },
 };
@@ -14,7 +14,7 @@ use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 
 #[test]
-fn herbivore_accepts_another_mind_and_propagates_its_errors() {
+fn animal_accepts_another_mind_and_propagates_its_errors() {
     struct EchoMind;
 
     impl<C: Context + ?Sized> nevo::mind::Mind<C> for EchoMind {
@@ -33,7 +33,7 @@ fn herbivore_accepts_another_mind_and_propagates_its_errors() {
     let mut cx = Cpu {
         rng: Xoshiro256PlusPlus::seed_from_u64(17),
     };
-    let mut agent = HerbivoreMind::from_brain(EchoMind);
+    let mut agent = AnimalMind::from_brain(EchoMind);
     let action = agent
         .process(
             &mut cx,
@@ -105,7 +105,7 @@ fn mind_and_genome_accept_an_alternate_unsized_context() {
     parent.weights[32] = 1.0;
     parent.weights[46] = 1.0;
     let original = parent.clone();
-    let mut agent = HerbivoreMind::new(parent.clone());
+    let mut agent = AnimalMind::new(parent.clone());
 
     let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
         &mut context;

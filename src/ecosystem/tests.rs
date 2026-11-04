@@ -374,11 +374,9 @@ fn failures_in_processing_mutation_or_construction_leave_the_published_universe_
 
 #[test]
 fn initial_and_later_arrivals_use_the_same_admission_and_rng_sequence() {
-    let mut initial =
-        Ecosystem::<HerbivoreMind>::empty(0, 0, 42, 17, None, WeightMutation::default());
+    let mut initial = Ecosystem::<AnimalMind>::empty(0, 0, 42, 17, None, WeightMutation::default());
     let arrivals = initial.admit(1, Admission::default()).unwrap();
-    let mut later =
-        Ecosystem::<HerbivoreMind>::empty(0, 1, 42, 17, None, WeightMutation::default());
+    let mut later = Ecosystem::<AnimalMind>::empty(0, 1, 42, 17, None, WeightMutation::default());
     let report = later.advance(1).unwrap();
     assert_eq!(arrivals, vec![id(1)]);
     assert_eq!(

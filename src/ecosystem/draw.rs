@@ -5,7 +5,7 @@ use super::{Animal, Body, Ecosystem, HALF_SIZE, Plant};
 use crate::viewer::{Bounds, Draw, Drawing, Label};
 
 const PLANT: Rgb<f32> = Rgb::new(0.20, 0.74, 0.32);
-const HERBIVORE: Rgb<f32> = Rgb::new(1.0, 0.85, 0.25);
+const ANIMAL: Rgb<f32> = Rgb::new(1.0, 0.85, 0.25);
 
 impl Draw for Plant {
     fn draw(&self, drawing: &mut Drawing<'_>) {
@@ -50,7 +50,7 @@ impl Draw for Body {
         );
         drawing.scene.add(
             &circle
-                .fill_color(HERBIVORE)
+                .fill_color(ANIMAL)
                 .scale(radius)
                 .move_to(position)
                 .order(2),
@@ -95,8 +95,8 @@ impl<M, G, P> Draw for Ecosystem<M, G, P> {
             PLANT,
         ));
         drawing.labels.push(Label::colored(
-            format!("Herbivores {}", self.animals().len()),
-            HERBIVORE,
+            format!("Animals {}", self.animals().len()),
+            ANIMAL,
         ));
     }
 }

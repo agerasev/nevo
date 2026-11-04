@@ -15,7 +15,7 @@ use super::{Counts, config::Options};
 
 const FORMAT_VERSION: u32 = 4;
 const WORLD_MODEL: &str = "foraging-sense-first-v1";
-const AGENT_MODEL: &str = "herbivore-rnn-3-4-3-v1";
+const AGENT_MODEL: &str = "animal-rnn-3-4-3-v1";
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

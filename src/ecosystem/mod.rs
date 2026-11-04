@@ -19,7 +19,7 @@ use crate::{
     genome::{Mutate, RandomInit},
     mind::{
         Mind,
-        herbivore::HerbivoreMind,
+        animal::AnimalMind,
         rnn::{RnnGenome, WeightMutation},
     },
     universe::Simulation,
@@ -236,7 +236,7 @@ fn validate_plants(plants: &[Plant], target: usize, next_plant: u64) -> Result<(
 /// during inference; memory and other learned state belong to `Mind::Update`.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Ecosystem<M = HerbivoreMind, G = RnnGenome, P = WeightMutation> {
+pub struct Ecosystem<M = AnimalMind, G = RnnGenome, P = WeightMutation> {
     rng: Xoshiro256PlusPlus,
     context: GeneticContext,
     next_animal: u64,

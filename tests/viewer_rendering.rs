@@ -285,7 +285,7 @@ fn ecosystem_drawing_preserves_complete_state_and_same_tick_labels() {
                 );
                 assert_eq!(
                     drawing.labels[2].text,
-                    format!("Herbivores {}", universe.world().animals().len())
+                    format!("Animals {}", universe.world().animals().len())
                 );
                 let mut target = Offscreen::new(&graphics, (100, 100));
                 drawing.render(&mut target);

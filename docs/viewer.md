@@ -18,7 +18,7 @@ labels, independently of its mind/genome types. [Universe](../src/universe/draw.
 adds the step label and delegates to its world.
 
 Circle borders are slightly larger filled circles beneath every entity fill.
-Overlapping entities therefore have no border crossing their interiors; herbivore
+Overlapping entities therefore have no border crossing their interiors; animal
 fills remain above plant fills. Individual bounds include the border.
 
 The [window loop](../src/viewer/window.rs) knows no ecosystem or scenario types.

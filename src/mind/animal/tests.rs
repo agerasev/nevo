@@ -18,7 +18,7 @@ fn genome_conversion_creates_a_fresh_mind_without_cloning_memory() {
         rng: Xoshiro256PlusPlus::seed_from_u64(17),
     };
     let mut reference_cx = cx.clone();
-    let mut parent = HerbivoreMind::from(genome.clone());
+    let mut parent = AnimalMind::from(genome.clone());
     parent.process(&mut cx, FoodObservation::default()).unwrap();
     assert_eq!(
         cx, reference_cx,
@@ -31,7 +31,7 @@ fn genome_conversion_creates_a_fresh_mind_without_cloning_memory() {
     child_genome
         .mutate(&WeightMutation::default(), &mut cx)
         .unwrap();
-    let child = HerbivoreMind::from(child_genome);
+    let child = AnimalMind::from(child_genome);
     let expected_weights = genome
         .weights
         .map(|weight| weight + reference_cx.rng.random_range(-0.02..0.02));
@@ -63,7 +63,7 @@ fn random_initialization_preserves_the_expected_draw_sequence() {
             assert_ne!(genome, previous);
         }
         previous = Some(genome.clone());
-        let mind = HerbivoreMind::from(genome);
+        let mind = AnimalMind::from(genome);
         assert_eq!(mind.brain.memory, [0.0; 4]);
         assert!(
             mind.as_ref()
@@ -78,10 +78,10 @@ fn random_initialization_preserves_the_expected_draw_sequence() {
 fn non_finite_brain_state_is_rejected() {
     let mut genome = RnnGenome::default();
     genome.weights[0] = f32::NAN;
-    let invalid = HerbivoreMind::new(genome);
-    assert!(<HerbivoreMind as Mind<Cx>>::validate(&invalid).is_err());
+    let invalid = AnimalMind::new(genome);
+    assert!(<AnimalMind as Mind<Cx>>::validate(&invalid).is_err());
 
-    let mut mind = HerbivoreMind::new(RnnGenome::default());
+    let mut mind = AnimalMind::new(RnnGenome::default());
     mind.brain.memory[0] = f32::INFINITY;
-    assert!(<HerbivoreMind as Mind<Cx>>::validate(&mind).is_err());
+    assert!(<AnimalMind as Mind<Cx>>::validate(&mind).is_err());
 }

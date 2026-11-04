@@ -66,7 +66,7 @@ positions are required state. Core simulation and genetics contracts have no
 persistence bounds.
 
 The current format is checkpoint version 4, with `foraging-sense-first-v1` and
-`herbivore-rnn-3-4-3-v1` model identifiers. Only this format is accepted;
+`animal-rnn-3-4-3-v1` model identifiers. Only this format is accepted;
 compatibility and migrations are intentionally unsupported. Rust module/type names
 are not part of the format.
 

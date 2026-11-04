@@ -2,7 +2,7 @@
 
 **Historical experiment, July 2016.** Could animals inherit a movement policy
 that finds enough food to sustain a lineage? Recurrent controllers guided
-herbivores among replenishing plants; feeding enabled reproduction with mutation.
+animals among replenishing plants; feeding enabled reproduction with mutation.
 A follow-up added perception of neighboring animals.
 
 Recordings show sustained grazing, repeated reproduction, and spatial grouping
