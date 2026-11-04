@@ -3,7 +3,8 @@ use rand::Rng;
 use crate::Context;
 
 /// Native CPU context. Scalar types are fixed by Rust, with no runtime metadata.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Cpu<R> {
     pub rng: R,
 }

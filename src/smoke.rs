@@ -1,19 +1,21 @@
 use nevo::{
-    foraging::{ForagingWorld, Scenario},
+    foraging::ForagingWorld,
     run::{Command, Control, Run},
 };
 
 /// Exercise the command channel while checking the snapshots actually presented.
+#[derive(Clone)]
 pub struct SmokeCheck {
     reference: Run,
     previous_tick: u64,
 }
 
 impl SmokeCheck {
-    pub fn new(scenario: Scenario, seed: u64) -> Self {
+    pub fn new(reference: Run) -> Self {
+        let previous_tick = reference.world().read().number();
         Self {
-            reference: Run::new(scenario, seed),
-            previous_tick: 0,
+            reference,
+            previous_tick,
         }
     }
 
@@ -38,7 +40,7 @@ impl SmokeCheck {
     ) -> wgame::Result<()> {
         let tick = snapshot.number();
         let expected = match frame {
-            0 => Some(0),
+            0 => Some(self.previous_tick),
             1 | 3 | 9 | 10 => Some(self.previous_tick + 1),
             2 | 8 | 11 => Some(self.previous_tick),
             _ => None,

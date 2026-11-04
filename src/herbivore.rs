@@ -12,9 +12,27 @@ use crate::{
 
 /// The July 26 controller's row-major input, recurrent and output parameters:
 /// 4×3 input weights, 4×4 recurrent weights, 4 biases, 3×4 output weights, 3 biases.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HerbivoreGenome {
+    #[serde(with = "weights")]
     pub weights: [f32; 47],
+}
+
+// Serde's built-in array implementations stop at length 32.
+mod weights {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
+
+    pub fn serialize<S: Serializer>(weights: &[f32; 47], serializer: S) -> Result<S::Ok, S::Error> {
+        weights.as_slice().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[f32; 47], D::Error> {
+        let weights = Vec::<f32>::deserialize(deserializer)?;
+        weights.try_into().map_err(|weights: Vec<f32>| {
+            D::Error::custom(format!("expected 47 weights, got {}", weights.len()))
+        })
+    }
 }
 
 impl Default for HerbivoreGenome {
@@ -61,7 +79,8 @@ impl<C: Context + ?Sized> Mutate<C, WeightMutation> for HerbivoreGenome {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Herbivore {
     pub genome: HerbivoreGenome,
     pub memory: [f32; 4],
@@ -118,7 +137,8 @@ impl<C: Context + ?Sized> Agent<C> for Herbivore {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Herbivores {
     live: BTreeMap<AgentId, Herbivore>,
     cx: Cpu<Xoshiro256PlusPlus>,
@@ -146,6 +166,34 @@ impl Herbivores {
 
     pub fn get(&self, id: AgentId) -> Option<&Herbivore> {
         self.live.get(&id)
+    }
+
+    pub(crate) fn ids(&self) -> impl Iterator<Item = AgentId> + '_ {
+        self.live.keys().copied()
+    }
+
+    pub(crate) fn validate_checkpoint(&self) -> Result<()> {
+        ensure!(
+            self.cx.rng.state() != [0; 32],
+            "population RNG state is all zero"
+        );
+        for agent in self.live.values() {
+            ensure!(
+                agent.genome.weights.iter().all(|v| v.is_finite()),
+                "non-finite genome weight"
+            );
+            ensure!(
+                agent.memory.iter().all(|v| v.is_finite()),
+                "non-finite recurrent memory"
+            );
+        }
+        if let Some(genome) = &self.founder_genome {
+            ensure!(
+                genome.weights.iter().all(|v| v.is_finite()),
+                "non-finite founder weight"
+            );
+        }
+        Ok(())
     }
 }
 

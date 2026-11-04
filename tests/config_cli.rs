@@ -43,8 +43,11 @@ impl Drop for ConfigFile {
 }
 
 fn run(args: &[&str]) -> Output {
+    // Each CLI invocation owns its default runs/ directory.
+    let working = ConfigFile::new("");
     let mut child = Command::new(env!("CARGO_BIN_EXE_nevo"))
         .args(args)
+        .current_dir(&working.directory)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

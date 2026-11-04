@@ -69,8 +69,13 @@ it, and renders the snapshot. The toolbar and arena display the same tick. UI
 controls send commands to the simulation worker; drawing never advances it.
 Completion leaves the final state visible. The application stops and joins its
 worker when the window closes. `--smoke` checks twelve displayed snapshots and
-control acknowledgements. Circle strokes are constructed before scale and
+control acknowledgements, starting from either a fresh or restored run.
+Circle strokes are constructed before scale and
 translation to preserve their centers. [Viewer](../src/viewer.rs)
+
+**Persistence.** The worker saves complete state between ticks and reconstructs
+a restored run with `Run::from_parts`. This does not introduce another stepping
+loop. [Storage policy and snapshot contents](persistence.md)
 
 **Debug fixture.** One herbivore starts with 390 energy in contact with a ripe
 plant. It senses that plant before its first action. In seed 1 it then eats for

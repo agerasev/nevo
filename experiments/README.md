@@ -15,6 +15,8 @@ experiment. It may contain several runs, seeds, and comparisons.
   read–act–write locking, shared execution controls, and the new sensing-first order.
 - [Shared CLI and file configuration](2026-11-04-configuration/README.md) checks
   configuration overrides, entropy-seed replay, and unpaced viewer controls.
+- [Checkpoint continuation](2026-11-04-persistence/README.md) checks complete-state
+  resume, retention, configuration recovery, and orderly shutdown.
 
 Each experiment needs a short `README.md` recording:
 
@@ -28,8 +30,8 @@ Each experiment needs a short `README.md` recording:
 
 Store small configs, metrics, and selected genomes beside the note. Reference large
 artifacts instead of committing them by default. Preserve earlier results; correct
-mistakes explicitly. Long runs should log periodic metrics and resumable checkpoints
-once supported, including world, controller memory, and RNG state.
+mistakes explicitly. Runs print periodic metrics and save
+[resumable checkpoints](../docs/persistence.md); retain relevant evidence here.
 
 For perception ablations, use matched environment seeds, evaluation budgets, and
 evolution settings. Record input masking, network capacity, and whether each variant

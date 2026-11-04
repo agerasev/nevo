@@ -1,5 +1,9 @@
 use std::{
     cell::{Cell, RefCell},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -107,9 +111,9 @@ pub async fn show(
     control: Control,
     scenario: Scenario,
     seed: u64,
-    smoke: bool,
+    mut check: Option<SmokeCheck>,
+    exit_requested: Arc<AtomicBool>,
 ) -> wgame::Result<()> {
-    let mut check = smoke.then(|| SmokeCheck::new(scenario, seed));
     let initial_snapshot = world.read().clone();
     let status = Cell::new(Status::read(&initial_snapshot, &control));
     let pending: RefCell<Vec<Command>> = RefCell::default();
@@ -186,6 +190,9 @@ pub async fn show(
     let mut initial = true;
     let mut smoke_frame = 0;
     loop {
+        if exit_requested.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         if !initial && pending.borrow().is_empty() {
             host.wait_for_update(Some(Duration::from_millis(16))).await;
         }
@@ -203,7 +210,7 @@ pub async fn show(
         let snapshot = world.read().clone();
         status.set(Status::read(&snapshot, &control));
         let Some(mut frame) = host.next_frame().await? else {
-            if smoke {
+            if check.is_some() {
                 return Err(wgame::Error::msg(
                     "viewer closed before the smoke check finished",
                 ));

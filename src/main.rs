@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod config;
+mod persistence;
 
 #[cfg(feature = "viewer")]
 mod smoke;
@@ -9,21 +10,26 @@ mod viewer;
 
 use std::{
     process::ExitCode,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
 
+use anyhow::{Context, Result, anyhow, ensure};
 use nevo::{
     foraging::{Event, Scenario, TickReport},
-    run::{Control, Run, StopReason},
+    run::{Command, Control, Run, StopReason},
 };
-
-#[cfg(feature = "viewer")]
-use nevo::run::Command;
+use serde::{Deserialize, Serialize};
 
 use config::Options;
+use persistence::RunDirectory;
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Counts {
     meals: u64,
     births: u64,
@@ -69,16 +75,16 @@ fn print_trace(report: &TickReport) {
 
 struct Worker {
     control: Control,
-    thread: Option<thread::JoinHandle<StopReason>>,
+    thread: Option<thread::JoinHandle<Result<StopReason>>>,
 }
 
 impl Worker {
-    fn join(mut self) -> Result<StopReason, String> {
+    fn join(mut self) -> Result<StopReason> {
         self.thread
             .take()
             .expect("worker can be joined once")
             .join()
-            .map_err(|_| "simulation worker panicked".to_string())
+            .map_err(|_| anyhow!("simulation worker panicked"))?
     }
 }
 
@@ -98,7 +104,8 @@ fn attach_viewer(
     control: Control,
     scenario: Scenario,
     seed: u64,
-    smoke: bool,
+    smoke: Option<smoke::SmokeCheck>,
+    exit_requested: Arc<AtomicBool>,
 ) -> Result<(), String> {
     use std::sync::{Arc, Mutex};
 
@@ -118,7 +125,8 @@ fn attach_viewer(
                     control.clone(),
                     scenario,
                     seed,
-                    smoke,
+                    smoke.clone(),
+                    exit_requested.clone(),
                 )
                 .await
             },
@@ -134,25 +142,70 @@ fn attach_viewer(
         .unwrap_or_else(|| Err("viewer exited without a result".into()))
 }
 
-fn execute(options: Options) -> Result<(), String> {
-    let limits = options
-        .loop_options()
-        .map_err(|error| format!("{error:#}"))?;
+fn execute(mut options: Options) -> Result<()> {
+    options.loop_options()?;
+    let directory = RunDirectory::open(options.directory.as_deref())?;
+    // Reload the saved configuration under the writer lock in case another
+    // invocation finished between argument parsing and acquiring the directory.
+    if options.directory.is_some() {
+        options = Options::load()?;
+    }
+    let (mut run, mut counts) = match directory.load_latest()? {
+        Some(checkpoint) => {
+            options = Options::load_with_fallback(&checkpoint.config)?;
+            ensure!(
+                options.scenario == checkpoint.config.scenario
+                    && options.seed == checkpoint.config.seed,
+                "cannot change the seed or scenario of an existing run"
+            );
+            let run = checkpoint.state.restore().context("restoring checkpoint")?;
+            eprintln!(
+                "resuming={} tick={}",
+                directory.path().display(),
+                run.world().read().number()
+            );
+            (run, checkpoint.counts)
+        }
+        None => {
+            directory.check_new()?;
+            options.seed = Some(options.resolved_seed()?);
+            (
+                Run::new(options.scenario, options.seed.unwrap()),
+                Counts::default(),
+            )
+        }
+    };
+    let limits = options.loop_options()?;
     let seed = options
-        .resolved_seed()
-        .map_err(|error| format!("{error:#}"))?;
+        .seed
+        .expect("new and restored runs have a resolved seed");
+    // No configuration is overwritten until the checkpoint is decoded and validated.
+    directory.save_config(&options)?;
+    eprintln!("run={}", directory.path().display());
     println!(
         "scenario={:?} seed={} ticks={:?} interval={:?}",
         options.scenario, seed, limits.ticks, limits.interval,
     );
-    let mut run = Run::new(options.scenario, seed);
     let (control, commands) = Control::channel(options.paused || options.smoke);
+    let exit_requested = Arc::new(AtomicBool::new(false));
+    let signal_exit = Arc::clone(&exit_requested);
+    let signal_control = control.clone();
+    ctrlc::set_handler(move || {
+        signal_exit.store(true, Ordering::Relaxed);
+        let _ = signal_control.send(Command::Stop);
+    })
+    .context("installing shutdown handler")?;
     #[cfg(feature = "viewer")]
     let world = run.world().clone();
+    #[cfg(feature = "viewer")]
+    let smoke = options.smoke.then(|| smoke::SmokeCheck::new(run.clone()));
+    let worker_options = options.clone();
+    let worker_exit = Arc::clone(&exit_requested);
     let thread = thread::spawn(move || {
-        let mut counts = Counts::default();
+        let options = worker_options;
         counts.print(&run);
         let mut last_report = Instant::now();
+        let mut save_error = None;
         let stop = run.execute(limits, commands, |state, report| {
             counts.record(report);
             if options.scenario == Scenario::Debug && report.tick <= 3 {
@@ -162,11 +215,26 @@ fn execute(options: Options) -> Result<(), String> {
                 counts.print(state);
                 last_report = Instant::now();
             }
+            if options.checkpoint_every != 0
+                && report.tick.is_multiple_of(options.checkpoint_every)
+                && let Err(error) = directory.save(state, &options, &counts)
+            {
+                save_error = Some(error);
+                return true;
+            }
             false
         });
         counts.print(&run);
         println!("stop={stop:?}");
-        stop
+        let saved = match save_error {
+            Some(error) => Err(error),
+            None => directory.save(&run, &options, &counts),
+        };
+        if saved.is_err() {
+            worker_exit.store(true, Ordering::Relaxed);
+        }
+        saved?;
+        Ok(stop)
     });
     let worker = Worker {
         control: control.clone(),
@@ -179,7 +247,8 @@ fn execute(options: Options) -> Result<(), String> {
             control.clone(),
             options.scenario,
             seed,
-            options.smoke,
+            smoke,
+            exit_requested,
         );
         let _ = control.send(Command::Stop);
         result
@@ -191,7 +260,7 @@ fn execute(options: Options) -> Result<(), String> {
     drop(control);
     joined?;
     #[cfg(feature = "viewer")]
-    viewed?;
+    viewed.map_err(anyhow::Error::msg)?;
     Ok(())
 }
 
@@ -209,7 +278,7 @@ fn main() -> ExitCode {
     match execute(options) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("{error}");
+            eprintln!("{error:#}");
             ExitCode::FAILURE
         }
     }

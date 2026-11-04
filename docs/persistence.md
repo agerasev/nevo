@@ -1,0 +1,78 @@
+# Run persistence
+
+Each invocation uses a run directory. Supply its path as the positional argument;
+omit it to create a unique directory under `runs/`. The chosen path is printed to
+stderr. Run artifacts are ignored by Git; experiment evidence belongs in
+[experiments/](../experiments/README.md).
+
+```sh
+# Create a run, saving every 100 ticks and keeping the latest three checkpoints.
+cargo run --locked -- runs/foraging --seed 1 --ticks 256 \
+  --checkpoint-every 100 --keep-checkpoints 3
+
+# Resume from its newest checkpoint, loading config.toml automatically.
+cargo run --locked -- runs/foraging
+
+# Continue for 64 ticks, saving only on exit, retaining one checkpoint.
+cargo run --locked -- runs/foraging --ticks 64 \
+  --checkpoint-every 0 --keep-checkpoints 1
+```
+
+`config.toml` records the last effective configuration, including the resolved
+entropy seed. CLI values override it. `--config PATH` remains available for
+initializing a new directory, but cannot replace an existing directory's config.
+If `config.toml` is missing, the checkpoint's embedded configuration is recovered.
+Resume rejects changed seeds or scenarios. Runtime settings such as pacing,
+viewer attachment, and save policy can change. A tick budget always applies to
+the current invocation: a saved budget of 256 means another 256 ticks on bare
+resume. Remove `ticks` from `config.toml` for an unlimited continuation.
+
+| CLI | TOML | Default | Meaning |
+| --- | --- | --- | --- |
+| `--checkpoint-every N` | `checkpoint_every` | `10000` | Save at absolute world ticks divisible by N; zero disables periodic saves. |
+| `--keep-checkpoints N` | `keep_checkpoints` | `3` | Retain the newest N checkpoints; must be positive. |
+
+The worker also saves when its budget ends, the viewer closes, or a stop signal
+arrives (Ctrl-C; also SIGTERM/SIGHUP on Unix). Saving the same tick replaces that
+checkpoint. A zero-tick invocation still saves. There is no automatic initial
+checkpoint; if interrupted before its first save, a directory with only a config
+reinitializes from that saved seed.
+
+## Layout and consistency
+
+```text
+runs/foraging/
+  config.toml
+  .lock
+  checkpoints/
+    00000000000000000100.cbor
+    00000000000000000200.cbor
+    00000000000000000256.cbor
+```
+
+Each checkpoint is one CBOR file containing the effective configuration, cumulative
+event counts, and a complete [foraging snapshot](../src/checkpoint.rs): world tick,
+bodies, ordered plants, next IDs, replenishment settings, both RNG states, all
+genomes and recurrent memories, and the optional founder genome. Native CBOR arrays
+hold the weights; no safetensors payload is used. Locks, channels, pacing clocks,
+and viewer/device resources are recreated rather than serialized. Generic agent
+and environment contracts have no persistence bounds.
+
+Only the simulation owner saves, between complete ticks. Snapshot copying holds
+the world's read lock briefly; serialization and file I/O happen after releasing
+it. A file is written to a temporary sibling, flushed and synced, then renamed
+into place. Older checkpoints are removed only after the new file is published.
+An OS lock permits one writer per directory and releases automatically when the
+process exits. Temporary files from an incomplete write are ignored on resume.
+
+The newest checkpoint is selected by tick. Schema/model versions and restored
+state invariants are checked before running or replacing configuration. Invalid or
+truncated checkpoints produce an error instead of silently restarting. To recover
+an older retained checkpoint, move newer checkpoint files out of `checkpoints/`
+while the run is stopped. The format has no checksum or automatic migration yet.
+Hard kills or power loss can lose progress since the last completed save; an
+exit checkpoint requires orderly shutdown.
+
+Exact replay currently targets the same build/platform. See the
+[resume experiment](../experiments/2026-11-04-persistence/README.md) for measured
+equivalence across separate processes and future ticks.

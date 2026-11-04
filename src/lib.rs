@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod checkpoint;
 mod context;
 pub mod foraging;
 pub mod herbivore;
@@ -11,7 +12,9 @@ use rand::Rng;
 pub use context::Cpu;
 
 /// Identifies one individual for its entire lifetime in a world.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct AgentId(pub u64);
 
 /// Simulation context, retaining the draft's RNG and compute metadata contract.

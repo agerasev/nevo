@@ -16,6 +16,8 @@ cargo run --locked --bin nevo -- --viewer --scenario baseline
 cargo run --locked --bin nevo -- --viewer --scenario debug --seed 1 --paused
 cargo run --locked --bin nevo -- --scenario baseline --seed 1 --ticks 256
 cargo run --locked --bin nevo -- --config configs/debug.toml
+cargo run --locked --bin nevo -- runs/foraging --seed 1 --ticks 256
+cargo run --locked --bin nevo -- runs/foraging
 ```
 
 Use **Pause / Resume** to control playback and **Single step** to advance one tick
@@ -45,6 +47,13 @@ All run options use the same names in TOML, including `hz`, `viewer`, `paused`,
 and `smoke`. Booleans accept bare CLI flags or explicit values such as
 `--viewer=false`. Quote seeds larger than TOML's signed integer range. Unknown
 keys are rejected. The former `--seconds` and `--focal` options are removed.
+
+Every run stores its resolved configuration and resumable CBOR checkpoints in
+the supplied directory, or a new directory under `runs/`. Pass that directory
+alone to resume with its last configuration. Checkpoints are saved periodically
+and on orderly shutdown, including Ctrl-C; their interval and retention count
+are configurable. `--ticks N` always means N additional ticks for that invocation.
+See [persistence options, format, and recovery](docs/persistence.md).
 
 Build with `--no-default-features` when graphics are unnecessary; the executable
 and runner stay the same. Add `--smoke` to a viewer command to verify twelve

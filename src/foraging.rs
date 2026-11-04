@@ -1,5 +1,6 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use anyhow::ensure;
 use glam::DVec2;
 use rand::{RngExt, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -14,7 +15,8 @@ const UPKEEP: f64 = 2.0;
 const MAX_SPEED: f64 = 100.0;
 const DT: f64 = 0.1;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Scenario {
     Debug,
     Baseline,
@@ -60,7 +62,8 @@ impl MoveAction {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Plant {
     pub id: u64,
     pub position: DVec2,
@@ -73,7 +76,8 @@ impl Plant {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Body {
     pub position: DVec2,
     pub energy: f64,
@@ -121,7 +125,8 @@ pub struct TickReport {
     pub decisions: Vec<Decision>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ForagingWorld {
     number: u64,
     rng: Xoshiro256PlusPlus,
@@ -181,6 +186,48 @@ impl ForagingWorld {
 
     pub fn plants(&self) -> &[Plant] {
         &self.plants
+    }
+
+    pub(crate) fn validate_checkpoint(&self) -> anyhow::Result<()> {
+        ensure!(self.rng.state() != [0; 32], "world RNG state is all zero");
+        ensure!(
+            self.next_animal > 0 && self.next_plant > 0,
+            "invalid next ID"
+        );
+        ensure!(self.number < u64::MAX, "world tick counter is exhausted");
+        ensure!(
+            self.plants.len() == self.plant_target,
+            "plant count differs from target"
+        );
+        ensure!(
+            self.animals.len() >= self.immigrant_floor,
+            "population is below its floor"
+        );
+        for (id, body) in &self.animals {
+            ensure!(id.0 > 0 && id.0 < self.next_animal, "invalid animal ID");
+            // Negative energy is legitimate between upkeep and the next cull.
+            ensure!(body.energy.is_finite(), "non-finite animal energy");
+            ensure!(
+                body.position.is_finite() && body.position.abs().cmple(HALF_SIZE).all(),
+                "invalid animal position"
+            );
+        }
+        let mut ids = BTreeSet::new();
+        for plant in &self.plants {
+            ensure!(
+                plant.id > 0 && plant.id < self.next_plant && ids.insert(plant.id),
+                "invalid or duplicate plant ID"
+            );
+            ensure!(
+                (0.0..=RIPE_ENERGY).contains(&plant.energy),
+                "invalid plant energy"
+            );
+            ensure!(
+                plant.position.is_finite() && plant.position.abs().cmple(HALF_SIZE).all(),
+                "invalid plant position"
+            );
+        }
+        Ok(())
     }
 
     fn random_position(&mut self) -> DVec2 {
