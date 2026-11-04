@@ -1,11 +1,12 @@
 use std::{array, collections::BTreeMap};
 
+use anyhow::{Result, ensure};
 use glam::DVec2;
 use rand::{RngExt, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 
 use crate::{
-    AgentId, Controller, Population,
+    Agent, AgentId, Context, Cpu, Genome, Mutate, Population,
     foraging::{FoodObservation, MoveAction, Origin},
 };
 
@@ -23,18 +24,40 @@ impl Default for HerbivoreGenome {
 }
 
 impl HerbivoreGenome {
-    fn random(rng: &mut Xoshiro256PlusPlus) -> Self {
+    fn random<C: Context + ?Sized>(cx: &mut C) -> Self {
         Self {
-            weights: array::from_fn(|_| rng.random_range(-0.5..0.5)),
+            weights: array::from_fn(|_| cx.rng().random_range(-0.5..0.5)),
         }
     }
+}
 
-    fn offspring(&self, rng: &mut Xoshiro256PlusPlus) -> Self {
-        Self {
-            weights: self
-                .weights
-                .map(|weight| weight + rng.random_range(-0.02..0.02)),
+impl<C: Context + ?Sized> Genome<C> for HerbivoreGenome {}
+
+/// Independent uniform noise in [-max_delta, max_delta) for each weight and bias.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WeightMutation {
+    pub max_delta: f32,
+}
+
+impl Default for WeightMutation {
+    fn default() -> Self {
+        Self { max_delta: 0.02 }
+    }
+}
+
+impl<C: Context + ?Sized> Mutate<C, WeightMutation> for HerbivoreGenome {
+    fn mutate(&mut self, param: &WeightMutation, cx: &mut C) -> Result<()> {
+        let delta = param.max_delta;
+        ensure!(
+            delta >= 0.0 && (2.0 * delta).is_finite(),
+            "mutation max_delta must be nonnegative with a finite sampling range"
+        );
+        if delta > 0.0 {
+            for weight in &mut self.weights {
+                *weight += cx.rng().random_range(-delta..delta);
+            }
         }
+        Ok(())
     }
 }
 
@@ -67,11 +90,11 @@ fn matrix_vector<const IN: usize, const OUT: usize>(
     })
 }
 
-impl Controller for Herbivore {
-    type Observation = FoodObservation;
-    type Action = MoveAction;
+impl<C: Context + ?Sized> Agent<C> for Herbivore {
+    type Input = FoodObservation;
+    type Output = MoveAction;
 
-    fn act(&mut self, obs: &FoodObservation) -> MoveAction {
+    fn process(&mut self, _cx: &mut C, obs: FoodObservation) -> Result<MoveAction> {
         let weights = &self.genome.weights;
         let input = [
             obs.gradient.x as f32,
@@ -88,17 +111,17 @@ impl Controller for Herbivore {
             *value += bias;
         }
 
-        MoveAction {
+        Ok(MoveAction {
             direction: DVec2::new(output[0].into(), output[1].into()),
             speed_fraction: f64::from(output[2]).tanh().abs(),
-        }
+        })
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Herbivores {
     live: BTreeMap<AgentId, Herbivore>,
-    rng: Xoshiro256PlusPlus,
+    cx: Cpu<Xoshiro256PlusPlus>,
     founder_genome: Option<HerbivoreGenome>,
 }
 
@@ -106,7 +129,9 @@ impl Herbivores {
     pub fn new(genetic_seed: u64) -> Self {
         Self {
             live: BTreeMap::new(),
-            rng: Xoshiro256PlusPlus::seed_from_u64(genetic_seed),
+            cx: Cpu {
+                rng: Xoshiro256PlusPlus::seed_from_u64(genetic_seed),
+            },
             founder_genome: None,
         }
     }
@@ -131,14 +156,20 @@ impl Population<FoodObservation, MoveAction, Origin> for Herbivores {
             Origin::Founder => self
                 .founder_genome
                 .clone()
-                .unwrap_or_else(|| HerbivoreGenome::random(&mut self.rng)),
-            Origin::Immigrant => HerbivoreGenome::random(&mut self.rng),
-            Origin::Child { parent } => self
-                .live
-                .get(&parent)
-                .expect("child requires a living parent")
-                .genome
-                .offspring(&mut self.rng),
+                .unwrap_or_else(|| HerbivoreGenome::random(&mut self.cx)),
+            Origin::Immigrant => HerbivoreGenome::random(&mut self.cx),
+            Origin::Child { parent } => {
+                let mut genome = self
+                    .live
+                    .get(&parent)
+                    .expect("child requires a living parent")
+                    .genome
+                    .clone();
+                genome
+                    .mutate(&WeightMutation::default(), &mut self.cx)
+                    .expect("the baseline mutation range is valid");
+                genome
+            }
         };
         self.live.insert(id, Herbivore::new(genome));
     }
@@ -147,7 +178,8 @@ impl Population<FoodObservation, MoveAction, Origin> for Herbivores {
         self.live
             .get_mut(&id)
             .expect("only a living agent can act")
-            .act(obs)
+            .process(&mut self.cx, *obs)
+            .expect("the scalar herbivore agent is infallible")
     }
 
     fn despawn(&mut self, id: AgentId) {
@@ -170,17 +202,30 @@ mod tests {
         genome.weights[37] = 1.0; // hidden 1 -> direction.y
         genome.weights[46] = -1.0; // speed bias
         let mut herbivore = Herbivore::new(genome);
+        let mut cx = Cpu {
+            rng: Xoshiro256PlusPlus::seed_from_u64(1),
+        };
 
-        let first = herbivore.act(&FoodObservation {
-            strength: 0.0,
-            gradient: DVec2::X,
-        });
+        let first = herbivore
+            .process(
+                &mut cx,
+                FoodObservation {
+                    strength: 0.0,
+                    gradient: DVec2::X,
+                },
+            )
+            .unwrap();
         assert_eq!(first.direction, DVec2::X * f64::from(1.0_f32.tanh()));
         assert_eq!(first.speed_fraction, 1.0_f64.tanh());
-        let second = herbivore.act(&FoodObservation {
-            strength: 0.0,
-            gradient: DVec2::ZERO,
-        });
+        let second = herbivore
+            .process(
+                &mut cx,
+                FoodObservation {
+                    strength: 0.0,
+                    gradient: DVec2::ZERO,
+                },
+            )
+            .unwrap();
         assert_eq!(
             second.direction,
             DVec2::Y * f64::from(1.0_f32.tanh().tanh())

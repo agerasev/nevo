@@ -9,6 +9,8 @@ experiment. It may contain several runs, seeds, and comparisons.
   checks the first Rust birth trace and seeded replay through population turnover.
 - [Viewer and headless playback](2026-11-03-viewer-playback/README.md) checks
   seeded state after presenting frames, pausing, resuming, and single-stepping.
+- [Draft trait reuse](2026-11-04-draft-traits/README.md) compares seeded trajectories
+  before and after restoring the agent and genome contracts.
 
 Each experiment needs a short `README.md` recording:
 

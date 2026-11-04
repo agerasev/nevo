@@ -1,9 +1,25 @@
 # Foraging interfaces
 
 The simulation uses one world tick for short herbivore trials, continuous ecology,
-and the viewer. The three [Rust traits](../src/lib.rs) separate a controller's
-decision, a population's lifecycle, and an environment's rules.
+and the viewer. The [Rust contracts](../src/lib.rs) separate agent processing,
+genome mutation, population lifecycle, and environment rules.
 [Historical rules and recordings](../experiments/2016-07-26-herbivore-foraging/README.md)
+
+**Agent and genome contracts.** `Agent<C>`, `Genome<C>`, `Mutate<C, P>`, and their
+`Context` dependency retain the draft signatures from `b5af8cf:core/src/lib.rs`.
+`Agent::process` takes a context and an owned input and returns a fallible output.
+`Genome` requires cloning; `Mutate::mutate` changes a genome using parameters and
+the context's RNG. `Herbivore` and `HerbivoreGenome` implement these contracts for
+any compatible context. The baseline's [CPU context](../src/context.rs) wraps its
+existing genetic RNG; device and dtype metadata are unit values because execution
+uses native Rust scalar types. Agent processing consumes no random draws.
+
+`Population` and `Environment` retain their infallible signatures. The concrete
+`Herbivores` adapter unwraps processing and mutation results: its scalar agent
+always succeeds and its fixed mutation parameters are valid. A future backend
+that can fail needs an explicit population error policy. The current population
+still chooses the concrete herbivore type; these traits do not provide a generic
+agent factory or sexual reproduction.
 
 `ForagingWorld` implements `Environment<P>` for any population that accepts its
 observation, action, and origin types. It owns the plants, bodies, energy ledger,
@@ -18,9 +34,12 @@ recurrent brain can consume the same observations. To run a known founder, pass
 **Reference controller.** `FoodObservation` carries field strength and the two
 components of its normalized gradient in world coordinates. `MoveAction` carries
 a direction and speed fraction. The four recurrent units and three outputs use
-47 inherited `f32` weights and biases. A child receives independent uniform noise
-of up to 0.02 per parameter. All recurrent units read the previous hidden state
-in Rust. The C++ matrix multiply overwrote parts of that state during the update.
+47 inherited `f32` weights and biases. A child clones its parent's genome and
+calls `Mutate` with `WeightMutation::default()`, adding independent uniform noise
+in [-0.02, 0.02) per parameter. Custom mutation bounds must be nonnegative with a
+finite sampling range; zero is a no-op. All recurrent units read the previous
+hidden state in Rust. The C++ matrix multiply overwrote parts of that state during
+the update.
 Both Rust scenarios use clamped edges and food-only inputs. The debug trace also
 reports each body's energy and positions before and after movement.
 
