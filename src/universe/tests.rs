@@ -2,7 +2,7 @@ use ciborium::Value;
 
 use crate::{
     ecosystem::{Admission, Event, Scenario},
-    mind::{herbivore::HerbivoreHeredity, rnn::RnnGenome},
+    mind::rnn::{RnnGenome, WeightMutation},
     run::Run,
 };
 
@@ -71,7 +71,8 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
         0,
         23,
         17,
-        HerbivoreHeredity::with_immigrant_genome(genome),
+        Some(genome),
+        WeightMutation { max_delta: 0.07 },
     );
     world
         .admit(
@@ -84,6 +85,15 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
         .unwrap();
     world.seed_plants(Some(glam::DVec2::ZERO)).unwrap();
     let universe = Universe::from_world(world).unwrap();
+    let mut value = Value::serialized(&universe).unwrap();
+    assert_eq!(
+        field(&mut value, &["world", "mutation", "max_delta"]),
+        &Value::Float(f64::from(0.07_f32))
+    );
+    assert!(!matches!(
+        field(&mut value, &["world", "immigrant_genome"]),
+        Value::Null
+    ));
     let mut run = Run::from_universe(universe);
     assert_eq!(round_trip(&run), run);
     run.tick().unwrap();

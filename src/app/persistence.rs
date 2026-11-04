@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Counts, config::Options};
 
-const FORMAT_VERSION: u32 = 3;
+const FORMAT_VERSION: u32 = 4;
 const WORLD_MODEL: &str = "foraging-sense-first-v1";
 const AGENT_MODEL: &str = "herbivore-rnn-3-4-3-v1";
 
@@ -263,7 +263,7 @@ mod tests {
             state: Universe::new(Scenario::Debug, 1).unwrap(),
         };
         for (name, invalid) in [
-            ("format_version", ciborium::Value::from(2)),
+            ("format_version", ciborium::Value::from(3)),
             ("format_version", ciborium::Value::from(99)),
             ("world_model", ciborium::Value::from("another-world")),
             ("agent_model", ciborium::Value::from("another-agent")),

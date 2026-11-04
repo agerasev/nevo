@@ -122,7 +122,7 @@ struct Checkpoint {
 
 fn read_checkpoint(path: &Path) -> Checkpoint {
     let checkpoint: Checkpoint = ciborium::from_reader(fs::File::open(path).unwrap()).unwrap();
-    assert_eq!(checkpoint.format_version, 3);
+    assert_eq!(checkpoint.format_version, 4);
     checkpoint
 }
 

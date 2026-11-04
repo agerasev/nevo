@@ -9,9 +9,11 @@ use rand_xoshiro::{SplitMix64, Xoshiro256PlusPlus};
 
 use crate::{
     context::Cpu,
+    genome::{Mutate, RandomInit},
     mind::{
-        Heredity, Mind,
-        herbivore::{HerbivoreHeredity, HerbivoreMind},
+        Mind,
+        herbivore::HerbivoreMind,
+        rnn::{RnnGenome, WeightMutation},
     },
     universe::Simulation,
 };
@@ -164,7 +166,7 @@ impl Default for Admission {
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Ecosystem<M = HerbivoreMind, H = HerbivoreHeredity> {
+pub struct Ecosystem<M = HerbivoreMind, G = RnnGenome, P = WeightMutation> {
     rng: Xoshiro256PlusPlus,
     context: GeneticContext,
     next_animal: u64,
@@ -173,22 +175,24 @@ pub struct Ecosystem<M = HerbivoreMind, H = HerbivoreHeredity> {
     plants: Vec<Plant>,
     plant_target: usize,
     minimum_population: usize,
-    heredity: H,
+    immigrant_genome: Option<G>,
+    mutation: P,
 }
 
 impl Ecosystem {
     pub fn new(scenario: Scenario, seed: u64) -> Result<Self> {
-        Self::with_heredity(scenario, seed, HerbivoreHeredity::default())
+        Self::with_genetics(scenario, seed, None, WeightMutation::default())
     }
 }
 
-impl<M, H> Ecosystem<M, H> {
+impl<M, G, P> Ecosystem<M, G, P> {
     pub fn empty(
         plant_target: usize,
         minimum_population: usize,
         world_seed: u64,
         genetic_seed: u64,
-        heredity: H,
+        immigrant_genome: Option<G>,
+        mutation: P,
     ) -> Self {
         Self {
             rng: Xoshiro256PlusPlus::seed_from_u64(world_seed),
@@ -201,7 +205,8 @@ impl<M, H> Ecosystem<M, H> {
             plants: Vec::with_capacity(plant_target),
             plant_target,
             minimum_population,
-            heredity,
+            immigrant_genome,
+            mutation,
         }
     }
 
@@ -332,12 +337,19 @@ impl<M, H> Ecosystem<M, H> {
     }
 }
 
-impl<M, H> Ecosystem<M, H>
+impl<M, G, P> Ecosystem<M, G, P>
 where
-    M: Mind<GeneticContext, Input = FoodObservation, Output = MoveAction>,
-    H: Heredity<GeneticContext, M>,
+    M: Mind<GeneticContext, Input = FoodObservation, Output = MoveAction> + AsRef<G> + TryFrom<G>,
+    M::Error: Into<anyhow::Error>,
+    G: RandomInit<GeneticContext> + Mutate<GeneticContext, P>,
+    P: Clone,
 {
-    pub fn with_heredity(scenario: Scenario, seed: u64, heredity: H) -> Result<Self> {
+    pub fn with_genetics(
+        scenario: Scenario,
+        seed: u64,
+        immigrant_genome: Option<G>,
+        mutation: P,
+    ) -> Result<Self> {
         let mut seeds = SplitMix64::seed_from_u64(seed);
         let world_seed = seeds.next_u64();
         let genetic_seed = seeds.next_u64();
@@ -353,7 +365,14 @@ where
             ),
             Scenario::Baseline => (20, 500, 20, Admission::default()),
         };
-        let mut world = Self::empty(plants, minimum, world_seed, genetic_seed, heredity);
+        let mut world = Self::empty(
+            plants,
+            minimum,
+            world_seed,
+            genetic_seed,
+            immigrant_genome,
+            mutation,
+        );
         world.admit(arrivals, admission)?;
         world.seed_plants(admission.position)?;
         world.validate()?;
@@ -372,7 +391,11 @@ where
         let mut arrivals = Vec::with_capacity(count);
         for _ in 0..count {
             let position = admission.position.unwrap_or_else(|| self.random_position());
-            let mind = self.heredity.immigrant(&mut self.context)?;
+            let genome = match &self.immigrant_genome {
+                Some(template) => template.clone(),
+                None => G::random(&mut self.context)?,
+            };
+            let mind = Self::develop(genome)?;
             arrivals.push(self.spawn(
                 Body {
                     position,
@@ -382,6 +405,12 @@ where
             )?);
         }
         Ok(arrivals)
+    }
+
+    fn develop(genome: G) -> Result<M> {
+        let mind = M::try_from(genome).map_err(Into::into)?;
+        mind.validate()?;
+        Ok(mind)
     }
 
     fn reproduce(&mut self, events: &mut Vec<Event>) -> Result<()> {
@@ -402,7 +431,9 @@ where
             let offset = 0.5 * body.radius() * direction.normalize_or(DVec2::X);
             let child_position = body.position + offset;
             body.position -= offset;
-            let mind = self.heredity.offspring(&mut self.context, &animal.mind)?;
+            let mut genome = animal.mind.as_ref().clone();
+            genome.mutate(&self.mutation, &mut self.context)?;
+            let mind = Self::develop(genome)?;
             let child = self.spawn(
                 Body {
                     position: child_position,
@@ -420,10 +451,12 @@ where
     }
 }
 
-impl<M, H> Simulation for Ecosystem<M, H>
+impl<M, G, P> Simulation for Ecosystem<M, G, P>
 where
-    M: Mind<GeneticContext, Input = FoodObservation, Output = MoveAction>,
-    H: Heredity<GeneticContext, M>,
+    M: Mind<GeneticContext, Input = FoodObservation, Output = MoveAction> + AsRef<G> + TryFrom<G>,
+    M::Error: Into<anyhow::Error>,
+    G: RandomInit<GeneticContext> + Mutate<GeneticContext, P>,
+    P: Clone,
 {
     type Report = TickReport;
 
@@ -515,7 +548,9 @@ where
             );
             animal.mind.validate()?;
         }
-        self.heredity.validate()?;
+        if let Some(template) = &self.immigrant_genome {
+            Self::develop(template.clone())?;
+        }
         let mut ids = BTreeSet::new();
         for plant in &self.plants {
             ensure!(

@@ -1,9 +1,5 @@
 //! Map food perception and movement to a replaceable brain's scalar signals.
 
-mod heredity;
-
-pub use heredity::HerbivoreHeredity;
-
 use anyhow::Result;
 use glam::DVec2;
 
@@ -31,6 +27,21 @@ impl HerbivoreMind {
 impl<M> HerbivoreMind<M> {
     pub fn from_brain(brain: M) -> Self {
         Self { brain }
+    }
+}
+
+impl From<RnnGenome> for HerbivoreMind {
+    fn from(genome: RnnGenome) -> Self {
+        Self::new(genome)
+    }
+}
+
+impl<M, G: ?Sized> AsRef<G> for HerbivoreMind<M>
+where
+    M: AsRef<G>,
+{
+    fn as_ref(&self) -> &G {
+        self.brain.as_ref()
     }
 }
 

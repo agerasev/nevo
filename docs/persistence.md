@@ -54,17 +54,18 @@ Each checkpoint is one CBOR file containing the effective configuration, cumulat
 event counts, model identifiers, and the directly serialized
 [Universe](../src/universe/mod.rs): step and complete experiment model. The ecosystem
 owns ordered plants and animals (each with body and mind), both RNG states, genomes,
-recurrent memories, the immigrant genome template, population target, and ID counters.
+recurrent memories, the immigrant genome template, mutation parameters, population
+target, and ID counters.
 Animal IDs serialize as integers; loading validates each complete animal and
 the remaining experiment state. Native CBOR arrays hold weights;
 no safetensors payload is used.
 
 Locks, channels, pacing clocks, and viewer/device resources live outside Universe.
 Reconstructible caches may be omitted from serialization; recurrent memory and RNG
-positions are required state. The Simulation, Mind, and Heredity contracts have no
+positions are required state. Core simulation and genetics contracts have no
 persistence bounds.
 
-The current format is checkpoint version 3, with `foraging-sense-first-v1` and
+The current format is checkpoint version 4, with `foraging-sense-first-v1` and
 `herbivore-rnn-3-4-3-v1` model identifiers. Only this format is accepted;
 compatibility and migrations are intentionally unsupported. Rust module/type names
 are not part of the format.

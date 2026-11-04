@@ -3,7 +3,7 @@ use glam::DVec2;
 use nevo::{
     context::{Context, Cpu},
     ecosystem::FoodObservation,
-    genome::Mutate,
+    genome::{Mutate, RandomInit},
     mind::{
         Mind,
         herbivore::HerbivoreMind,
@@ -158,4 +158,37 @@ fn invalid_mutation_fails_without_changing_genome_or_random_stream() {
         assert_eq!(genome, original);
         assert_eq!(context, before);
     }
+}
+
+#[test]
+fn random_initialization_accepts_unsized_context_without_requiring_a_genome() {
+    // No Clone or Genome implementation: random initialization is independent.
+    struct RandomLabel(u64);
+
+    impl<C: Context + ?Sized> RandomInit<C> for RandomLabel {
+        fn random(cx: &mut C) -> Result<Self> {
+            Ok(Self(cx.rng().next_u64()))
+        }
+    }
+
+    let mut context = ResearchContext {
+        rng: Xoshiro256PlusPlus::seed_from_u64(42),
+    };
+    let mut expected = context.clone();
+    let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
+        &mut context;
+    let label = RandomLabel::random(cx).unwrap();
+    assert_eq!(label.0, expected.rng.next_u64());
+    assert_eq!(context, expected);
+
+    let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
+        &mut context;
+    let genome = RnnGenome::random(cx).unwrap();
+    assert!(
+        genome
+            .weights
+            .iter()
+            .all(|weight| (-0.5..0.5).contains(weight))
+    );
+    assert_ne!(context, expected);
 }

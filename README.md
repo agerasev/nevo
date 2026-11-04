@@ -66,8 +66,8 @@ Multi-file modules use `mod.rs` inside their directory.
 
 | Module | Responsibility |
 | --- | --- |
-| [mind](src/mind/mod.rs) | Mind and Heredity contracts, food-sensing adapter, and scalar RNN with memory and genome. |
-| [genome](src/genome/mod.rs) | Representation-independent inheritance and mutation contracts. |
+| [mind](src/mind/mod.rs) | Mind contract, food-sensing adapter, and scalar RNN with memory and genome. |
+| [genome](src/genome/mod.rs) | Genome, Mutate, and independent RandomInit contracts. |
 | [context](src/context/mod.rs) | Execution context contract and CPU implementation. |
 | [ecosystem](src/ecosystem/mod.rs) | Plants and complete animals with body and mind; foraging, reproduction, and immigration rules. |
 | [universe](src/universe/mod.rs) | Complete serializable state and the small Simulation stepping contract. |

@@ -1,49 +1,87 @@
 use super::*;
+use crate::genome::{Genome, Mutate, RandomInit};
 
 #[derive(Clone, Debug, Default, PartialEq)]
-struct FixedMind {
+struct FixedGenome<const FAIL_INIT: bool = false> {
     action: MoveAction,
-    calls: usize,
-    fail: bool,
+    allele: u64,
+    fail_mind: bool,
+    reject_mind: bool,
 }
 
-impl Mind<GeneticContext> for FixedMind {
+impl<const FAIL_INIT: bool> Genome<GeneticContext> for FixedGenome<FAIL_INIT> {}
+
+impl<const FAIL_INIT: bool> RandomInit<GeneticContext> for FixedGenome<FAIL_INIT> {
+    fn random(cx: &mut GeneticContext) -> Result<Self> {
+        let allele = cx.rng.next_u64();
+        ensure!(!FAIL_INIT, "initialization failed");
+        Ok(Self {
+            allele,
+            ..Self::default()
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct FixedMutation {
+    increment: u64,
+    fail: bool,
+    reject_child: bool,
+}
+
+impl<const FAIL_INIT: bool> Mutate<GeneticContext, FixedMutation> for FixedGenome<FAIL_INIT> {
+    fn mutate(&mut self, mutation: &FixedMutation, cx: &mut GeneticContext) -> Result<()> {
+        if mutation.fail {
+            // A backend may fail after consuming randomness or changing scratch state.
+            self.allele = cx.rng.next_u64();
+            anyhow::bail!("mutation failed");
+        }
+        self.allele = self.allele.wrapping_add(mutation.increment);
+        self.reject_mind = mutation.reject_child;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct FixedMind<const FAIL_INIT: bool = false> {
+    genome: FixedGenome<FAIL_INIT>,
+    calls: usize,
+}
+
+impl<const FAIL_INIT: bool> AsRef<FixedGenome<FAIL_INIT>> for FixedMind<FAIL_INIT> {
+    fn as_ref(&self) -> &FixedGenome<FAIL_INIT> {
+        &self.genome
+    }
+}
+
+impl<const FAIL_INIT: bool> TryFrom<FixedGenome<FAIL_INIT>> for FixedMind<FAIL_INIT> {
+    type Error = anyhow::Error;
+
+    fn try_from(genome: FixedGenome<FAIL_INIT>) -> Result<Self> {
+        ensure!(!genome.reject_mind, "mind construction failed");
+        Ok(Self { genome, calls: 0 })
+    }
+}
+
+impl<const FAIL_INIT: bool> Mind<GeneticContext> for FixedMind<FAIL_INIT> {
     type Input = FoodObservation;
     type Output = MoveAction;
 
     fn process(&mut self, _: &mut GeneticContext, _: FoodObservation) -> Result<MoveAction> {
         self.calls += 1;
-        ensure!(!self.fail, "mind failed");
-        Ok(self.action)
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-struct FixedHeredity {
-    fail_offspring: bool,
-}
-
-impl Heredity<GeneticContext, FixedMind> for FixedHeredity {
-    fn immigrant(&self, _: &mut GeneticContext) -> Result<FixedMind> {
-        Ok(FixedMind::default())
-    }
-    fn offspring(&self, _: &mut GeneticContext, parent: &FixedMind) -> Result<FixedMind> {
-        ensure!(!self.fail_offspring, "offspring failed");
-        Ok(FixedMind {
-            action: parent.action,
-            ..FixedMind::default()
-        })
+        ensure!(!self.genome.fail_mind, "mind failed");
+        Ok(self.genome.action)
     }
 }
 
 struct Fixture {
-    world: Ecosystem<FixedMind, FixedHeredity>,
+    world: Ecosystem<FixedMind, FixedGenome, FixedMutation>,
     number: u64,
 }
 
 impl Fixture {
     fn debug(seed: u64) -> Self {
-        let mut world = Ecosystem::empty(1, 0, seed, seed, FixedHeredity::default());
+        let mut world = Ecosystem::empty(1, 0, seed, seed, None, FixedMutation::default());
         world
             .admit(
                 1,
@@ -64,7 +102,7 @@ impl Fixture {
 
     fn action(&mut self, action: MoveAction) {
         for animal in self.world.animals.values_mut() {
-            animal.mind.action = action;
+            animal.mind.genome.action = action;
         }
     }
 }
@@ -177,18 +215,26 @@ fn parent_senses_ripe_food_and_newborn_waits_to_process_it() {
 
     let mut genome = RnnGenome::default();
     genome.weights[28] = 0.5;
-    let mut world = Ecosystem::with_heredity(
-        Scenario::Debug,
-        7,
-        HerbivoreHeredity::with_immigrant_genome(genome),
-    )
-    .unwrap();
+    let mut world: Ecosystem =
+        Ecosystem::with_genetics(Scenario::Debug, 7, Some(genome), WeightMutation::default())
+            .unwrap();
     let before = world.clone();
     let sensed = world.sense(world.animals[&id(1)].body.position);
     assert_eq!(world, before, "sensing must not change the world");
     assert_eq!(sensed.strength, 100.0);
 
+    let mut expected_genome = world.animals[&id(1)].mind.brain.genome.clone();
+    let mut expected_context = world.context.clone();
+    expected_genome
+        .mutate(&WeightMutation::default(), &mut expected_context)
+        .unwrap();
     let first = world.advance(1).unwrap();
+    assert_eq!(
+        world.animals[&id(1)].mind.brain.genome,
+        before.animals[&id(1)].mind.brain.genome
+    );
+    assert_eq!(world.animals[&id(2)].mind.brain.genome, expected_genome);
+    assert_eq!(world.context, expected_context);
     assert_eq!(first.decisions.len(), 1);
     assert_eq!(first.decisions[0].id, id(1));
     assert_eq!(first.decisions[0].energy, 390.0);
@@ -288,17 +334,27 @@ fn replacements_follow_culling_and_precede_births() {
 }
 
 #[test]
-fn failures_in_minds_actions_or_birth_leave_the_published_universe_unchanged() {
+fn failures_in_processing_mutation_or_construction_leave_the_published_universe_unchanged() {
     use crate::universe::Universe;
-    for phase in 0..3 {
+    for phase in 0..4 {
         let mut fixture = Fixture::debug(11);
         match phase {
-            0 => fixture.world.animals.get_mut(&id(1)).unwrap().mind.fail = true,
+            0 => {
+                fixture
+                    .world
+                    .animals
+                    .get_mut(&id(1))
+                    .unwrap()
+                    .mind
+                    .genome
+                    .fail_mind = true
+            }
             1 => fixture.action(MoveAction {
                 direction: DVec2::new(f64::INFINITY, 0.0),
                 speed_fraction: 0.0,
             }),
-            2 => fixture.world.heredity.fail_offspring = true,
+            2 => fixture.world.mutation.fail = true,
+            3 => fixture.world.mutation.reject_child = true,
             _ => unreachable!(),
         }
         let mut universe = Universe::from_world(fixture.world).unwrap();
@@ -310,9 +366,11 @@ fn failures_in_minds_actions_or_birth_leave_the_published_universe_unchanged() {
 
 #[test]
 fn initial_and_later_arrivals_use_the_same_admission_and_rng_sequence() {
-    let mut initial = Ecosystem::empty(0, 0, 42, 17, HerbivoreHeredity::default());
+    let mut initial =
+        Ecosystem::<HerbivoreMind>::empty(0, 0, 42, 17, None, WeightMutation::default());
     let arrivals = initial.admit(1, Admission::default()).unwrap();
-    let mut later = Ecosystem::empty(0, 1, 42, 17, HerbivoreHeredity::default());
+    let mut later =
+        Ecosystem::<HerbivoreMind>::empty(0, 1, 42, 17, None, WeightMutation::default());
     let report = later.advance(1).unwrap();
     assert_eq!(arrivals, vec![id(1)]);
     assert_eq!(
@@ -374,4 +432,113 @@ fn identities_serialize_as_integers_and_never_wrap() {
     assert!(fixture.world.admit(1, Admission::default()).is_err());
     assert_eq!(fixture.world.next_animal, u64::MAX);
     assert_eq!(fixture.world.animals.len(), 1);
+}
+
+#[test]
+fn a_different_genome_and_mutation_type_drive_generic_reproduction() {
+    let mut world: Ecosystem<FixedMind, FixedGenome, FixedMutation> = Ecosystem::empty(
+        0,
+        0,
+        42,
+        17,
+        None,
+        FixedMutation {
+            increment: 7,
+            ..FixedMutation::default()
+        },
+    );
+    let mut expected_rng = world.context.rng.clone();
+    let parent_allele = expected_rng.next_u64();
+    let parent = world
+        .admit(
+            1,
+            Admission {
+                position: Some(DVec2::ZERO),
+                energy: 500.0,
+            },
+        )
+        .unwrap()[0];
+    assert_eq!(world.animals[&parent].mind.genome.allele, parent_allele);
+    assert_eq!(world.context.rng, expected_rng);
+
+    let report = world.advance(1).unwrap();
+    let child = match report.events.as_slice() {
+        [
+            Event::Birth {
+                parent: actual,
+                child,
+            },
+        ] => {
+            assert_eq!(*actual, parent);
+            *child
+        }
+        events => panic!("unexpected events: {events:?}"),
+    };
+    assert_eq!(world.animals[&parent].mind.genome.allele, parent_allele);
+    assert_eq!(
+        world.animals[&child].mind.genome.allele,
+        parent_allele.wrapping_add(7)
+    );
+    assert_eq!(world.animals[&parent].mind.calls, 1);
+    assert_eq!(world.animals[&child].mind.calls, 0);
+    assert_eq!(
+        world.context.rng, expected_rng,
+        "this mutation is deterministic"
+    );
+    assert_eq!(world.animals[&parent].body.energy, 248.0);
+    assert_eq!(world.animals[&child].body.energy, 248.0);
+}
+
+#[test]
+fn failed_random_initialization_does_not_publish_consumed_randomness() {
+    use crate::universe::Universe;
+
+    let world: Ecosystem<FixedMind<true>, FixedGenome<true>, FixedMutation> =
+        Ecosystem::empty(0, 1, 11, 17, None, FixedMutation::default());
+    let mut universe = Universe::from_world(world).unwrap();
+    let original = universe.clone();
+    assert!(
+        universe
+            .advance()
+            .unwrap_err()
+            .to_string()
+            .contains("initialization failed")
+    );
+    assert_eq!(universe, original);
+}
+
+#[test]
+fn immigrant_template_applies_to_every_arrival_without_genetic_draws() {
+    let mut genome = RnnGenome::default();
+    genome.weights[28] = 0.5;
+    let mut world: Ecosystem = Ecosystem::empty(
+        0,
+        0,
+        42,
+        17,
+        Some(genome.clone()),
+        WeightMutation::default(),
+    );
+    let original_context = world.context.clone();
+    let admission = Admission {
+        position: Some(DVec2::ZERO),
+        energy: 100.0,
+    };
+    let first = world.admit(1, admission).unwrap()[0];
+    world.advance(1).unwrap();
+    assert_ne!(world.animals[&first].mind.brain.memory, [0.0; 4]);
+    let later = world.admit(1, admission).unwrap()[0];
+    for animal in world.animals.values() {
+        assert_eq!(animal.mind.brain.genome, genome);
+    }
+    assert_eq!(world.animals[&later].mind.brain.memory, [0.0; 4]);
+    assert_eq!(world.context, original_context);
+}
+
+#[test]
+fn an_invalid_template_is_rejected_even_without_animals() {
+    let mut genome = RnnGenome::default();
+    genome.weights[0] = f32::NAN;
+    let world: Ecosystem = Ecosystem::empty(0, 0, 42, 17, Some(genome), WeightMutation::default());
+    assert!(world.validate().is_err());
 }

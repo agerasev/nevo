@@ -5,7 +5,7 @@ use rand::RngExt;
 
 use crate::{
     context::Context,
-    genome::{Genome, Mutate},
+    genome::{Genome, Mutate, RandomInit},
 };
 
 use super::weights;
@@ -25,18 +25,19 @@ impl Default for RnnGenome {
     }
 }
 
-impl RnnGenome {
-    pub fn random<C: Context + ?Sized>(cx: &mut C) -> Self {
-        Self {
+impl<C: Context + ?Sized> RandomInit<C> for RnnGenome {
+    fn random(cx: &mut C) -> Result<Self> {
+        Ok(Self {
             weights: array::from_fn(|_| cx.rng().random_range(-0.5..0.5)),
-        }
+        })
     }
 }
 
 impl<C: Context + ?Sized> Genome<C> for RnnGenome {}
 
 /// Independent uniform noise in [-max_delta, max_delta) for each weight and bias.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WeightMutation {
     pub max_delta: f32,
 }

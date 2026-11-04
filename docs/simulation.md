@@ -12,11 +12,14 @@ serializes directly to CBOR; locks and the viewer live outside it.
 | [Ecosystem](../src/ecosystem/mod.rs) | The foraging model: plants, complete animals, perception, physics, population support, and random streams. |
 | `Animal<B, M>` | Own a body and its mind together: `body: B`, `mind: M`. |
 | [Mind](../src/mind/mod.rs) | Process typed input into output and validate its own state. |
-| [Heredity](../src/mind/mod.rs) | Create immigrant minds and derive offspring minds from a parent. |
 | [Genome / Mutate](../src/genome/mod.rs) | Clone inherited representations and mutate them using an execution context. |
+| [RandomInit](../src/genome/mod.rs) | Initialize a value from the context RNG, independently of Genome. |
 | [Context](../src/context/mod.rs) | Supply RNG and execution resources; the CPU context owns the genetic RNG. |
 
-`Ecosystem<M, H>` can use another compatible mind and heredity implementation.
+`Ecosystem<M, G, P>` can use another compatible mind, genome, and mutation parameter
+type. Genetic minds expose their genome through `AsRef<G>` and construct fresh minds
+through `TryFrom<G>`; the baseline provides infallible `From<RnnGenome>` conversions.
+The Mind contract itself does not require a genome.
 A different experiment implements `Simulation`; the runner imposes no animal,
 population, observation, or action types. `Animal` is generic over its body and mind;
 the foraging model uses its own physical `Body` type.
@@ -34,11 +37,18 @@ and four recurrent units, all reading the previous hidden state. Minds receive
 observations, not unrestricted access to the world. The RNN consumes no random draws
 when processing.
 
-`HerbivoreHeredity` creates random immigrant genomes, or uses its optional template
-for every immigrant. Offspring copy the parent genome, mutate each parameter by
-independent noise in [-0.02, 0.02), and start with zero recurrent memory. Invalid
-mutation bounds fail; zero preserves the RNG stream. Initial and later arrivals
-both use `Ecosystem::admit` with physical admission parameters.
+Immigration clones the optional genome template or calls `RandomInit::random`, then
+constructs a fresh mind. Reproduction clones the parent's genome, calls `Mutate` with
+the experiment's stored parameters, and constructs the offspring's mind. There is no
+separate inheritance-policy object. Both paths propagate initialization, mutation,
+and conversion errors through Universe preparation.
+
+For the baseline, random genomes draw 47 weights in [-0.5, 0.5). Default mutation
+adds independent noise in [-0.02, 0.02), and new brains start with zero recurrent
+memory. Invalid mutation bounds fail when used; zero preserves the RNG stream.
+Initial and later arrivals both use `Ecosystem::admit` with physical admission
+parameters. A supplied genome template applies to all immigrants without consuming
+genetic random draws.
 
 ## A complete step
 

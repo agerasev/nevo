@@ -28,6 +28,18 @@ impl Rnn {
     }
 }
 
+impl From<RnnGenome> for Rnn {
+    fn from(genome: RnnGenome) -> Self {
+        Self::new(genome)
+    }
+}
+
+impl AsRef<RnnGenome> for Rnn {
+    fn as_ref(&self) -> &RnnGenome {
+        &self.genome
+    }
+}
+
 fn matrix_vector<const IN: usize, const OUT: usize>(
     weights: &[f32],
     input: &[f32; IN],
