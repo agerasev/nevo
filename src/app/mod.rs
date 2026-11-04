@@ -165,7 +165,10 @@ fn attach_viewer(
         .unwrap_or_else(|| Err("viewer exited without a result".into()))
 }
 
-fn execute(cli: Cli) -> Result<()> {
+fn execute(mut cli: Cli) -> Result<()> {
+    if cli.latest {
+        cli.directory = Some(persistence::latest_run(std::path::Path::new("runs"))?);
+    }
     let mut options = cli.load_config(None)?;
     options.loop_options()?;
     let directory = RunDirectory::open(cli.directory.as_deref())?;
@@ -191,6 +194,7 @@ fn execute(cli: Cli) -> Result<()> {
             (run, checkpoint.counts)
         }
         None => {
+            ensure!(!cli.latest, "selected run no longer contains a checkpoint");
             directory.check_new()?;
             options.seed = Some(options.resolved_seed()?);
             (

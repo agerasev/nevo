@@ -60,8 +60,9 @@ slowing simulation; there is no additional rendering timer.
 
 Every run stores its resolved configuration and resumable CBOR checkpoints in
 the supplied directory, or a new directory under `runs/`. Pass that directory
-alone to resume with its last configuration. Checkpoints are saved periodically
-and on orderly shutdown, including Ctrl-C; their interval and retention count
+alone to resume with its last configuration, or use `--latest` for the most recently
+saved run under `runs/`. Checkpoints are saved periodically and on orderly shutdown,
+including Ctrl-C; their interval and retention count
 are configurable. `--ticks N` always means N additional ticks for that invocation.
 See [persistence options, format, and recovery](docs/persistence.md).
 

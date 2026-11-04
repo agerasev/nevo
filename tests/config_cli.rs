@@ -200,6 +200,7 @@ fn missing_config_fails_but_help_does_not_need_the_file() {
     assert!(!help.contains("--hz"));
     assert!(help.contains("--tick-hz"));
     assert!(help.contains("--viewer"));
+    assert!(help.contains("--latest"));
 }
 
 #[test]

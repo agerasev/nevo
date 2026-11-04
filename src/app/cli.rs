@@ -14,6 +14,10 @@ pub struct Cli {
     /// Run directory: resume if it contains checkpoints, otherwise create a run.
     pub directory: Option<PathBuf>,
 
+    /// Resume the run directly under runs/ with the most recently saved checkpoint.
+    #[arg(long, conflicts_with = "directory")]
+    pub latest: bool,
+
     /// Load TOML files in order; later files override earlier ones, then CLI wins.
     #[arg(long)]
     pub config: Vec<PathBuf>,

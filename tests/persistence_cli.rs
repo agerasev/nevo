@@ -7,7 +7,7 @@ use std::{
     process::{Child, Command, Output, Stdio},
     sync::atomic::{AtomicUsize, Ordering},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use nevo::{run::Run, universe::Universe};
@@ -77,6 +77,17 @@ impl Directory {
     fn config(&self, run: &str) -> toml::Value {
         let text = fs::read_to_string(self.0.join(run).join("config.toml")).unwrap();
         toml::from_str(&text).unwrap()
+    }
+
+    fn saved_at(&self, run: &str, seconds: u64) {
+        for checkpoint in self.checkpoints(run) {
+            fs::OpenOptions::new()
+                .write(true)
+                .open(checkpoint)
+                .unwrap()
+                .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds))
+                .unwrap();
+        }
     }
 
     fn overlay(&self, name: &str, content: &str) -> String {
@@ -278,6 +289,112 @@ fn default_directory_records_entropy_and_full_range_seeds() {
         directory.latest("maximum").state.restore().unwrap(),
         reference
     );
+}
+
+#[test]
+fn latest_resumes_by_save_time_with_saved_config_and_explicit_overrides() {
+    let directory = Directory::new();
+    directory.success(&["runs/z-older", "--seed", "1", "--ticks", "9"]);
+    directory.success(&[
+        "runs/a-newer",
+        "--config",
+        &support::preset("debug"),
+        "--seed",
+        "42",
+        "--ticks",
+        "2",
+    ]);
+    directory.saved_at("runs/z-older", 100);
+    directory.saved_at("runs/a-newer", 200);
+    // Unfinished saves, artifact folders, and runs outside runs/ are not candidates.
+    fs::create_dir_all(directory.0.join("runs/artifacts/checkpoints")).unwrap();
+    fs::write(
+        directory
+            .0
+            .join("runs/artifacts/checkpoints/.00000000000000000003.cbor.tmp"),
+        b"incomplete",
+    )
+    .unwrap();
+    directory.success(&["outside", "--ticks", "0"]);
+    directory.success(&[
+        "--latest",
+        "--config",
+        &directory.overlay("override.toml", "ticks = 7\n[viewer]\nvsync = false\n"),
+        "--ticks",
+        "1",
+    ]);
+    let mut reference = Run::new(support::ecosystem("debug"), 42).unwrap();
+    for _ in 0..3 {
+        reference.tick().unwrap();
+    }
+    assert_eq!(
+        directory.latest("runs/a-newer").state.restore().unwrap(),
+        reference
+    );
+    assert_eq!(directory.latest("runs/z-older").state.step(), 9);
+    let config = directory.config("runs/a-newer");
+    assert_eq!(config["viewer"]["vsync"].as_bool(), Some(false));
+    assert!(config.get("latest").is_none());
+
+    // Saving an older run makes it the latest, irrespective of its creation/name.
+    directory.success(&["runs/z-older", "--ticks", "0"]);
+    directory.saved_at("runs/a-newer", 200);
+    directory.success(&["--latest", "--ticks", "1"]);
+    assert_eq!(directory.latest("runs/z-older").state.step(), 10);
+    assert_eq!(directory.latest("runs/a-newer").state.step(), 3);
+}
+
+#[test]
+fn latest_requires_a_saved_run_and_conflicts_with_a_directory() {
+    let directory = Directory::new();
+    let missing = directory.run(&["--latest", "--ticks", "0"]);
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("no saved runs"));
+    assert!(!directory.0.join("runs").exists());
+
+    fs::create_dir_all(directory.0.join("runs/unfinished/checkpoints")).unwrap();
+    let empty = directory.run(&["--latest", "--ticks", "0"]);
+    assert!(!empty.status.success());
+    assert!(String::from_utf8_lossy(&empty.stderr).contains("no saved runs"));
+    assert!(!directory.0.join("runs/unfinished/config.toml").exists());
+
+    let conflict = directory.run(&["explicit", "--latest", "--ticks", "0"]);
+    assert!(!conflict.status.success());
+    assert!(String::from_utf8_lossy(&conflict.stderr).contains("cannot be used with"));
+    assert!(!directory.0.join("explicit").exists());
+}
+
+#[test]
+fn latest_does_not_fall_back_when_selected_run_is_locked_or_corrupt() {
+    let directory = Directory::new();
+    directory.success(&["runs/older", "--seed", "1", "--ticks", "2"]);
+    directory.success(&["runs/newer", "--seed", "42", "--ticks", "3"]);
+    directory.saved_at("runs/older", 100);
+    directory.saved_at("runs/newer", 200);
+    let config_path = directory.0.join("runs/newer/config.toml");
+    let config = fs::read(&config_path).unwrap();
+    let checkpoint_path = directory.checkpoints("runs/newer").pop().unwrap();
+    let checkpoint = fs::read(&checkpoint_path).unwrap();
+
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(directory.0.join("runs/newer/.lock"))
+        .unwrap();
+    lock.try_lock().unwrap();
+    let locked = directory.run(&["--latest", "--ticks", "1"]);
+    assert!(!locked.status.success());
+    assert!(String::from_utf8_lossy(&locked.stderr).contains("cannot lock run directory"));
+    assert_eq!(fs::read(&checkpoint_path).unwrap(), checkpoint);
+    drop(lock);
+
+    fs::write(&checkpoint_path, b"broken checkpoint").unwrap();
+    let corrupt = directory.run(&["--latest", "--ticks", "1"]);
+    assert!(!corrupt.status.success());
+    assert!(String::from_utf8_lossy(&corrupt.stderr).contains("reading checkpoint"));
+    assert_eq!(fs::read(&config_path).unwrap(), config);
+    assert_eq!(fs::read(&checkpoint_path).unwrap(), b"broken checkpoint");
+    assert_eq!(directory.latest("runs/older").state.step(), 2);
 }
 
 #[test]

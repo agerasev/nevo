@@ -1,7 +1,7 @@
 # Run persistence
 
 Each invocation uses a run directory. Supply its path as the positional argument;
-omit it to create `runs/YYYY-MM-DD_HH-MM-SS/` using the local date and time.
+omit it without `--latest` to create `runs/YYYY-MM-DD_HH-MM-SS/` using local time.
 If the name is taken, append `-2`, `-3`, etc. to create a fresh directory.
 The chosen path is printed to stderr. Keep screenshots and other run outputs
 alongside checkpoints in that directory, for example under `screenshots/`.
@@ -14,9 +14,20 @@ cargo run --locked -- runs/baseline --seed 1 --ticks 256
 # Resume from its newest checkpoint, loading config.toml automatically.
 cargo run --locked -- runs/baseline
 
+# Resume the most recently saved run under runs/.
+cargo run --locked -- --latest
+
 # Continue for 64 more ticks.
 cargo run --locked -- runs/baseline --ticks 64
 ```
+
+`--latest` checks immediate subdirectories of `runs/`, including named runs, and
+selects the run with the most recently modified checkpoint file. Directory names
+break equal-time ties. Artifact folders and runs without checkpoints are ignored.
+The selected run uses the usual saved configuration and explicit overrides.
+No saved runs, a locked directory, or an invalid selected checkpoint produces an
+error; it never silently starts fresh or falls back to another run.
+`--latest` and an explicit directory are mutually exclusive.
 
 `config.toml` records the last effective configuration, including the resolved
 entropy seed. Ordered `--config PATH` files override individual settings, then CLI

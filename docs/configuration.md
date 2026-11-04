@@ -33,9 +33,9 @@ loading files. Quote seeds larger than TOML's signed integer range.
 | `--paused[=true\|false]` | `paused` |
 
 Bare boolean shortcuts mean true; `--viewer=false` and `--paused=false` override true
-values. Omitted shortcuts preserve file settings. The positional run directory and
-repeated `--config` paths select inputs and are not persisted. There is no `--hz`
-alias, generated nested flags, or `--set` interface.
+values. Omitted shortcuts preserve file settings. The positional run directory,
+[`--latest`](persistence.md), and repeated `--config` paths select inputs and are
+not persisted. There is no `--hz` alias, generated nested flags, or `--set` interface.
 
 Viewer configuration is a table (equivalently, dotted TOML keys):
 

@@ -4,6 +4,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{BufReader, BufWriter, Read, Write},
     path::{Path, PathBuf},
+    time::SystemTime,
 };
 
 use anyhow::{Context, Result, bail, ensure};
@@ -95,12 +96,10 @@ impl RunDirectory {
                 continue;
             };
             // Only our fixed-width checkpoint names participate in retention.
-            ensure!(
-                tick.len() == 20 && tick.bytes().all(|byte| byte.is_ascii_digit()),
-                "invalid checkpoint filename {}",
-                entry.path().display()
-            );
-            checkpoints.push((tick.parse()?, entry.path()));
+            let tick = checkpoint_tick(tick).with_context(|| {
+                format!("invalid checkpoint filename {}", entry.path().display())
+            })?;
+            checkpoints.push((tick, entry.path()));
         }
         checkpoints.sort_by_key(|(tick, _)| *tick);
         Ok(checkpoints)
@@ -191,6 +190,67 @@ impl RunDirectory {
         }
         Ok(())
     }
+}
+
+fn checkpoint_tick(stem: &str) -> Option<u64> {
+    (stem.len() == 20 && stem.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| stem.parse().ok())
+        .flatten()
+}
+
+/// Discover without locking or changing unrelated runs; validate the selected run on open.
+pub fn latest_run(root: &Path) -> Result<PathBuf> {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            bail!("no saved runs found in {}", root.display());
+        }
+        Err(error) => return Err(error).context("listing runs"),
+    };
+    let mut latest: Option<(SystemTime, PathBuf)> = None;
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        let checkpoints = match fs::read_dir(path.join("checkpoints")) {
+            Ok(checkpoints) => checkpoints,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("listing checkpoints in {}", path.display()));
+            }
+        };
+        for checkpoint in checkpoints {
+            let checkpoint = checkpoint?;
+            let name = checkpoint.file_name();
+            if name
+                .to_str()
+                .and_then(|name| name.strip_suffix(".cbor"))
+                .and_then(checkpoint_tick)
+                .is_none()
+            {
+                continue;
+            }
+            let metadata = match checkpoint.metadata() {
+                Ok(metadata) => metadata,
+                // An active run may have just pruned an older checkpoint.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if metadata.is_file() {
+                let candidate = (metadata.modified()?, path.clone());
+                // Break equal-time ties by path, independently of directory listing order.
+                if latest.as_ref().is_none_or(|previous| candidate > *previous) {
+                    latest = Some(candidate);
+                }
+            }
+        }
+    }
+    latest
+        .map(|(_, path)| path)
+        .with_context(|| format!("no saved runs found in {}", root.display()))
 }
 
 fn create_run_directory(root: &Path, time: &jiff::Zoned) -> Result<PathBuf> {
