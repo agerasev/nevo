@@ -49,7 +49,6 @@ fn agent_work_and_after_tick_callback_hold_no_world_lock() {
             LoopOptions {
                 ticks: Some(1),
                 interval: Duration::ZERO,
-                ..LoopOptions::default()
             },
             commands,
             |run, report| {

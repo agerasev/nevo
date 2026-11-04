@@ -14,8 +14,11 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.104"
+conf = { version = "0.4.5", features = ["serde"] }
+toml = "1.1.8"
+serde = "1.0"
 wgame = { path = "wgame/wgame", optional = true }
 wgame-egui = { path = "wgame/wgame-egui", optional = true }
-rand = { version = "0.10.2", default-features = false, features = ["std"] }
+rand = { version = "0.10.2", default-features = false, features = ["std", "sys_rng"] }
 rand_xoshiro = "0.8.1"
 glam = { version = "0.33.7", features = ["rand"] }

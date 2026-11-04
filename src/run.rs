@@ -78,22 +78,11 @@ impl Run {
 }
 
 /// Limits apply to this invocation; completing a loop never resets the run.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct LoopOptions {
     pub ticks: Option<u64>,
-    pub duration: Option<Duration>,
-    /// Zero runs as fast as possible. Pacing never changes the simulation timestep.
+    /// Defaults to zero: run as fast as possible. Pacing never changes the timestep.
     pub interval: Duration,
-}
-
-impl Default for LoopOptions {
-    fn default() -> Self {
-        Self {
-            ticks: None,
-            duration: None,
-            interval: Duration::from_millis(40),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,7 +97,6 @@ pub enum Command {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StopReason {
     TickLimit,
-    TimeLimit,
     Condition,
     Requested,
     Disconnected,
@@ -223,23 +211,16 @@ where
         commands: Commands,
         mut after_tick: impl FnMut(&Self, &W::Report) -> bool,
     ) -> StopReason {
-        let started = Instant::now();
-        let mut last_tick = started;
+        let mut last_tick = Instant::now();
         let mut status = *commands.status.lock().expect("loop status poisoned");
         status.steps = 0;
         status.stop = None;
         let publish = |state| *commands.status.lock().expect("loop status poisoned") = state;
         let limit = |steps| {
-            if options.ticks.is_some_and(|ticks| steps >= ticks) {
-                Some(StopReason::TickLimit)
-            } else if options
-                .duration
-                .is_some_and(|time| started.elapsed() >= time)
-            {
-                Some(StopReason::TimeLimit)
-            } else {
-                None
-            }
+            options
+                .ticks
+                .is_some_and(|ticks| steps >= ticks)
+                .then_some(StopReason::TickLimit)
         };
         publish(status);
         loop {
@@ -261,11 +242,7 @@ where
                     if until_tick == Some(Duration::ZERO) {
                         None
                     } else {
-                        let until_limit = options
-                            .duration
-                            .map(|duration| duration.saturating_sub(started.elapsed()));
-                        let wait = until_tick.into_iter().chain(until_limit).min();
-                        let received = match wait {
+                        let received = match until_tick {
                             Some(wait) => commands.receiver.recv_timeout(wait),
                             None => commands
                                 .receiver
@@ -303,12 +280,6 @@ where
                 }
             }
 
-            // A command may have arrived before a deadline but been scheduled after it.
-            if let Some(reason) = limit(status.steps) {
-                status.stop = Some(reason);
-                publish(status);
-                return reason;
-            }
             let report = self.tick();
             status.steps += 1;
             last_tick = Instant::now();

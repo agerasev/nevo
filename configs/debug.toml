@@ -1,0 +1,3 @@
+scenario = "debug"
+seed = 1
+ticks = 32

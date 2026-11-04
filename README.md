@@ -12,9 +12,10 @@ viewer reads the shared world. Sensing now precedes movement, feeding, and birth
 A fresh checkout needs `git submodule update --init` for the Cargo path dependency.
 
 ```sh
-cargo run --locked --bin nevo -- --viewer --scenario baseline --seed 1
+cargo run --locked --bin nevo -- --viewer --scenario baseline
 cargo run --locked --bin nevo -- --viewer --scenario debug --seed 1 --paused
-cargo run --locked --bin nevo -- --scenario baseline --seed 1 --ticks 256 --hz 0
+cargo run --locked --bin nevo -- --scenario baseline --seed 1 --ticks 256
+cargo run --locked --bin nevo -- --config configs/debug.toml
 ```
 
 Use **Pause / Resume** to control playback and **Single step** to advance one tick
@@ -22,13 +23,28 @@ and pause. With the arena focused, Space toggles playback and Right Arrow steps.
 The toolbar shows the seed, scenario, tick, and population counts for the displayed
 world. Green circles are plants and yellow circles are herbivores.
 
-All commands accept `--ticks`, `--seconds`, and `--hz` (default 25; zero removes
-pacing). Omit limits to run until interrupted. A trial simply uses an initial
-configuration and a limit. Use `--focal 1` to trace a founder and stop on its death.
-`--seconds` counts wall time, including pauses; tick limits give reproducible
-budgets. The `debug` layout exercises a meal and a birth on tick one. The
+Runs default to full speed (`--hz 0`) and a seed drawn from system entropy.
+The resolved seed is printed before the run starts; supply `--seed N` to replay it.
+Use `--hz 25` for paced viewing and `--ticks N` for a reproducible budget. Omit
+the budget to run until interrupted. A trial simply supplies initialization and
+a tick limit. The `debug` layout exercises a meal and a birth on tick one. The
 `baseline` starts 20 herbivores among 500 mature plants.
 See the [tick and runner contracts](docs/foraging.md).
+
+CLI and TOML configuration share one [conf](https://docs.rs/conf/0.4.5/conf/)
+schema. Load a file explicitly with `--config PATH`; CLI values override it.
+[Example configuration](configs/debug.toml):
+
+```toml
+scenario = "debug"
+seed = 1
+ticks = 32
+```
+
+All run options use the same names in TOML, including `hz`, `viewer`, `paused`,
+and `smoke`. Booleans accept bare CLI flags or explicit values such as
+`--viewer=false`. Quote seeds larger than TOML's signed integer range. Unknown
+keys are rejected. The former `--seconds` and `--focal` options are removed.
 
 Build with `--no-default-features` when graphics are unnecessary; the executable
 and runner stay the same. Add `--smoke` to a viewer command to verify twelve

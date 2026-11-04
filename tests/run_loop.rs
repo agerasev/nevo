@@ -31,10 +31,17 @@ fn pause_and_step_commands_control_the_same_worker() {
     let (observed, ticks) = mpsc::channel();
     let (done, finished) = mpsc::channel();
     thread::spawn(move || {
-        let stop = run.execute(LoopOptions::default(), commands, |_, report| {
-            observed.send(report.tick).unwrap();
-            false
-        });
+        let stop = run.execute(
+            LoopOptions {
+                interval: Duration::from_millis(10),
+                ..LoopOptions::default()
+            },
+            commands,
+            |_, report| {
+                observed.send(report.tick).unwrap();
+                false
+            },
+        );
         done.send((run, stop)).unwrap();
     });
 
@@ -72,31 +79,42 @@ fn pause_and_step_commands_control_the_same_worker() {
 }
 
 #[test]
-fn zero_tick_and_wall_time_limits_work_while_paused() {
-    for (ticks, duration, expected) in [
-        (Some(0), None, StopReason::TickLimit),
-        (None, Some(Duration::from_millis(20)), StopReason::TimeLimit),
-    ] {
-        let mut run = Run::new(Scenario::Debug, 1);
-        let original = run.clone();
-        let (_control, commands) = Control::channel(true);
-        let (done, finished) = mpsc::channel();
-        thread::spawn(move || {
-            let reason = run.execute(
-                LoopOptions {
-                    ticks,
-                    duration,
-                    interval: Duration::ZERO,
-                },
-                commands,
-                |_, _| false,
-            );
-            done.send((run, reason)).unwrap();
-        });
-        let (run, reason) = finished.recv_timeout(TIMEOUT).unwrap();
-        assert_eq!(reason, expected);
-        assert_eq!(run, original);
-    }
+fn zero_tick_limit_works_while_paused() {
+    let mut run = Run::new(Scenario::Debug, 1);
+    let original = run.clone();
+    let (_control, commands) = Control::channel(true);
+    let (done, finished) = mpsc::channel();
+    thread::spawn(move || {
+        let reason = run.execute(
+            LoopOptions {
+                ticks: Some(0),
+                ..LoopOptions::default()
+            },
+            commands,
+            |_, _| false,
+        );
+        done.send((run, reason)).unwrap();
+    });
+    let (run, reason) = finished.recv_timeout(TIMEOUT).unwrap();
+    assert_eq!(reason, StopReason::TickLimit);
+    assert_eq!(run, original);
+}
+
+#[test]
+fn dropping_last_control_wakes_a_paused_loop() {
+    let mut run = Run::new(Scenario::Debug, 1);
+    let original = run.clone();
+    let (control, commands) = Control::channel(true);
+    let (done, finished) = mpsc::channel();
+    thread::spawn(move || {
+        let reason = run.execute(LoopOptions::default(), commands, |_, _| false);
+        done.send((run, reason)).unwrap();
+    });
+    request(&control, Command::Pause);
+    drop(control);
+    let (run, reason) = finished.recv_timeout(TIMEOUT).unwrap();
+    assert_eq!(reason, StopReason::Disconnected);
+    assert_eq!(run, original);
 }
 
 #[derive(Debug)]
@@ -155,7 +173,6 @@ fn readers_can_inspect_during_agent_work_and_hold_back_publication() {
             LoopOptions {
                 ticks: Some(1),
                 interval: Duration::ZERO,
-                ..LoopOptions::default()
             },
             commands,
             |_, _| false,

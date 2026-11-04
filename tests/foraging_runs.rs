@@ -9,7 +9,6 @@ use nevo::{
 fn bounded(ticks: u64) -> LoopOptions {
     LoopOptions {
         ticks: Some(ticks),
-        duration: None,
         interval: Duration::ZERO,
     }
 }

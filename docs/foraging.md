@@ -50,11 +50,10 @@ nonnegative with a finite sampling range; zero is a no-op. New agents start with
 fresh memory. `Herbivores::with_founder_genome` supplies a known founder genome;
 immigrants still receive random genomes.
 
-**One loop.** `Run::execute` accepts optional tick and wall-time limits, a pacing
-interval, a command receiver, and an after-tick stop predicate. Limits apply to
-that invocation and leave the live run available for continuation. Wall time
-includes pauses and is checked at tick boundaries; an in-progress tick completes.
-A zero interval removes pacing. Per-tick rules and RNG draws never depend on
+**One loop.** `Run::execute` accepts an optional tick limit, a pacing interval,
+a command receiver, and an after-tick stop predicate. The budget applies to that
+invocation and leaves the live run available for continuation. Pacing defaults
+to zero (full speed). Per-tick rules and RNG draws never depend on
 rendering or elapsed wall time. SplitMix64 expands the master seed into separate
 Xoshiro256++ streams for spatial draws and genetics. Replay targets one build and
 platform. [Continuation checks](../tests/foraging_runs.rs)
@@ -62,7 +61,7 @@ platform. [Continuation checks](../tests/foraging_runs.rs)
 Commands take effect between ticks. Pause/resume reset the pacing delay, and
 single-step pauses and advances exactly once. Blocking command acknowledgements
 arrive after application; a step acknowledgement follows the completed update.
-Stop, limits, and a true predicate finish the loop. Dropping all command senders
+Stop, the tick limit, and a true predicate finish the loop. Dropping all command senders
 also stops it. A fresh channel can resume the same `Run` in another invocation.
 
 **Viewer.** A separate window loop copies a snapshot under the read lock, releases
