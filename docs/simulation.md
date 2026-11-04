@@ -113,3 +113,25 @@ state used for twelve displayed scenes, including minds and RNGs, with a referen
 run and checks pause/step commands.
 [Viewer contract](viewer.md) · [Locking and failure checks](../src/run/tests.rs) ·
 [Continuation checks](../tests/simulation_runs.rs) · [Persistence](persistence.md)
+
+## Planned statistics
+
+The generic metrics system is not implemented yet. Existing checkpoint event counts
+are described in [persistence](persistence.md).
+
+The proposed design uses separate metrics and aggregation contracts, typed caches
+owned by their components, and component-first configuration such as
+`ecosystem.animal.metrics`. Computation borrows the relevant configuration section;
+metric changes are applied with the component update. Keep Mind and Simulation
+separate, with consistent `compute_update` / `apply_update` naming and
+`(output, update)` results.
+
+**Agreed resume policy:** statistics accumulators are excluded from checkpoints
+and start a fresh observation window at the restored tick. Collect recent statistics
+over short, configurable tick windows, filled from new observations. Report actual
+window bounds and sample counts, mark incomplete windows, and normalize rates by
+the observed exposure. Empty mean/min/max are unavailable; observed event counts
+can legitimately be zero.
+Reset historical measurements describe the observed window or period since resume,
+not the animal's full lifetime or the entire run. No statistics-history recovery
+or replay is required.

@@ -119,6 +119,7 @@ conclusions in [history](docs/history/README.md). Run configurations live in
   sensing as smell, with modality ablations.
 - Begin with the minimum evolutionary degrees of freedom needed to demonstrate
   adaptation. The first baseline evolves weights and biases with fixed topology.
+- Follow the [planned statistics and resume policy](docs/simulation.md#planned-statistics).
 - Record concise conclusions from major research milestones in [history](docs/history/README.md).
 
 ## Proposed design
