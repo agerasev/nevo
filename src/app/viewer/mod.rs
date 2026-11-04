@@ -10,7 +10,7 @@ use std::{
 };
 
 use nevo::{
-    environment::ecosystem::{Ecosystem, HALF_SIZE, Scenario},
+    ecosystem::{Ecosystem, HALF_SIZE, Scenario},
     run::{Command, Control, UniverseView},
     universe::Universe,
 };
@@ -38,7 +38,7 @@ struct Status {
 
 impl Status {
     fn read(universe: &Universe, control: &Control) -> Self {
-        let world = universe.environment();
+        let world = universe.world();
         let status = control.status();
         Self {
             paused: status.paused,
@@ -88,7 +88,8 @@ fn draw_world(frame: &mut impl ContentFrame, library: &Library, world: &Ecosyste
                 .order(1),
         );
     }
-    for body in world.animals().values() {
+    for animal in world.animals().values() {
+        let body = &animal.body;
         let position = body.position.as_vec2();
         let radius = body.radius() as f32;
         scene.add(
@@ -237,7 +238,7 @@ pub async fn show(
                 }
             }
         }
-        draw_world(&mut frame, &library, snapshot.environment());
+        draw_world(&mut frame, &library, snapshot.world());
         frame.present();
         if let Some(check) = &mut check {
             check.verify(smoke_frame, &snapshot, &control)?;

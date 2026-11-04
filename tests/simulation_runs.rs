@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use nevo::{
-    environment::ecosystem::{Event, Scenario},
+    ecosystem::{Event, Scenario},
     run::{Control, LoopOptions, Run, StopReason},
-    universe::{ForagingPolicy, Universe},
+    universe::Universe,
 };
 
 fn bounded(ticks: u64) -> LoopOptions {
@@ -18,10 +18,14 @@ fn agents_sense_before_feeding_and_newborns_act_next_tick() {
     let mut run = Run::new(Scenario::Debug, 1).unwrap();
     let (parent, genome) = {
         let universe = run.universe().read();
-        let parent = universe.actor().members().next().unwrap();
+        let parent = *universe.world().animals().keys().next().unwrap();
         (
             parent,
-            universe.actor().get(parent).unwrap().mind.genome.clone(),
+            universe.world().animals()[&parent]
+                .mind
+                .brain
+                .genome
+                .clone(),
         )
     };
 
@@ -55,12 +59,21 @@ fn agents_sense_before_feeding_and_newborns_act_next_tick() {
     {
         let universe = run.universe().read();
         for id in [parent, child] {
-            assert_eq!(universe.environment().animals()[&id].energy, 213.0);
+            assert_eq!(universe.world().animals()[&id].body.energy, 213.0);
         }
-        assert_ne!(universe.actor().get(parent).unwrap().mind.memory, [0.0; 4]);
-        assert_eq!(universe.actor().get(child).unwrap().mind.memory, [0.0; 4]);
-        assert_eq!(universe.actor().get(parent).unwrap().mind.genome, genome);
-        assert_ne!(universe.actor().get(child).unwrap().mind.genome, genome);
+        assert_ne!(
+            universe.world().animals()[&parent].mind.brain.memory,
+            [0.0; 4]
+        );
+        assert_eq!(
+            universe.world().animals()[&child].mind.brain.memory,
+            [0.0; 4]
+        );
+        assert_eq!(
+            universe.world().animals()[&parent].mind.brain.genome,
+            genome
+        );
+        assert_ne!(universe.world().animals()[&child].mind.brain.genome, genome);
     }
     assert!(
         run.tick()
@@ -70,12 +83,9 @@ fn agents_sense_before_feeding_and_newborns_act_next_tick() {
             .any(|decision| decision.id == child)
     );
     assert_ne!(
-        run.universe()
-            .read()
-            .actor()
-            .get(child)
-            .unwrap()
+        run.universe().read().world().animals()[&child]
             .mind
+            .brain
             .memory,
         [0.0; 4]
     );
@@ -155,19 +165,13 @@ fn a_condition_stop_can_resume_the_same_run() {
 }
 
 #[test]
-fn population_support_policy_is_independent_of_the_physical_environment() {
+fn minimum_population_is_an_experiment_setting() {
     let mut unsupported = Universe::new(Scenario::Debug, 1).unwrap();
-    let mut supported = Universe::from_parts(
-        unsupported.step(),
-        unsupported.environment().clone(),
-        unsupported.actor().clone(),
-        unsupported.context().clone(),
-        ForagingPolicy::new(20),
-        unsupported.handles().clone(),
-    )
-    .unwrap();
-    assert_eq!(unsupported.environment(), supported.environment());
-    assert_eq!(unsupported.actor(), supported.actor());
+    let mut supported_world = unsupported.world().clone();
+    supported_world.set_minimum_population(20);
+    assert_eq!(unsupported.world().animals(), supported_world.animals());
+    assert_eq!(unsupported.world().plants(), supported_world.plants());
+    let mut supported = Universe::from_world(supported_world).unwrap();
 
     let unsupported_report = unsupported.advance().unwrap();
     let supported_report = supported.advance().unwrap();
@@ -185,8 +189,18 @@ fn population_support_policy_is_independent_of_the_physical_environment() {
             .count(),
         19
     );
-    assert_eq!(unsupported.environment().animals().len(), 2);
-    assert_eq!(supported.environment().animals().len(), 21);
-    assert_eq!(unsupported.actor().members().count(), 2);
-    assert_eq!(supported.actor().members().count(), 21);
+    assert_eq!(unsupported.world().animals().len(), 2);
+    assert_eq!(supported.world().animals().len(), 21);
+    for animal in supported.world().animals().values() {
+        assert!(animal.body.energy.is_finite());
+        assert!(
+            animal
+                .mind
+                .brain
+                .genome
+                .weights
+                .iter()
+                .all(|weight| weight.is_finite())
+        );
+    }
 }

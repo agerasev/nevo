@@ -6,18 +6,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Result;
-use rand_xoshiro::Xoshiro256PlusPlus;
-
 use crate::{
-    actor::{Actor, herbivore::Herbivores},
-    context::{Context, Cpu},
-    environment::{
-        Environment,
-        ecosystem::{Ecosystem, Scenario},
-    },
-    universe::{ForagingPolicy, Policy, Universe},
+    ecosystem::{Ecosystem, Scenario},
+    universe::{Simulation, Universe},
 };
+use anyhow::Result;
 
 /// Read-only access to complete state. Cloning attaches another reader.
 pub struct UniverseView<U = Universe>(Arc<RwLock<U>>);
@@ -42,16 +35,16 @@ impl<U: fmt::Debug> fmt::Debug for UniverseView<U> {
 
 /// The sole writer publishes complete universes; observers only receive readers.
 #[derive(Debug)]
-pub struct Run<E = Ecosystem, A = Herbivores, C = Cpu<Xoshiro256PlusPlus>, P = ForagingPolicy> {
-    universe: UniverseView<Universe<E, A, C, P>>,
+pub struct Run<S = Ecosystem> {
+    universe: UniverseView<Universe<S>>,
 }
 
-impl<E, A, C, P> Run<E, A, C, P> {
-    pub fn universe(&self) -> &UniverseView<Universe<E, A, C, P>> {
+impl<S> Run<S> {
+    pub fn universe(&self) -> &UniverseView<Universe<S>> {
         &self.universe
     }
 
-    pub fn from_universe(universe: Universe<E, A, C, P>) -> Self {
+    pub fn from_universe(universe: Universe<S>) -> Self {
         Self {
             universe: UniverseView(Arc::new(RwLock::new(universe))),
         }
@@ -59,13 +52,13 @@ impl<E, A, C, P> Run<E, A, C, P> {
 }
 
 /// Cloning a run makes an independent simulation, unlike cloning its view.
-impl<E: Clone, A: Clone, C: Clone, P: Clone> Clone for Run<E, A, C, P> {
+impl<S: Clone> Clone for Run<S> {
     fn clone(&self) -> Self {
         Self::from_universe(self.universe.read().clone())
     }
 }
 
-impl<E: PartialEq, A: PartialEq, C: PartialEq, P: PartialEq> PartialEq for Run<E, A, C, P> {
+impl<S: PartialEq> PartialEq for Run<S> {
     fn eq(&self, other: &Self) -> bool {
         *self.universe.read() == *other.universe.read()
     }
@@ -181,14 +174,11 @@ impl Control {
     }
 }
 
-impl<E, A, C, P> Run<E, A, C, P>
+impl<S> Run<S>
 where
-    E: Environment + Clone,
-    A: Actor<C, Observation = E::Observation, Action = E::Action> + Clone,
-    C: Context + Clone,
-    P: Policy<E::Request, Intervention = E::Intervention> + Clone,
+    S: Simulation + Clone,
 {
-    pub fn tick(&mut self) -> Result<E::Report> {
+    pub fn tick(&mut self) -> Result<S::Report> {
         // Keep the read lock for preparation: viewers may read the old complete
         // state concurrently. Drop it before acquiring the publication lock.
         let (next, report) = self.universe.read().prepare_step()?;
@@ -206,7 +196,7 @@ where
         &mut self,
         options: LoopOptions,
         commands: Commands,
-        mut after_tick: impl FnMut(&Self, &E::Report) -> bool,
+        mut after_tick: impl FnMut(&Self, &S::Report) -> bool,
     ) -> Result<StopReason> {
         let mut last_tick = Instant::now();
         let mut status = *commands.status.lock().expect("loop status poisoned");

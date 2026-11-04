@@ -16,7 +16,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, ensure};
 use nevo::{
-    environment::ecosystem::{Event, Scenario, TickReport},
+    ecosystem::{Event, Scenario, TickReport},
     run::{Command, Control, Run, StopReason},
 };
 use serde::{Deserialize, Serialize};
@@ -47,7 +47,7 @@ impl Counts {
 
     fn print(&self, run: &Run) {
         let universe = run.universe().read();
-        let world = universe.environment();
+        let world = universe.world();
         println!(
             "tick={} animals={} plants={} meals={} births={} deaths={} immigrants={}",
             universe.step(),

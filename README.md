@@ -7,7 +7,7 @@ and recorded experiments, with no final endpoint for the research program.
 ## Current implementation
 
 The ecosystem has replenishing plants and herbivores with 3–4–3 recurrent
-controllers. One configurable loop runs every experiment; an optional desktop
+brains. One configurable loop runs every experiment; an optional desktop
 viewer reads the shared Universe. Sensing precedes movement, feeding, and births.
 A fresh checkout needs `git submodule update --init` for the Cargo path dependency.
 
@@ -66,21 +66,20 @@ Multi-file modules use `mod.rs` inside their directory.
 
 | Module | Responsibility |
 | --- | --- |
-| [actor](src/actor/mod.rs) | Actor contract, generic Population and Factory, opaque handles, and herbivore adapter. |
-| [mind](src/mind/mod.rs) | Mind contract; scalar RNN computation, memory, and its genome. |
+| [mind](src/mind/mod.rs) | Mind and Heredity contracts, food-sensing adapter, and scalar RNN with memory and genome. |
 | [genome](src/genome/mod.rs) | Representation-independent inheritance and mutation contracts. |
 | [context](src/context/mod.rs) | Execution context contract and CPU implementation. |
-| [environment](src/environment/mod.rs) | Physical state, observations/actions, and ecosystem lifecycle rules. |
-| [universe](src/universe/mod.rs) | Complete serializable state, component orchestration, and experiment intervention policy. |
+| [ecosystem](src/ecosystem/mod.rs) | Plants and complete animals with body and mind; foraging, reproduction, and immigration rules. |
+| [universe](src/universe/mod.rs) | Complete serializable state and the small Simulation stepping contract. |
 | [run](src/run/mod.rs) | Shared read/prepare/write loop and controls. |
 | [app](src/app/mod.rs) | CLI configuration, run storage, and optional viewer. |
 
 `main.rs` only enters the application; `lib.rs` exposes the library modules.
-The concrete environment is `environment::ecosystem::Ecosystem`. A `Universe` owns
-it together with the actor, RNG context, identity allocator, and intervention policy;
+The concrete experiment is `ecosystem::Ecosystem`. Each animal owns its `body` and
+`mind` together. A `Universe` owns the complete experiment and step counter;
 both bounded and unlimited runs use `run::Run`. Initialization and later immigration
-share one admission path. Physical births/deaths remain environment rules, with
-controller creation and inheritance handled by the population.
+share one admission path. Minds receive typed observations and return actions;
+there is no separate environment–actor storage or lifecycle synchronization.
 See [simulation contracts](docs/simulation.md) for the implemented boundaries.
 
 Keep current documentation in [docs/](docs/README.md), with selected milestone

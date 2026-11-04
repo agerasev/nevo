@@ -1,22 +1,18 @@
-//! Complete simulation state and observation/action orchestration.
-
-pub mod foraging;
+//! Complete simulation state, independent of the experiment's internal ownership.
 
 use anyhow::{Result, ensure};
-use rand_xoshiro::Xoshiro256PlusPlus;
 
 use crate::{
-    actor::{Actor, HandleAllocator, herbivore::Herbivores},
-    context::{Context, Cpu},
-    environment::{Environment, ecosystem::Ecosystem},
+    ecosystem::{Ecosystem, Scenario},
+    run::Run,
 };
-pub use foraging::ForagingPolicy;
 
-/// Experiment interventions, separate from physical rules and controller logic.
-pub trait Policy<Request> {
-    type Intervention;
+/// An experiment owns its physical state, minds, random streams, and rules.
+/// `advance` operates on private prepared state; it may fail without publication.
+pub trait Simulation {
+    type Report;
 
-    fn respond(&mut self, request: Request) -> Result<Self::Intervention>;
+    fn advance(&mut self, step: u64) -> Result<Self::Report>;
 
     fn validate(&self) -> Result<()> {
         Ok(())
@@ -24,118 +20,72 @@ pub trait Policy<Request> {
 }
 
 /// Everything needed to continue a simulation. Locks and viewers live outside it.
-///
-/// Clone must produce independently mutable simulation state. Reconstructible
-/// caches may be skipped by serde; RNGs and recurrent memory must be retained.
+/// Clone must produce independently mutable state. Reconstructible caches may be
+/// skipped by serde; RNG positions and recurrent memory are required state.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Universe<E = Ecosystem, A = Herbivores, C = Cpu<Xoshiro256PlusPlus>, P = ForagingPolicy>
-{
+pub struct Universe<S = Ecosystem> {
     pub(crate) step: u64,
-    pub(crate) environment: E,
-    pub(crate) actor: A,
-    pub(crate) context: C,
-    pub(crate) policy: P,
-    pub(crate) handles: HandleAllocator,
+    pub(crate) world: S,
 }
 
-impl<E, A, C, P> Universe<E, A, C, P> {
+impl<S> Universe<S> {
     pub fn step(&self) -> u64 {
         self.step
     }
 
-    pub fn environment(&self) -> &E {
-        &self.environment
-    }
-
-    pub fn actor(&self) -> &A {
-        &self.actor
-    }
-
-    pub fn context(&self) -> &C {
-        &self.context
-    }
-
-    pub fn policy(&self) -> &P {
-        &self.policy
-    }
-
-    pub fn handles(&self) -> &HandleAllocator {
-        &self.handles
+    pub fn world(&self) -> &S {
+        &self.world
     }
 }
 
-impl<E, A, C, P> Universe<E, A, C, P>
-where
-    E: Environment + Clone,
-    A: Actor<C, Observation = E::Observation, Action = E::Action> + Clone,
-    C: Context + Clone,
-    P: Policy<E::Request, Intervention = E::Intervention> + Clone,
-{
-    pub fn from_parts(
-        step: u64,
-        environment: E,
-        actor: A,
-        context: C,
-        policy: P,
-        handles: HandleAllocator,
-    ) -> Result<Self> {
-        let universe = Self {
-            step,
-            environment,
-            actor,
-            context,
-            policy,
-            handles,
-        };
+impl<S: Simulation> Universe<S> {
+    pub fn from_world(world: S) -> Result<Self> {
+        Self::from_parts(0, world)
+    }
+
+    pub fn from_parts(step: u64, world: S) -> Result<Self> {
+        let universe = Self { step, world };
         universe.validate()?;
         Ok(universe)
     }
 
-    fn validate_components(&self) -> Result<()> {
-        ensure!(self.step < u64::MAX, "universe step counter is exhausted");
-        self.handles.validate()?;
-        self.environment.validate(&self.handles)?;
-        self.actor.validate()?;
-        self.policy.validate()?;
-        Ok(())
-    }
-
-    /// Validate components and their observation protocol without altering state.
     pub fn validate(&self) -> Result<()> {
-        self.validate_components()?;
-        let mut actor = self.actor.clone();
-        let mut context = self.context.clone();
-        actor.observe(&mut context, self.environment.observe())?;
-        Ok(())
+        ensure!(self.step < u64::MAX, "universe step counter is exhausted");
+        self.world.validate()
     }
 
-    /// Prepare an independent complete step. Failure leaves this universe intact.
-    pub fn prepare_step(&self) -> Result<(Self, E::Report)> {
-        let mut next = self.clone();
+    pub fn restore(self) -> Result<Run<S>> {
+        self.validate()?;
+        Ok(Run::from_universe(self))
+    }
+}
+
+impl<S: Simulation + Clone> Universe<S> {
+    /// Compute a complete next state without changing the published universe.
+    /// Component deltas can replace this full clone in a subsequent change.
+    pub fn prepare_step(&self) -> Result<(Self, S::Report)> {
         let step = self
             .step
             .checked_add(1)
             .ok_or_else(|| anyhow::anyhow!("universe step counter is exhausted"))?;
-        next.actor
-            .observe(&mut next.context, next.environment.observe())?;
-        let action = next.actor.act(&mut next.context)?;
-        let (report, feedback) =
-            next.environment
-                .advance(step, action, &mut next.handles, |request| {
-                    next.policy.respond(request)
-                })?;
-        // Feedback may synchronize membership without causing another action.
-        next.actor.observe(&mut next.context, feedback)?;
+        let mut next = self.clone();
+        let report = next.world.advance(step)?;
         next.step = step;
-        next.validate_components()?;
+        next.validate()?;
         Ok((next, report))
     }
 
-    pub fn advance(&mut self) -> Result<E::Report> {
+    pub fn advance(&mut self) -> Result<S::Report> {
         let (next, report) = self.prepare_step()?;
         *self = next;
         Ok(report)
+    }
+}
+
+impl Universe {
+    pub fn new(scenario: Scenario, seed: u64) -> Result<Self> {
+        Self::from_world(Ecosystem::new(scenario, seed)?)
     }
 }
 

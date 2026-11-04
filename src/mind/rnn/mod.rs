@@ -7,7 +7,7 @@ pub use genome::{RnnGenome, WeightMutation};
 
 use std::array;
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 
 use super::Mind;
 use crate::context::Context;
@@ -59,6 +59,18 @@ impl<C: Context + ?Sized> Mind<C> for Rnn {
         }
 
         Ok(output)
+    }
+
+    fn validate(&self) -> Result<()> {
+        ensure!(
+            self.genome.weights.iter().all(|value| value.is_finite()),
+            "non-finite genome weight"
+        );
+        ensure!(
+            self.memory.iter().all(|value| value.is_finite()),
+            "non-finite recurrent memory"
+        );
+        Ok(())
     }
 }
 

@@ -1,10 +1,8 @@
 use ciborium::Value;
-use rand::SeedableRng;
 
 use crate::{
-    actor::Actor,
-    environment::ecosystem::{Admission, Event, Scenario},
-    mind::rnn::RnnGenome,
+    ecosystem::{Admission, Event, Scenario},
+    mind::{herbivore::HerbivoreHeredity, rnn::RnnGenome},
     run::Run,
 };
 
@@ -68,46 +66,34 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
     genome.weights[0] = -0.0;
     genome.weights[1] = f32::from_bits(1);
     genome.weights[28] = 0.25;
-    let mut actor = Herbivores::with_immigrant_genome(genome);
-    let mut context = Cpu {
-        rng: Xoshiro256PlusPlus::seed_from_u64(17),
-    };
-    let mut handles = HandleAllocator::default();
-    let mut environment = Ecosystem::empty(1, 23);
-    actor
-        .observe(
-            &mut context,
-            environment
-                .admit(
-                    1,
-                    Admission {
-                        position: Some(glam::DVec2::ZERO),
-                        energy: 390.0,
-                    },
-                    &mut handles,
-                )
-                .unwrap(),
+    let mut world = Ecosystem::empty(
+        1,
+        0,
+        23,
+        17,
+        HerbivoreHeredity::with_immigrant_genome(genome),
+    );
+    world
+        .admit(
+            1,
+            Admission {
+                position: Some(glam::DVec2::ZERO),
+                energy: 390.0,
+            },
         )
         .unwrap();
-    environment.seed_plants(Some(glam::DVec2::ZERO)).unwrap();
-    let universe = Universe::from_parts(
-        0,
-        environment,
-        actor,
-        context,
-        ForagingPolicy::new(0),
-        handles,
-    )
-    .unwrap();
+    world.seed_plants(Some(glam::DVec2::ZERO)).unwrap();
+    let universe = Universe::from_world(world).unwrap();
     let mut run = Run::from_universe(universe);
     assert_eq!(round_trip(&run), run);
     run.tick().unwrap();
     assert!(
         run.universe()
             .read()
-            .actor()
-            .iter()
-            .any(|(_, actor)| actor.mind.memory != [0.0; 4])
+            .world()
+            .animals()
+            .values()
+            .any(|animal| animal.mind.brain.memory != [0.0; 4])
     );
     let mut restored = round_trip(&run);
     for _ in 1..108 {
@@ -116,10 +102,10 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
     assert!(
         run.universe()
             .read()
-            .environment()
+            .world()
             .animals()
             .values()
-            .any(|body| body.energy < 0.0)
+            .any(|animal| animal.body.energy < 0.0)
     );
     let mut restored = round_trip(&run);
     let report = run.tick().unwrap();
@@ -134,23 +120,31 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
 }
 
 #[test]
-fn missing_actors_are_rejected_at_the_universe_boundary() {
+fn animals_cannot_deserialize_without_a_body_or_mind() {
     let universe = Universe::new(Scenario::Debug, 1).unwrap();
-    let mut value = Value::serialized(&universe).unwrap();
-    field(&mut value, &["actor", "live"])
-        .as_map_mut()
-        .unwrap()
-        .clear();
-    let invalid: Universe = value.deserialized().unwrap();
-    assert!(invalid.restore().is_err());
+    for missing in ["body", "mind"] {
+        let mut value = Value::serialized(&universe).unwrap();
+        let animal = &mut field(&mut value, &["world", "animals"])
+            .as_map_mut()
+            .unwrap()[0]
+            .1;
+        animal
+            .as_map_mut()
+            .unwrap()
+            .retain(|(key, _)| key.as_text() != Some(missing));
+        assert!(
+            value.deserialized::<Universe>().is_err(),
+            "accepted animal without {missing}"
+        );
+    }
 }
 
 #[test]
 fn zero_rngs_and_wrong_weight_dimensions_are_rejected() {
     let universe = Universe::new(Scenario::Debug, 1).unwrap();
     for path in [
-        ["environment", "rng", "s"].as_slice(),
-        ["context", "rng", "s"].as_slice(),
+        ["world", "rng", "s"].as_slice(),
+        ["world", "context", "rng", "s"].as_slice(),
     ] {
         let mut value = Value::serialized(&universe).unwrap();
         *field(&mut value, path) = Value::Array(vec![Value::from(0); 4]);
@@ -158,8 +152,11 @@ fn zero_rngs_and_wrong_weight_dimensions_are_rejected() {
         assert!(invalid.restore().unwrap_err().to_string().contains("RNG"));
     }
     let mut value = Value::serialized(&universe).unwrap();
-    let actor = &mut field(&mut value, &["actor", "live"]).as_map_mut().unwrap()[0].1;
-    field(actor, &["mind", "genome", "weights"])
+    let animal = &mut field(&mut value, &["world", "animals"])
+        .as_map_mut()
+        .unwrap()[0]
+        .1;
+    field(animal, &["mind", "brain", "genome", "weights"])
         .as_array_mut()
         .unwrap()
         .pop();

@@ -5,7 +5,7 @@ use std::{
 };
 
 use nevo::{
-    environment::ecosystem::Scenario,
+    ecosystem::Scenario,
     run::{Command, Control, LoopOptions, Run, StopReason},
 };
 

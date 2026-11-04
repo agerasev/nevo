@@ -52,25 +52,25 @@ runs/baseline/
 
 Each checkpoint is one CBOR file containing the effective configuration, cumulative
 event counts, model identifiers, and the directly serialized
-[Universe](../src/universe/mod.rs): step, environment, population, genetic context,
-experiment policy, and handle allocator. This includes ordered plants and animals,
-both RNG states, genomes, recurrent memories, and any immigrant genome template.
-Opaque handles serialize as integer IDs; loading validates component state and
-membership without rebuilding shared pointers. Native CBOR arrays hold weights;
+[Universe](../src/universe/mod.rs): step and complete experiment model. The ecosystem
+owns ordered plants and animals (each with body and mind), both RNG states, genomes,
+recurrent memories, the immigrant genome template, population target, and ID counters.
+Animal IDs serialize as integers; loading validates each complete animal and
+the remaining experiment state. Native CBOR arrays hold weights;
 no safetensors payload is used.
 
 Locks, channels, pacing clocks, and viewer/device resources live outside Universe.
 Reconstructible caches may be omitted from serialization; recurrent memory and RNG
-positions are required state. Generic actor and environment contracts have no
+positions are required state. The Simulation, Mind, and Heredity contracts have no
 persistence bounds.
 
-The current format is checkpoint version 2, with `foraging-sense-first-v1` and
+The current format is checkpoint version 3, with `foraging-sense-first-v1` and
 `herbivore-rnn-3-4-3-v1` model identifiers. Only this format is accepted;
 compatibility and migrations are intentionally unsupported. Rust module/type names
 are not part of the format.
 
 Only the simulation owner saves, between complete ticks. Snapshot copying holds
-the Universe's read lock briefly; serialization and file I/O happen after releasing
+the Universe's read lock; serialization and file I/O happen after releasing
 it. A file is written to a temporary sibling, flushed and synced, then renamed
 into place. Older checkpoints are removed only after the new file is published.
 An OS lock permits one writer per directory and releases automatically when the

@@ -1,12 +1,14 @@
 use anyhow::Result;
 use glam::DVec2;
 use nevo::{
-    actor::Actor,
-    actor::herbivore::Herbivore,
     context::{Context, Cpu},
-    environment::ecosystem::FoodObservation,
+    ecosystem::FoodObservation,
     genome::Mutate,
-    mind::rnn::{RnnGenome, WeightMutation},
+    mind::{
+        Mind,
+        herbivore::HerbivoreMind,
+        rnn::{RnnGenome, WeightMutation},
+    },
 };
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -28,9 +30,9 @@ fn herbivore_accepts_another_mind_and_propagates_its_errors() {
     let mut cx = Cpu {
         rng: Xoshiro256PlusPlus::seed_from_u64(17),
     };
-    let mut agent = Herbivore::from_mind(EchoMind);
-    agent
-        .observe(
+    let mut agent = HerbivoreMind::from_brain(EchoMind);
+    let action = agent
+        .process(
             &mut cx,
             FoodObservation {
                 gradient: DVec2::new(0.25, -0.5),
@@ -38,20 +40,19 @@ fn herbivore_accepts_another_mind_and_propagates_its_errors() {
             },
         )
         .unwrap();
-    let action = agent.act(&mut cx).unwrap();
     assert_eq!(action.direction, DVec2::new(0.25, -0.5));
     assert_eq!(action.speed_fraction, 1.0_f64.tanh());
-    agent
-        .observe(
-            &mut cx,
-            FoodObservation {
-                strength: f64::NAN,
-                ..FoodObservation::default()
-            },
-        )
-        .unwrap();
     assert_eq!(
-        agent.act(&mut cx).unwrap_err().to_string(),
+        agent
+            .process(
+                &mut cx,
+                FoodObservation {
+                    strength: f64::NAN,
+                    ..FoodObservation::default()
+                },
+            )
+            .unwrap_err()
+            .to_string(),
         "invalid signal"
     );
 }
@@ -79,7 +80,7 @@ impl Context for ResearchContext {
     }
 }
 
-// A population can use the genome contract without knowing its representation.
+// Reproduction can use the genome contract without knowing its representation.
 fn mutated_copy<C: Context + ?Sized, G: Mutate<C, WeightMutation>>(
     parent: &G,
     param: &WeightMutation,
@@ -91,7 +92,7 @@ fn mutated_copy<C: Context + ?Sized, G: Mutate<C, WeightMutation>>(
 }
 
 #[test]
-fn actor_and_genome_accept_an_alternate_unsized_context() {
+fn mind_and_genome_accept_an_alternate_unsized_context() {
     let mut context = ResearchContext {
         rng: Xoshiro256PlusPlus::seed_from_u64(42),
     };
@@ -101,15 +102,14 @@ fn actor_and_genome_accept_an_alternate_unsized_context() {
     parent.weights[32] = 1.0;
     parent.weights[46] = 1.0;
     let original = parent.clone();
-    let mut agent = Herbivore::new(parent.clone());
+    let mut agent = HerbivoreMind::new(parent.clone());
 
     let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
         &mut context;
-    agent.observe(cx, FoodObservation::default()).unwrap();
-    let action = agent.act(cx).unwrap();
+    let action = agent.process(cx, FoodObservation::default()).unwrap();
     assert_eq!(action.direction, DVec2::X * f64::from(0.5_f32.tanh()));
     assert_eq!(action.speed_fraction, 1.0_f64.tanh());
-    assert_ne!(agent.mind.memory, [0.0; 4]);
+    assert_ne!(agent.brain.memory, [0.0; 4]);
     assert_eq!(context, before, "processing must not consume genetic draws");
 
     let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =

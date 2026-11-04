@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nevo::{environment::ecosystem::Scenario, run::Run, universe::Universe};
+use nevo::{ecosystem::Scenario, run::Run, universe::Universe};
 use serde::Deserialize;
 
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
@@ -122,7 +122,7 @@ struct Checkpoint {
 
 fn read_checkpoint(path: &Path) -> Checkpoint {
     let checkpoint: Checkpoint = ciborium::from_reader(fs::File::open(path).unwrap()).unwrap();
-    assert_eq!(checkpoint.format_version, 2);
+    assert_eq!(checkpoint.format_version, 3);
     checkpoint
 }
 

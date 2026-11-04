@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Counts, config::Options};
 
-const FORMAT_VERSION: u32 = 2;
+const FORMAT_VERSION: u32 = 3;
 const WORLD_MODEL: &str = "foraging-sense-first-v1";
 const AGENT_MODEL: &str = "herbivore-rnn-3-4-3-v1";
 
@@ -45,7 +45,7 @@ impl Checkpoint {
             "unsupported agent model {}",
             self.agent_model
         );
-        self.state.validate_checkpoint()
+        self.state.validate()
     }
 }
 
@@ -247,7 +247,7 @@ fn sync_directory(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use conf::Conf;
-    use nevo::environment::ecosystem::Scenario;
+    use nevo::ecosystem::Scenario;
 
     #[test]
     fn checkpoint_version_and_models_are_checked_before_restore() {
@@ -263,7 +263,7 @@ mod tests {
             state: Universe::new(Scenario::Debug, 1).unwrap(),
         };
         for (name, invalid) in [
-            ("format_version", ciborium::Value::from(1)),
+            ("format_version", ciborium::Value::from(2)),
             ("format_version", ciborium::Value::from(99)),
             ("world_model", ciborium::Value::from("another-world")),
             ("agent_model", ciborium::Value::from("another-agent")),

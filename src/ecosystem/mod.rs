@@ -1,16 +1,19 @@
+//! The foraging experiment: physical bodies and their minds share one lifetime.
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use anyhow::{Result, ensure};
 use glam::DVec2;
-use rand::{RngExt, SeedableRng};
-use rand_xoshiro::Xoshiro256PlusPlus;
+use rand::{Rng, RngExt, SeedableRng};
+use rand_xoshiro::{SplitMix64, Xoshiro256PlusPlus};
 
 use crate::{
-    actor::{
-        Handle, HandleAllocator,
-        population::{Lifecycle, PopulationAction, PopulationObservation},
+    context::Cpu,
+    mind::{
+        Heredity, Mind,
+        herbivore::{HerbivoreHeredity, HerbivoreMind},
     },
-    environment::Environment,
+    universe::Simulation,
 };
 
 pub const HALF_SIZE: DVec2 = DVec2::new(630.0, 350.0);
@@ -21,6 +24,8 @@ const UPKEEP: f64 = 2.0;
 const MAX_SPEED: f64 = 100.0;
 const DT: f64 = 0.1;
 
+type GeneticContext = Cpu<Xoshiro256PlusPlus>;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Scenario {
@@ -30,7 +35,6 @@ pub enum Scenario {
 
 impl std::str::FromStr for Scenario {
     type Err = String;
-
     fn from_str(name: &str) -> std::result::Result<Self, Self::Err> {
         match name {
             "debug" => Ok(Self::Debug),
@@ -40,10 +44,17 @@ impl std::str::FromStr for Scenario {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum Origin {
-    Immigrant,
-    Child { parent: Handle },
+/// Stable identity for lineage, event reports, and references within the experiment.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct AnimalId(u64);
+
+impl AnimalId {
+    pub fn serial(self) -> u64 {
+        self.0
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -60,7 +71,7 @@ pub struct MoveAction {
 
 impl MoveAction {
     fn displacement(self) -> DVec2 {
-        if !self.speed_fraction.is_finite() || self.direction.length() <= 0.01 {
+        if self.direction.length() <= 0.01 {
             return DVec2::ZERO;
         }
         self.direction.normalize_or_zero() * (self.speed_fraction.clamp(0.0, 1.0) * MAX_SPEED * DT)
@@ -74,7 +85,6 @@ pub struct Plant {
     pub position: DVec2,
     pub energy: f64,
 }
-
 impl Plant {
     pub fn radius(&self) -> f64 {
         radius(self.energy)
@@ -83,21 +93,27 @@ impl Plant {
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Animal {
+pub struct Body {
     pub position: DVec2,
     pub energy: f64,
 }
-
-impl Animal {
+impl Body {
     pub fn radius(&self) -> f64 {
         radius(self.energy)
     }
 }
 
+/// Body and mind are replaceable types, owned together and born or removed together.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Animal<B, M> {
+    pub body: B,
+    pub mind: M,
+}
+
 fn radius(energy: f64) -> f64 {
     0.5 * energy.max(0.0).sqrt()
 }
-
 fn clamp_position(position: DVec2, radius: f64) -> DVec2 {
     let limit = (HALF_SIZE - radius).max(DVec2::ZERO);
     position.clamp(-limit, limit)
@@ -105,15 +121,15 @@ fn clamp_position(position: DVec2, radius: f64) -> DVec2 {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Event {
-    Meal { id: Handle, plant: u64, gain: f64 },
-    Death { id: Handle },
-    Immigrant { id: Handle },
-    Birth { parent: Handle, child: Handle },
+    Meal { id: AnimalId, plant: u64, gain: f64 },
+    Death { id: AnimalId },
+    Immigrant { id: AnimalId },
+    Birth { parent: AnimalId, child: AnimalId },
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Decision {
-    pub id: Handle,
+    pub id: AnimalId,
     pub observation: FoodObservation,
     pub action: MoveAction,
     /// Energy when sensed, before feeding, splitting, and upkeep.
@@ -130,17 +146,6 @@ pub struct TickReport {
     pub decisions: Vec<Decision>,
 }
 
-/// The experiment decides whether to inject animals at this point in a tick.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ImmigrationRequest {
-    pub population: usize,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Immigration {
-    pub count: usize,
-}
-
 /// Physical parameters for an arrival, whether at initialization or later.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Admission {
@@ -148,7 +153,6 @@ pub struct Admission {
     pub position: Option<DVec2>,
     pub energy: f64,
 }
-
 impl Default for Admission {
     fn default() -> Self {
         Self {
@@ -158,55 +162,63 @@ impl Default for Admission {
     }
 }
 
-pub type Observation = PopulationObservation<FoodObservation, Origin>;
-
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Ecosystem {
+pub struct Ecosystem<M = HerbivoreMind, H = HerbivoreHeredity> {
     rng: Xoshiro256PlusPlus,
+    context: GeneticContext,
+    next_animal: u64,
     next_plant: u64,
-    animals: BTreeMap<Handle, Animal>,
+    animals: BTreeMap<AnimalId, Animal<Body, M>>,
     plants: Vec<Plant>,
     plant_target: usize,
+    minimum_population: usize,
+    heredity: H,
 }
 
 impl Ecosystem {
-    pub fn empty(plant_target: usize, world_seed: u64) -> Self {
+    pub fn new(scenario: Scenario, seed: u64) -> Result<Self> {
+        Self::with_heredity(scenario, seed, HerbivoreHeredity::default())
+    }
+}
+
+impl<M, H> Ecosystem<M, H> {
+    pub fn empty(
+        plant_target: usize,
+        minimum_population: usize,
+        world_seed: u64,
+        genetic_seed: u64,
+        heredity: H,
+    ) -> Self {
         Self {
             rng: Xoshiro256PlusPlus::seed_from_u64(world_seed),
+            context: Cpu {
+                rng: Xoshiro256PlusPlus::seed_from_u64(genetic_seed),
+            },
+            next_animal: 1,
             next_plant: 1,
             animals: BTreeMap::new(),
             plants: Vec::with_capacity(plant_target),
             plant_target,
+            minimum_population,
+            heredity,
         }
     }
 
-    /// The experiment chooses how many arrivals to admit and their physical state.
-    pub fn admit(
-        &mut self,
-        count: usize,
-        admission: Admission,
-        handles: &mut HandleAllocator,
-    ) -> Result<Observation> {
-        ensure!(admission.energy.is_finite(), "non-finite admission energy");
-        if let Some(position) = admission.position {
-            ensure!(
-                position.is_finite() && position.abs().cmple(HALF_SIZE).all(),
-                "invalid admission position"
-            );
-        }
-        let mut changes = Vec::with_capacity(count);
-        for _ in 0..count {
-            let position = admission.position.unwrap_or_else(|| self.random_position());
-            self.spawn(
-                handles,
-                Origin::Immigrant,
-                position,
-                admission.energy,
-                &mut changes,
-            )?;
-        }
-        Ok(self.lifecycle(changes))
+    pub fn animals(&self) -> &BTreeMap<AnimalId, Animal<Body, M>> {
+        &self.animals
+    }
+    pub fn plants(&self) -> &[Plant] {
+        &self.plants
+    }
+    pub fn context(&self) -> &GeneticContext {
+        &self.context
+    }
+    pub fn minimum_population(&self) -> usize {
+        self.minimum_population
+    }
+    pub fn set_minimum_population(&mut self, minimum: usize) {
+        self.minimum_population = minimum;
     }
 
     /// Fill an empty plant layout with ripe food, after initial animal admission.
@@ -223,21 +235,6 @@ impl Ecosystem {
             self.add_plant(position, RIPE_ENERGY)?;
         }
         Ok(())
-    }
-
-    pub fn animals(&self) -> &BTreeMap<Handle, Animal> {
-        &self.animals
-    }
-
-    pub fn plants(&self) -> &[Plant] {
-        &self.plants
-    }
-
-    fn lifecycle(&self, changes: Vec<Lifecycle<Origin>>) -> Observation {
-        PopulationObservation::Lifecycle {
-            members: self.animals.keys().copied().collect(),
-            changes,
-        }
     }
 
     fn random_position(&mut self) -> DVec2 {
@@ -261,27 +258,21 @@ impl Ecosystem {
         Ok(())
     }
 
-    fn spawn(
-        &mut self,
-        handles: &mut HandleAllocator,
-        origin: Origin,
-        position: DVec2,
-        energy: f64,
-        changes: &mut Vec<Lifecycle<Origin>>,
-    ) -> Result<Handle> {
-        let handle = handles.allocate()?;
-        ensure!(
-            !self.animals.contains_key(&handle),
-            "duplicate animal handle"
-        );
-        self.animals.insert(handle, Animal { position, energy });
-        changes.push(Lifecycle::Spawn { handle, origin });
-        Ok(handle)
+    fn spawn(&mut self, body: Body, mind: M) -> Result<AnimalId> {
+        let next = self
+            .next_animal
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("animal ID allocator exhausted"))?;
+        let id = AnimalId(self.next_animal);
+        self.animals.insert(id, Animal { body, mind });
+        self.next_animal = next;
+        Ok(id)
     }
 
-    fn feed_and_cull(&mut self, events: &mut Vec<Event>, changes: &mut Vec<Lifecycle<Origin>>) {
-        // Lower handles get first claim. A meal enlarges the next contact radius.
-        for (&id, body) in &mut self.animals {
+    fn feed_and_cull(&mut self, events: &mut Vec<Event>) {
+        // Lower IDs get first claim. A meal enlarges the next contact radius.
+        for (&id, animal) in &mut self.animals {
+            let body = &mut animal.body;
             if body.energy < 0.0 {
                 continue;
             }
@@ -301,9 +292,8 @@ impl Ecosystem {
                 }
             });
         }
-        self.animals.retain(|&id, body| {
-            if body.energy < 0.0 {
-                changes.push(Lifecycle::Despawn { handle: id });
+        self.animals.retain(|&id, animal| {
+            if animal.body.energy < 0.0 {
                 events.push(Event::Death { id });
                 false
             } else {
@@ -316,66 +306,6 @@ impl Ecosystem {
         while self.plants.len() < self.plant_target {
             let position = self.random_position();
             self.add_plant(position, 0.0)?;
-        }
-        Ok(())
-    }
-
-    fn immigrate(
-        &mut self,
-        count: usize,
-        handles: &mut HandleAllocator,
-        events: &mut Vec<Event>,
-        changes: &mut Vec<Lifecycle<Origin>>,
-    ) -> Result<()> {
-        let PopulationObservation::Lifecycle {
-            changes: arrivals, ..
-        } = self.admit(count, Admission::default(), handles)?
-        else {
-            unreachable!("admission emits lifecycle observations")
-        };
-        for arrival in &arrivals {
-            if let Lifecycle::Spawn { handle, .. } = arrival {
-                events.push(Event::Immigrant { id: *handle });
-            }
-        }
-        changes.extend(arrivals);
-        Ok(())
-    }
-
-    fn reproduce(
-        &mut self,
-        handles: &mut HandleAllocator,
-        events: &mut Vec<Event>,
-        changes: &mut Vec<Lifecycle<Origin>>,
-    ) -> Result<()> {
-        let mut parents: VecDeque<_> = self
-            .animals
-            .iter()
-            .filter_map(|(&id, body)| (body.energy > BIRTH_THRESHOLD).then_some(id))
-            .collect();
-        while let Some(parent) = parents.pop_front() {
-            let body = self.animals.get_mut(&parent).expect("parent body exists");
-            body.energy *= 0.5;
-            let energy = body.energy;
-            let direction = DVec2::new(
-                self.rng.random_range(-0.5..0.5),
-                self.rng.random_range(-0.5..0.5),
-            );
-            let offset = 0.5 * body.radius() * direction.normalize_or(DVec2::X);
-            let child_position = body.position + offset;
-            body.position -= offset;
-            let child = self.spawn(
-                handles,
-                Origin::Child { parent },
-                child_position,
-                energy,
-                changes,
-            )?;
-            events.push(Event::Birth { parent, child });
-            // Historical ordered traversal also visits newly appended children.
-            if energy > BIRTH_THRESHOLD {
-                parents.push_back(child);
-            }
         }
         Ok(())
     }
@@ -402,54 +332,129 @@ impl Ecosystem {
     }
 }
 
-impl Environment for Ecosystem {
-    type Observation = Observation;
-    type Action = PopulationAction<MoveAction>;
-    type Report = TickReport;
-    type Request = ImmigrationRequest;
-    type Intervention = Immigration;
-
-    fn observe(&self) -> Observation {
-        PopulationObservation::Inputs {
-            members: self.animals.keys().copied().collect(),
-            inputs: self
-                .animals
-                .iter()
-                .filter(|(_, body)| body.energy >= 0.0)
-                .map(|(&id, body)| (id, self.sense(body.position)))
-                .collect(),
-        }
+impl<M, H> Ecosystem<M, H>
+where
+    M: Mind<GeneticContext, Input = FoodObservation, Output = MoveAction>,
+    H: Heredity<GeneticContext, M>,
+{
+    pub fn with_heredity(scenario: Scenario, seed: u64, heredity: H) -> Result<Self> {
+        let mut seeds = SplitMix64::seed_from_u64(seed);
+        let world_seed = seeds.next_u64();
+        let genetic_seed = seeds.next_u64();
+        let (arrivals, plants, minimum, admission) = match scenario {
+            Scenario::Debug => (
+                1,
+                1,
+                0,
+                Admission {
+                    position: Some(DVec2::ZERO),
+                    energy: 390.0,
+                },
+            ),
+            Scenario::Baseline => (20, 500, 20, Admission::default()),
+        };
+        let mut world = Self::empty(plants, minimum, world_seed, genetic_seed, heredity);
+        world.admit(arrivals, admission)?;
+        world.seed_plants(admission.position)?;
+        world.validate()?;
+        Ok(world)
     }
 
-    fn advance(
-        &mut self,
-        tick: u64,
-        actions: Self::Action,
-        handles: &mut HandleAllocator,
-        mut intervene: impl FnMut(ImmigrationRequest) -> Result<Immigration>,
-    ) -> Result<(TickReport, Observation)> {
-        let eligible: BTreeSet<_> = self
+    /// Create complete animals through the same path at startup and during a run.
+    pub fn admit(&mut self, count: usize, admission: Admission) -> Result<Vec<AnimalId>> {
+        ensure!(admission.energy.is_finite(), "non-finite admission energy");
+        if let Some(position) = admission.position {
+            ensure!(
+                position.is_finite() && position.abs().cmple(HALF_SIZE).all(),
+                "invalid admission position"
+            );
+        }
+        let mut arrivals = Vec::with_capacity(count);
+        for _ in 0..count {
+            let position = admission.position.unwrap_or_else(|| self.random_position());
+            let mind = self.heredity.immigrant(&mut self.context)?;
+            arrivals.push(self.spawn(
+                Body {
+                    position,
+                    energy: admission.energy,
+                },
+                mind,
+            )?);
+        }
+        Ok(arrivals)
+    }
+
+    fn reproduce(&mut self, events: &mut Vec<Event>) -> Result<()> {
+        let mut parents: VecDeque<_> = self
             .animals
             .iter()
-            .filter_map(|(&id, body)| (body.energy >= 0.0).then_some(id))
+            .filter_map(|(&id, animal)| (animal.body.energy > BIRTH_THRESHOLD).then_some(id))
             .collect();
-        let supplied: BTreeSet<_> = actions.iter().map(|(id, _)| *id).collect();
-        ensure!(supplied.len() == actions.len(), "duplicate animal action");
-        ensure!(
-            supplied == eligible,
-            "actions do not match eligible animals"
-        );
-        for (_, action) in &actions {
+        while let Some(parent) = parents.pop_front() {
+            let animal = self.animals.get_mut(&parent).expect("parent exists");
+            let body = &mut animal.body;
+            body.energy *= 0.5;
+            let energy = body.energy;
+            let direction = DVec2::new(
+                self.rng.random_range(-0.5..0.5),
+                self.rng.random_range(-0.5..0.5),
+            );
+            let offset = 0.5 * body.radius() * direction.normalize_or(DVec2::X);
+            let child_position = body.position + offset;
+            body.position -= offset;
+            let mind = self.heredity.offspring(&mut self.context, &animal.mind)?;
+            let child = self.spawn(
+                Body {
+                    position: child_position,
+                    energy,
+                },
+                mind,
+            )?;
+            events.push(Event::Birth { parent, child });
+            // Historical ordered traversal also visits newly appended children.
+            if energy > BIRTH_THRESHOLD {
+                parents.push_back(child);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<M, H> Simulation for Ecosystem<M, H>
+where
+    M: Mind<GeneticContext, Input = FoodObservation, Output = MoveAction>,
+    H: Heredity<GeneticContext, M>,
+{
+    type Report = TickReport;
+
+    fn advance(&mut self, tick: u64) -> Result<TickReport> {
+        let observations: Vec<_> = self
+            .animals
+            .iter()
+            .filter(|(_, animal)| animal.body.energy >= 0.0)
+            .map(|(&id, animal)| (id, self.sense(animal.body.position)))
+            .collect();
+        let mut actions = Vec::with_capacity(observations.len());
+        for (id, observation) in observations {
+            let action = self
+                .animals
+                .get_mut(&id)
+                .expect("observed animal exists")
+                .mind
+                .process(&mut self.context, observation)?;
             ensure!(
                 action.direction.is_finite() && action.speed_fraction.is_finite(),
                 "non-finite movement action"
             );
+            actions.push((id, observation, action));
         }
         let mut decisions = Vec::with_capacity(actions.len());
-        for (id, action) in actions {
-            // Only plants enter sensing; earlier movement cannot alter this value.
-            let observation = self.sense(self.animals[&id].position);
-            let body = self.animals.get_mut(&id).expect("validated animal action");
+        for (id, observation, action) in actions {
+            let body = &mut self
+                .animals
+                .get_mut(&id)
+                .expect("acting animal exists")
+                .body;
             let position = clamp_position(body.position + action.displacement(), body.radius());
             decisions.push(Decision {
                 id,
@@ -461,18 +466,16 @@ impl Environment for Ecosystem {
             });
             body.position = position;
         }
-
         let mut events = Vec::new();
-        let mut changes = Vec::new();
-        self.feed_and_cull(&mut events, &mut changes);
+        self.feed_and_cull(&mut events);
         self.replenish_plants()?;
-        let immigration = intervene(ImmigrationRequest {
-            population: self.animals.len(),
-        })?;
-        self.immigrate(immigration.count, handles, &mut events, &mut changes)?;
-        self.reproduce(handles, &mut events, &mut changes)?;
-
-        for body in self.animals.values_mut() {
+        let count = self.minimum_population.saturating_sub(self.animals.len());
+        for id in self.admit(count, Admission::default())? {
+            events.push(Event::Immigrant { id });
+        }
+        self.reproduce(&mut events)?;
+        for animal in self.animals.values_mut() {
+            let body = &mut animal.body;
             body.energy -= UPKEEP;
             body.position = clamp_position(body.position, body.radius());
         }
@@ -480,30 +483,39 @@ impl Environment for Ecosystem {
             plant.energy = (plant.energy + 1.0).min(RIPE_ENERGY);
             plant.position = clamp_position(plant.position, plant.radius());
         }
-        let report = TickReport {
+        Ok(TickReport {
             tick,
             events,
             decisions,
-        };
-        Ok((report, self.lifecycle(changes)))
+        })
     }
 
-    fn validate(&self, handles: &HandleAllocator) -> Result<()> {
+    fn validate(&self) -> Result<()> {
         ensure!(self.rng.state() != [0; 32], "world RNG state is all zero");
-        ensure!(self.next_plant > 0, "invalid next plant ID");
+        ensure!(
+            self.context.rng.state() != [0; 32],
+            "genetic RNG state is all zero"
+        );
+        ensure!(
+            self.next_animal > 0 && self.next_plant > 0,
+            "invalid next ID"
+        );
         ensure!(
             self.plants.len() == self.plant_target,
             "plant count differs from target"
         );
-        for (handle, body) in &self.animals {
-            handles.validate_handle(*handle)?;
+        for (id, animal) in &self.animals {
+            ensure!(id.0 > 0 && id.0 < self.next_animal, "invalid animal ID");
+            let body = &animal.body;
             // Negative energy is legitimate between upkeep and the next cull.
             ensure!(body.energy.is_finite(), "non-finite animal energy");
             ensure!(
                 body.position.is_finite() && body.position.abs().cmple(HALF_SIZE).all(),
                 "invalid animal position"
             );
+            animal.mind.validate()?;
         }
+        self.heredity.validate()?;
         let mut ids = BTreeSet::new();
         for plant in &self.plants {
             ensure!(

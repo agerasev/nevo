@@ -1,8 +1,7 @@
 #![forbid(unsafe_code)]
 
-pub mod actor;
 pub mod context;
-pub mod environment;
+pub mod ecosystem;
 pub mod genome;
 pub mod mind;
 pub mod run;

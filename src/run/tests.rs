@@ -1,120 +1,62 @@
 use super::*;
-use crate::actor::HandleAllocator;
 use anyhow::{Result, ensure};
 use rand::{Rng, SeedableRng};
+use rand_xoshiro::Xoshiro256PlusPlus;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// An unrelated experiment demonstrates that the runner requires no animal,
+/// perception, lifecycle, or population contracts.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-enum Observation {
-    Input(u64),
-    Feedback,
-}
-
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct World {
-    value: u64,
-    fail: bool,
-}
-
-impl Environment for World {
-    type Observation = Observation;
-    type Action = u64;
-    type Report = u64;
-    type Request = ();
-    type Intervention = ();
-
-    fn observe(&self) -> Observation {
-        Observation::Input(self.value)
-    }
-
-    fn advance(
-        &mut self,
-        _: u64,
-        action: u64,
-        handles: &mut HandleAllocator,
-        mut intervene: impl FnMut(()) -> Result<()>,
-    ) -> Result<(u64, Observation)> {
-        self.value = action;
-        handles.allocate()?;
-        ensure!(!self.fail, "environment failed");
-        intervene(())?;
-        Ok((self.value, Observation::Feedback))
-    }
-
-    fn validate(&self, _: &HandleAllocator) -> Result<()> {
-        Ok(())
-    }
-}
-
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 struct Probe {
-    pending: Option<u64>,
+    value: u64,
     memory: u64,
-    fail_action: bool,
-    fail_feedback: bool,
+    rng: Xoshiro256PlusPlus,
+    births: u64,
+    interventions: u64,
+    fail_phase: u8,
     #[serde(skip)]
     inspect: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
-type TestContext = Cpu<Xoshiro256PlusPlus>;
+impl Simulation for Probe {
+    type Report = u64;
 
-impl Actor<TestContext> for Probe {
-    type Observation = Observation;
-    type Action = u64;
-
-    fn observe(&mut self, _: &mut TestContext, observation: Observation) -> Result<()> {
-        match observation {
-            Observation::Input(value) => self.pending = Some(value),
-            Observation::Feedback => {
-                self.memory += 1;
-                ensure!(!self.fail_feedback, "feedback failed");
-            }
-        }
-        Ok(())
-    }
-
-    fn act(&mut self, context: &mut TestContext) -> Result<u64> {
+    fn advance(&mut self, _: u64) -> Result<u64> {
         if let Some(inspect) = &self.inspect {
             inspect();
         }
-        self.memory = context.rng.next_u64() % 100;
-        ensure!(!self.fail_action, "actor failed");
-        Ok(self.pending.take().unwrap() + 1)
+        self.memory = self.rng.next_u64();
+        ensure!(self.fail_phase != 1, "mind failed");
+        self.value += 1;
+        self.births += 1;
+        ensure!(self.fail_phase != 2, "physical update failed");
+        self.interventions += 1;
+        ensure!(self.fail_phase != 3, "intervention failed");
+        Ok(self.value)
     }
-}
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
-struct TestPolicy {
-    calls: u64,
-    fail: bool,
-}
-
-impl Policy<()> for TestPolicy {
-    type Intervention = ();
-    fn respond(&mut self, _: ()) -> Result<()> {
-        self.calls += 1;
-        ensure!(!self.fail, "policy failed");
+    fn validate(&self) -> Result<()> {
+        ensure!(
+            self.fail_phase != 4 || self.value == 0,
+            "invalid prepared state"
+        );
         Ok(())
     }
 }
 
-type TestUniverse = Universe<World, Probe, TestContext, TestPolicy>;
-type TestRun = Run<World, Probe, TestContext, TestPolicy>;
+type TestUniverse = Universe<Probe>;
+type TestRun = Run<Probe>;
 
 fn universe() -> TestUniverse {
-    Universe::from_parts(
-        0,
-        World {
-            value: 0,
-            fail: false,
-        },
-        Probe::default(),
-        Cpu {
-            rng: Xoshiro256PlusPlus::seed_from_u64(42),
-        },
-        TestPolicy::default(),
-        HandleAllocator::default(),
-    )
+    Universe::from_world(Probe {
+        value: 0,
+        memory: 0,
+        rng: Xoshiro256PlusPlus::seed_from_u64(42),
+        births: 0,
+        interventions: 0,
+        fail_phase: 0,
+        inspect: None,
+    })
     .unwrap()
 }
 
@@ -130,12 +72,12 @@ fn preparation_holds_read_lock_and_callback_runs_after_atomic_publication() {
     let observed = Arc::new(AtomicUsize::new(0));
     let view = run.universe.clone();
     let count = observed.clone();
-    run.universe.0.write().unwrap().actor.inspect = Some(Arc::new(move || {
+    run.universe.0.write().unwrap().world.inspect = Some(Arc::new(move || {
         assert!(view.0.try_write().is_err(), "preparation holds a read lock");
         let state = view.0.try_read().expect("concurrent readers are allowed");
         assert_eq!(state.step(), 0);
-        assert_eq!(state.actor.memory, 0);
-        assert_eq!(state.environment.value, 0);
+        assert_eq!(state.world.memory, 0);
+        assert_eq!(state.world.value, 0);
         count.fetch_add(1, Ordering::Relaxed);
     }));
     let (_control, commands) = Control::channel(false);
@@ -153,8 +95,8 @@ fn preparation_holds_read_lock_and_callback_runs_after_atomic_publication() {
                     .try_write()
                     .expect("callback holds no universe lock");
                 assert_eq!(state.step(), 1);
-                assert_eq!(state.environment.value, *report);
-                assert_eq!(state.policy.calls, 1);
+                assert_eq!(state.world.value, *report);
+                assert_eq!(state.world.interventions, 1);
                 false
             },
         )
@@ -162,7 +104,7 @@ fn preparation_holds_read_lock_and_callback_runs_after_atomic_publication() {
     assert_eq!(stop, StopReason::TickLimit);
     assert_eq!(observed.load(Ordering::Relaxed), 1);
     // Remove the test instrumentation's back-reference.
-    run.universe.0.write().unwrap().actor.inspect = None;
+    run.universe.0.write().unwrap().world.inspect = None;
 }
 
 #[test]
@@ -172,7 +114,7 @@ fn readers_can_hold_back_publication_while_preparation_runs() {
     let (entered, acting) = mpsc::channel();
     let (release, proceed) = mpsc::channel();
     let proceed = Mutex::new(proceed);
-    run.universe.0.write().unwrap().actor.inspect = Some(Arc::new(move || {
+    run.universe.0.write().unwrap().world.inspect = Some(Arc::new(move || {
         entered.send(()).unwrap();
         proceed
             .lock()
@@ -192,7 +134,7 @@ fn readers_can_hold_back_publication_while_preparation_runs() {
         completed.recv_timeout(Duration::from_millis(30)),
         Err(mpsc::RecvTimeoutError::Timeout)
     ));
-    assert_eq!(old.environment.value, 0);
+    assert_eq!(old.world.value, 0);
     drop(old);
     assert_eq!(
         completed
@@ -205,16 +147,10 @@ fn readers_can_hold_back_publication_while_preparation_runs() {
 }
 
 #[test]
-fn failed_preparation_preserves_environment_actor_policy_allocator_and_rng() {
-    for phase in 0..4 {
+fn failed_preparation_preserves_all_experiment_state() {
+    for phase in 1..=4 {
         let mut state = universe();
-        match phase {
-            0 => state.actor.fail_action = true,
-            1 => state.environment.fail = true,
-            2 => state.policy.fail = true,
-            3 => state.actor.fail_feedback = true,
-            _ => unreachable!(),
-        }
+        state.world.fail_phase = phase;
         let before = encoded(&state);
         let mut run = TestRun::from_universe(state);
         let (control, commands) = Control::channel(false);

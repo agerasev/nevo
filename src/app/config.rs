@@ -2,7 +2,7 @@ use std::{env, ffi::OsString, fmt, fs, path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result, ensure};
 use conf::Conf;
-use nevo::{environment::ecosystem::Scenario, run::LoopOptions};
+use nevo::{ecosystem::Scenario, run::LoopOptions};
 use rand::{TryRng, rngs::SysRng};
 use serde::{
     Deserialize, Serialize, Serializer,
