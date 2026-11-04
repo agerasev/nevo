@@ -8,10 +8,10 @@ serializes directly to CBOR; locks and the viewer live outside it.
 
 | Contract or type | Responsibility |
 | --- | --- |
-| [Simulation](../src/universe/mod.rs) | Advance and validate an experiment, without prescribing its internal entities or sensing. |
+| [Simulation](../src/universe/mod.rs) | Prepare an owned update, apply it, and validate an experiment, without prescribing its entities or sensing. |
 | [Ecosystem](../src/ecosystem/mod.rs) | The foraging model: plants, complete animals, perception, physics, population support, and random streams. |
 | `Animal<B, M>` | Own a body and its mind together: `body: B`, `mind: M`. |
-| [Mind](../src/mind/mod.rs) | Process typed input into output and validate its own state. |
+| [Mind](../src/mind/mod.rs) | Prepare typed output and a state update from input; apply the update and validate mind state. |
 | [Genome / Mutate](../src/genome/mod.rs) | Clone inherited representations and mutate them using an execution context. |
 | [RandomInit](../src/genome/mod.rs) | Initialize a value from the context RNG, independently of Genome. |
 | [Context](../src/context/mod.rs) | Supply RNG and execution resources; the CPU context owns the genetic RNG. |
@@ -19,7 +19,8 @@ serializes directly to CBOR; locks and the viewer live outside it.
 `Ecosystem<M, G, P>` can use another compatible mind, genome, and mutation parameter
 type. Genetic minds expose their genome through `AsRef<G>` and construct fresh minds
 through `TryFrom<G>`; the baseline provides infallible `From<RnnGenome>` conversions.
-The Mind contract itself does not require a genome.
+In this ecosystem, thinking leaves the inherited genome unchanged; learned state
+belongs to the mind's update. The Mind contract itself does not require a genome.
 A different experiment implements `Simulation`; the runner imposes no animal,
 population, observation, or action types. `Animal` is generic over its body and mind;
 the foraging model uses its own physical `Body` type.
@@ -52,17 +53,30 @@ genetic random draws.
 
 ## A complete step
 
-The [runner](../src/run/mod.rs) holds a Universe read lock while cloning and advancing
-an independent next state. It releases the read lock before publishing the complete
-next Universe under a write lock. Other readers can inspect the previous state
-during computation. Failure discards all prepared changes, including memory and
-random draws. The runner is the sole writer; `UniverseView` only exposes read access.
-Cloning a Run creates an independent simulation; cloning its view attaches a reader.
+The [runner](../src/run/mod.rs) holds a Universe read lock while `prepare_step`
+computes an owned update. It releases that lock, then installs the update and step
+counter under a write lock. Other readers can inspect the previous complete state
+during computation. The runner is the sole writer; `UniverseView` exposes only reads.
 
-Full-state cloning remains the current implementation. A later prepare/apply change
-can represent only updates. Reconstructible caches may be omitted from serialization;
-recurrent memory and RNG positions are required state. Replacement models must clone
-independently mutable simulation state.
+`Simulation::Update` and `Mind::Update` describe their component's changes.
+Preparation performs all fallible work, validates the proposed state, and uses
+private RNG copies. Failure or a discarded update leaves published state unchanged.
+Application consumes a successful update on its unchanged source state; it cannot
+fail, draw randomness, or run further model computation. Preparation must not change
+simulation state through interior mutability. Stepping requires no `Clone` bound on
+the model or mind.
+
+The ecosystem works on body and plant copies to preserve sequential feeding and
+birth rules. Its update carries final physical state, mind updates, new animals,
+deaths, RNG positions, and ID counters. Existing minds and genomes stay in place:
+the RNN prepares only four recurrent values, and reproduction copies a genome only
+for the child. Immutable experiment parameters are borrowed during preparation.
+Updates are transient; the serialized Universe layout is unchanged.
+
+Cloning a Run still creates an independent simulation; cloning its view attaches a
+reader. Snapshot copies for rendering and persistence remain independent of stepping.
+Reconstructible caches may be omitted from serialization; recurrent memory and RNG
+positions are required state.
 
 The ecosystem senses animals with nonnegative energy in stable ID order and obtains
 all actions before moving any bodies. Movement and clamping precede feeding and

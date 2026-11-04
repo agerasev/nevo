@@ -52,9 +52,14 @@ where
 {
     type Input = FoodObservation;
     type Output = MoveAction;
+    type Update = M::Update;
 
-    fn process(&mut self, cx: &mut C, observation: FoodObservation) -> Result<MoveAction> {
-        let output = self.brain.process(
+    fn prepare(
+        &self,
+        cx: &mut C,
+        observation: FoodObservation,
+    ) -> Result<(MoveAction, Self::Update)> {
+        let (output, update) = self.brain.prepare(
             cx,
             [
                 observation.gradient.x as f32,
@@ -62,10 +67,17 @@ where
                 observation.strength as f32,
             ],
         )?;
-        Ok(MoveAction {
-            direction: DVec2::new(output[0].into(), output[1].into()),
-            speed_fraction: f64::from(output[2]).tanh().abs(),
-        })
+        Ok((
+            MoveAction {
+                direction: DVec2::new(output[0].into(), output[1].into()),
+                speed_fraction: f64::from(output[2]).tanh().abs(),
+            },
+            update,
+        ))
+    }
+
+    fn apply(&mut self, update: Self::Update) {
+        self.brain.apply(update);
     }
 
     fn validate(&self) -> Result<()> {

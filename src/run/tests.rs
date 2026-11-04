@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// An unrelated experiment demonstrates that the runner requires no animal,
 /// perception, lifecycle, or population contracts.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+// Deliberately not Clone: stepping must prepare changes without copying the model.
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Probe {
     value: u64,
     memory: u64,
@@ -16,23 +17,56 @@ struct Probe {
     fail_phase: u8,
     #[serde(skip)]
     inspect: Option<Arc<dyn Fn() + Send + Sync>>,
+    #[serde(skip)]
+    inspect_apply: Option<Arc<dyn Fn() + Send + Sync>>,
+}
+
+struct ProbeUpdate {
+    value: u64,
+    memory: u64,
+    rng: Xoshiro256PlusPlus,
+    births: u64,
+    interventions: u64,
 }
 
 impl Simulation for Probe {
+    type Update = ProbeUpdate;
     type Report = u64;
 
-    fn advance(&mut self, _: u64) -> Result<u64> {
+    fn prepare_step(&self, _: u64) -> Result<(ProbeUpdate, u64)> {
         if let Some(inspect) = &self.inspect {
             inspect();
         }
-        self.memory = self.rng.next_u64();
+        let mut rng = self.rng.clone();
+        let memory = rng.next_u64();
         ensure!(self.fail_phase != 1, "mind failed");
-        self.value += 1;
-        self.births += 1;
+        let value = self.value + 1;
+        let births = self.births + 1;
         ensure!(self.fail_phase != 2, "physical update failed");
-        self.interventions += 1;
+        let interventions = self.interventions + 1;
         ensure!(self.fail_phase != 3, "intervention failed");
-        Ok(self.value)
+        ensure!(self.fail_phase != 4, "invalid prepared state");
+        Ok((
+            ProbeUpdate {
+                value,
+                memory,
+                rng,
+                births,
+                interventions,
+            },
+            value,
+        ))
+    }
+
+    fn apply_step(&mut self, update: ProbeUpdate) {
+        if let Some(inspect) = &self.inspect_apply {
+            inspect();
+        }
+        self.value = update.value;
+        self.memory = update.memory;
+        self.rng = update.rng;
+        self.births = update.births;
+        self.interventions = update.interventions;
     }
 
     fn validate(&self) -> Result<()> {
@@ -56,6 +90,7 @@ fn universe() -> TestUniverse {
         interventions: 0,
         fail_phase: 0,
         inspect: None,
+        inspect_apply: None,
     })
     .unwrap()
 }
@@ -78,6 +113,17 @@ fn preparation_holds_read_lock_and_callback_runs_after_atomic_publication() {
         assert_eq!(state.step(), 0);
         assert_eq!(state.world.memory, 0);
         assert_eq!(state.world.value, 0);
+        count.fetch_add(1, Ordering::Relaxed);
+    }));
+    let applied = Arc::new(AtomicUsize::new(0));
+    let count = applied.clone();
+    let view = run.universe.clone();
+    run.universe.0.write().unwrap().world.inspect_apply = Some(Arc::new(move || {
+        assert!(view.0.try_read().is_err(), "application excludes readers");
+        assert!(
+            view.0.try_write().is_err(),
+            "application holds the write lock"
+        );
         count.fetch_add(1, Ordering::Relaxed);
     }));
     let (_control, commands) = Control::channel(false);
@@ -103,8 +149,35 @@ fn preparation_holds_read_lock_and_callback_runs_after_atomic_publication() {
         .unwrap();
     assert_eq!(stop, StopReason::TickLimit);
     assert_eq!(observed.load(Ordering::Relaxed), 1);
+    assert_eq!(applied.load(Ordering::Relaxed), 1);
     // Remove the test instrumentation's back-reference.
     run.universe.0.write().unwrap().world.inspect = None;
+    run.universe.0.write().unwrap().world.inspect_apply = None;
+}
+
+#[test]
+fn discarding_an_update_preserves_state_and_randomness() {
+    let mut state = universe();
+    let before = encoded(&state);
+    drop(state.prepare_step().unwrap());
+    assert_eq!(encoded(&state), before);
+
+    let mut expected_rng = state.world.rng.clone();
+    let expected_memory = expected_rng.next_u64();
+    assert_eq!(state.advance().unwrap(), 1);
+    assert_eq!(state.step(), 1);
+    assert_eq!(state.world.memory, expected_memory);
+    assert_eq!(state.world.rng, expected_rng);
+}
+
+#[test]
+fn exhausted_step_counter_fails_before_model_preparation() {
+    let mut state = universe();
+    state.step = u64::MAX - 1;
+    state.world.inspect = Some(Arc::new(|| panic!("must check counter before preparation")));
+    let before = encoded(&state);
+    assert!(state.advance().is_err());
+    assert_eq!(encoded(&state), before);
 }
 
 #[test]

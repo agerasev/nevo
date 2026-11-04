@@ -80,6 +80,8 @@ The concrete experiment is `ecosystem::Ecosystem`. Each animal owns its `body` a
 both bounded and unlimited runs use `run::Run`. Initialization and later immigration
 share one admission path. Minds receive typed observations and return actions;
 there is no separate environment–actor storage or lifecycle synchronization.
+Each tick prepares component updates under a read lock and applies them under a
+write lock, without cloning the Universe or existing minds.
 See [simulation contracts](docs/simulation.md) for the implemented boundaries.
 
 Keep current documentation in [docs/](docs/README.md), with selected milestone

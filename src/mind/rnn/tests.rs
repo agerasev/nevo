@@ -28,3 +28,50 @@ fn recurrent_units_read_previous_memory() {
     assert_eq!(mind.memory, [0.0, 1.0_f32.tanh().tanh(), 0.0, 0.0]);
     assert_eq!(cx, before, "processing must not consume genetic draws");
 }
+
+#[test]
+fn preparing_and_discarding_memory_does_not_change_the_mind() {
+    let mut genome = RnnGenome::default();
+    genome.weights[28] = 0.5;
+    genome.weights[32] = 1.0;
+    let mut mind = Rnn::new(genome);
+    let original = mind.clone();
+    let mut cx = Cpu {
+        rng: Xoshiro256PlusPlus::seed_from_u64(42),
+    };
+    let original_cx = cx.clone();
+
+    let (output, discarded) = mind.prepare(&mut cx, [0.0; 3]).unwrap();
+    assert_eq!(output, [0.5_f32.tanh(), 0.0, 0.0]);
+    assert_ne!(discarded, mind.memory);
+    assert_eq!(mind, original);
+    assert_eq!(cx, original_cx);
+
+    let (repeated_output, update) = mind.prepare(&mut cx, [0.0; 3]).unwrap();
+    assert_eq!((repeated_output, update), (output, discarded));
+    <Rnn as Mind<Cpu<Xoshiro256PlusPlus>>>::apply(&mut mind, update);
+    assert_eq!(mind.memory, update);
+    assert_eq!(mind.genome, original.genome);
+    assert_eq!(cx, original_cx);
+}
+
+#[test]
+fn invalid_prepared_memory_fails_before_changing_the_mind() {
+    let mut mind = Rnn::new(RnnGenome::default());
+    let original = mind.clone();
+    let mut cx = Cpu {
+        rng: Xoshiro256PlusPlus::seed_from_u64(42),
+    };
+    let original_cx = cx.clone();
+
+    assert!(
+        mind.prepare(&mut cx, [f32::NAN, 0.0, 0.0])
+            .unwrap_err()
+            .to_string()
+            .contains("prepared recurrent memory")
+    );
+    assert_eq!(mind, original);
+    assert!(mind.process(&mut cx, [f32::NAN, 0.0, 0.0]).is_err());
+    assert_eq!(mind, original);
+    assert_eq!(cx, original_cx);
+}

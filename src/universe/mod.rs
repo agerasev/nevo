@@ -8,11 +8,22 @@ use crate::{
 };
 
 /// An experiment owns its physical state, minds, random streams, and rules.
-/// `advance` operates on private prepared state; it may fail without publication.
+/// Preparation reads published state and returns an owned, validated update.
+/// It must not change simulation state through interior mutability. All fallible
+/// work and random draws belong here, using private working state as needed.
+/// Applying an update to its unchanged source state must not fail or draw randomness.
 pub trait Simulation {
+    type Update;
     type Report;
 
-    fn advance(&mut self, step: u64) -> Result<Self::Report>;
+    fn prepare_step(&self, step: u64) -> Result<(Self::Update, Self::Report)>;
+    fn apply_step(&mut self, update: Self::Update);
+
+    fn advance(&mut self, step: u64) -> Result<Self::Report> {
+        let (update, report) = self.prepare_step(step)?;
+        self.apply_step(update);
+        Ok(report)
+    }
 
     fn validate(&self) -> Result<()> {
         Ok(())
@@ -27,6 +38,13 @@ pub trait Simulation {
 pub struct Universe<S = Ecosystem> {
     pub(crate) step: u64,
     pub(crate) world: S,
+}
+
+/// Confined to the stepping path, which applies it to the unchanged source Universe.
+pub(crate) struct PreparedStep<S: Simulation> {
+    step: u64,
+    world: S::Update,
+    report: S::Report,
 }
 
 impl<S> Universe<S> {
@@ -59,27 +77,30 @@ impl<S: Simulation> Universe<S> {
         self.validate()?;
         Ok(Run::from_universe(self))
     }
-}
 
-impl<S: Simulation + Clone> Universe<S> {
-    /// Compute a complete next state without changing the published universe.
-    /// Component deltas can replace this full clone in a subsequent change.
-    pub fn prepare_step(&self) -> Result<(Self, S::Report)> {
+    pub(crate) fn prepare_step(&self) -> Result<PreparedStep<S>> {
         let step = self
             .step
             .checked_add(1)
             .ok_or_else(|| anyhow::anyhow!("universe step counter is exhausted"))?;
-        let mut next = self.clone();
-        let report = next.world.advance(step)?;
-        next.step = step;
-        next.validate()?;
-        Ok((next, report))
+        ensure!(step < u64::MAX, "universe step counter is exhausted");
+        let (world, report) = self.world.prepare_step(step)?;
+        Ok(PreparedStep {
+            step,
+            world,
+            report,
+        })
+    }
+
+    pub(crate) fn apply_step(&mut self, update: PreparedStep<S>) -> S::Report {
+        self.world.apply_step(update.world);
+        self.step = update.step;
+        update.report
     }
 
     pub fn advance(&mut self) -> Result<S::Report> {
-        let (next, report) = self.prepare_step()?;
-        *self = next;
-        Ok(report)
+        let update = self.prepare_step()?;
+        Ok(self.apply_step(update))
     }
 }
 

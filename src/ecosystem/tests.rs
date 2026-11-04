@@ -66,11 +66,19 @@ impl<const FAIL_INIT: bool> TryFrom<FixedGenome<FAIL_INIT>> for FixedMind<FAIL_I
 impl<const FAIL_INIT: bool> Mind<GeneticContext> for FixedMind<FAIL_INIT> {
     type Input = FoodObservation;
     type Output = MoveAction;
+    type Update = usize;
 
-    fn process(&mut self, _: &mut GeneticContext, _: FoodObservation) -> Result<MoveAction> {
-        self.calls += 1;
+    fn prepare(&self, cx: &mut GeneticContext, _: FoodObservation) -> Result<(MoveAction, usize)> {
+        if self.genome.fail_mind {
+            // Even a failed inference that consumes scratch randomness cannot publish it.
+            cx.rng.next_u64();
+        }
         ensure!(!self.genome.fail_mind, "mind failed");
-        Ok(self.genome.action)
+        Ok((self.genome.action, self.calls + 1))
+    }
+
+    fn apply(&mut self, calls: usize) {
+        self.calls = calls;
     }
 }
 
@@ -541,4 +549,176 @@ fn an_invalid_template_is_rejected_even_without_animals() {
     genome.weights[0] = f32::NAN;
     let world: Ecosystem = Ecosystem::empty(0, 0, 42, 17, Some(genome), WeightMutation::default());
     assert!(world.validate().is_err());
+}
+
+#[test]
+fn preparing_and_discarding_a_tick_leaves_every_component_unchanged() {
+    let fixture = Fixture::debug(14);
+    let before = fixture.world.clone();
+    let (update, first) = fixture.world.prepare_step(1).unwrap();
+    assert_eq!(fixture.world, before);
+    assert!(
+        first
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::Birth { .. }))
+    );
+    drop(update);
+    let (update, repeated) = fixture.world.prepare_step(1).unwrap();
+    assert_eq!(repeated, first);
+    let mut world = fixture.world;
+    world.apply_step(update);
+    assert_eq!(world.animals[&id(1)].mind.calls, 1);
+    assert_eq!(world.animals[&id(2)].mind.calls, 0);
+}
+
+#[test]
+fn exhausted_allocators_cannot_publish_partial_ticks() {
+    use crate::universe::Universe;
+
+    for animals in [false, true] {
+        let mut fixture = Fixture::debug(15);
+        if animals {
+            fixture.world.next_animal = u64::MAX;
+        } else {
+            fixture.world.next_plant = u64::MAX;
+        }
+        let mut universe = Universe::from_world(fixture.world).unwrap();
+        let original = universe.clone();
+        assert!(universe.advance().is_err());
+        assert_eq!(universe, original);
+    }
+}
+
+#[test]
+fn stepping_requires_no_mind_clone_and_copies_genomes_only_for_arrivals_and_births() {
+    use crate::{run::Run, universe::Universe};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    struct CountedGenome(Arc<AtomicUsize>);
+    impl Clone for CountedGenome {
+        fn clone(&self) -> Self {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Self(Arc::clone(&self.0))
+        }
+    }
+    impl Genome<GeneticContext> for CountedGenome {}
+    impl RandomInit<GeneticContext> for CountedGenome {
+        fn random(_: &mut GeneticContext) -> Result<Self> {
+            panic!("this experiment uses an immigrant template")
+        }
+    }
+    struct Mutation;
+    impl Clone for Mutation {
+        fn clone(&self) -> Self {
+            panic!("stepping must borrow mutation parameters")
+        }
+    }
+    impl Mutate<GeneticContext, Mutation> for CountedGenome {
+        fn mutate(&mut self, _: &Mutation, _: &mut GeneticContext) -> Result<()> {
+            Ok(())
+        }
+    }
+    // Deliberately not Clone: persistent brains can own expensive backend state.
+    struct CountingMind {
+        genome: CountedGenome,
+        calls: usize,
+    }
+    impl From<CountedGenome> for CountingMind {
+        fn from(genome: CountedGenome) -> Self {
+            Self { genome, calls: 0 }
+        }
+    }
+    impl AsRef<CountedGenome> for CountingMind {
+        fn as_ref(&self) -> &CountedGenome {
+            &self.genome
+        }
+    }
+    impl Mind<GeneticContext> for CountingMind {
+        type Input = FoodObservation;
+        type Output = MoveAction;
+        type Update = usize;
+        fn prepare(
+            &self,
+            _: &mut GeneticContext,
+            _: FoodObservation,
+        ) -> Result<(MoveAction, usize)> {
+            Ok((MoveAction::default(), self.calls + 1))
+        }
+        fn apply(&mut self, calls: usize) {
+            self.calls = calls;
+        }
+    }
+
+    let copies = Arc::new(AtomicUsize::new(0));
+    let mut world: Ecosystem<CountingMind, CountedGenome, Mutation> = Ecosystem::empty(
+        0,
+        0,
+        1,
+        42,
+        Some(CountedGenome(Arc::clone(&copies))),
+        Mutation,
+    );
+    let animal = world
+        .admit(
+            1,
+            Admission {
+                position: Some(DVec2::ZERO),
+                energy: 100.0,
+            },
+        )
+        .unwrap()[0];
+    assert_eq!(copies.load(Ordering::Relaxed), 1, "one immigrant genome");
+    let mut run = Run::from_universe(Universe::from_world(world).unwrap());
+    // Initial validation also checks the template by developing a fresh mind.
+    let before = copies.load(Ordering::Relaxed);
+    for _ in 0..3 {
+        assert!(run.tick().unwrap().events.is_empty());
+    }
+    assert_eq!(
+        copies.load(Ordering::Relaxed),
+        before,
+        "ordinary ticks never copy a genome"
+    );
+    assert_eq!(
+        run.universe().read().world().animals()[&animal].mind.calls,
+        3
+    );
+
+    let mut world: Ecosystem<CountingMind, CountedGenome, Mutation> = Ecosystem::empty(
+        0,
+        0,
+        1,
+        42,
+        Some(CountedGenome(Arc::clone(&copies))),
+        Mutation,
+    );
+    world
+        .admit(
+            1,
+            Admission {
+                position: Some(DVec2::ZERO),
+                energy: 1700.0,
+            },
+        )
+        .unwrap();
+    let mut run = Run::from_universe(Universe::from_world(world).unwrap());
+    let before = copies.load(Ordering::Relaxed);
+    let report = run.tick().unwrap();
+    assert_eq!(
+        report
+            .events
+            .iter()
+            .filter(|event| matches!(event, Event::Birth { .. }))
+            .count(),
+        3
+    );
+    assert_eq!(
+        copies.load(Ordering::Relaxed) - before,
+        3,
+        "one genome per birth, including newborn parents"
+    );
 }

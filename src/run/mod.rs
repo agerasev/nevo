@@ -33,7 +33,7 @@ impl<U: fmt::Debug> fmt::Debug for UniverseView<U> {
     }
 }
 
-/// The sole writer publishes complete universes; observers only receive readers.
+/// The sole writer applies complete updates; observers only receive readers.
 #[derive(Debug)]
 pub struct Run<S = Ecosystem> {
     universe: UniverseView<Universe<S>>,
@@ -176,17 +176,18 @@ impl Control {
 
 impl<S> Run<S>
 where
-    S: Simulation + Clone,
+    S: Simulation,
 {
     pub fn tick(&mut self) -> Result<S::Report> {
         // Keep the read lock for preparation: viewers may read the old complete
         // state concurrently. Drop it before acquiring the publication lock.
-        let (next, report) = self.universe.read().prepare_step()?;
-        *self
+        let update = self.universe.read().prepare_step()?;
+        let report = self
             .universe
             .0
             .write()
-            .expect("universe publication panicked") = next;
+            .expect("universe publication panicked")
+            .apply_step(update);
         Ok(report)
     }
 

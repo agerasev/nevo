@@ -20,11 +20,14 @@ fn herbivore_accepts_another_mind_and_propagates_its_errors() {
     impl<C: Context + ?Sized> nevo::mind::Mind<C> for EchoMind {
         type Input = [f32; 3];
         type Output = [f32; 3];
+        type Update = ();
 
-        fn process(&mut self, _: &mut C, input: Self::Input) -> Result<Self::Output> {
+        fn prepare(&self, _: &mut C, input: Self::Input) -> Result<(Self::Output, ())> {
             anyhow::ensure!(input.iter().all(|v| v.is_finite()), "invalid signal");
-            Ok(input)
+            Ok((input, ()))
         }
+
+        fn apply(&mut self, _: ()) {}
     }
 
     let mut cx = Cpu {

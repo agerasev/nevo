@@ -1,6 +1,10 @@
 //! The foraging experiment: physical bodies and their minds share one lifetime.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+mod update;
+
+pub use update::EcosystemUpdate;
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, ensure};
 use glam::DVec2;
@@ -164,6 +168,69 @@ impl Default for Admission {
     }
 }
 
+fn random_position(rng: &mut Xoshiro256PlusPlus) -> DVec2 {
+    DVec2::new(rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0)) * HALF_SIZE
+}
+
+fn allocate_animal(next_animal: &mut u64) -> Result<AnimalId> {
+    let next = next_animal
+        .checked_add(1)
+        .ok_or_else(|| anyhow::anyhow!("animal ID allocator exhausted"))?;
+    let id = AnimalId(*next_animal);
+    *next_animal = next;
+    Ok(id)
+}
+
+fn add_plant(
+    plants: &mut Vec<Plant>,
+    next_plant: &mut u64,
+    position: DVec2,
+    energy: f64,
+) -> Result<()> {
+    let next = next_plant
+        .checked_add(1)
+        .ok_or_else(|| anyhow::anyhow!("plant ID allocator exhausted"))?;
+    plants.push(Plant {
+        id: *next_plant,
+        position,
+        energy,
+    });
+    *next_plant = next;
+    Ok(())
+}
+
+fn validate_body(body: &Body) -> Result<()> {
+    // Negative energy is legitimate between upkeep and the next cull.
+    ensure!(body.energy.is_finite(), "non-finite animal energy");
+    ensure!(
+        body.position.is_finite() && body.position.abs().cmple(HALF_SIZE).all(),
+        "invalid animal position"
+    );
+    Ok(())
+}
+
+fn validate_plants(plants: &[Plant], target: usize, next_plant: u64) -> Result<()> {
+    ensure!(plants.len() == target, "plant count differs from target");
+    let mut ids = BTreeSet::new();
+    for plant in plants {
+        ensure!(
+            plant.id > 0 && plant.id < next_plant && ids.insert(plant.id),
+            "invalid or duplicate plant ID"
+        );
+        ensure!(
+            (0.0..=RIPE_ENERGY).contains(&plant.energy),
+            "invalid plant energy"
+        );
+        ensure!(
+            plant.position.is_finite() && plant.position.abs().cmple(HALF_SIZE).all(),
+            "invalid plant position"
+        );
+    }
+    Ok(())
+}
+
+/// Foraging with genetic minds whose inherited `AsRef<G>` genome stays unchanged
+/// during inference; memory and other learned state belong to `Mind::Update`.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Ecosystem<M = HerbivoreMind, G = RnnGenome, P = WeightMutation> {
@@ -243,76 +310,11 @@ impl<M, G, P> Ecosystem<M, G, P> {
     }
 
     fn random_position(&mut self) -> DVec2 {
-        DVec2::new(
-            self.rng.random_range(-1.0..1.0),
-            self.rng.random_range(-1.0..1.0),
-        ) * HALF_SIZE
+        random_position(&mut self.rng)
     }
 
     fn add_plant(&mut self, position: DVec2, energy: f64) -> Result<()> {
-        let next = self
-            .next_plant
-            .checked_add(1)
-            .ok_or_else(|| anyhow::anyhow!("plant ID allocator exhausted"))?;
-        self.plants.push(Plant {
-            id: self.next_plant,
-            position,
-            energy,
-        });
-        self.next_plant = next;
-        Ok(())
-    }
-
-    fn spawn(&mut self, body: Body, mind: M) -> Result<AnimalId> {
-        let next = self
-            .next_animal
-            .checked_add(1)
-            .ok_or_else(|| anyhow::anyhow!("animal ID allocator exhausted"))?;
-        let id = AnimalId(self.next_animal);
-        self.animals.insert(id, Animal { body, mind });
-        self.next_animal = next;
-        Ok(id)
-    }
-
-    fn feed_and_cull(&mut self, events: &mut Vec<Event>) {
-        // Lower IDs get first claim. A meal enlarges the next contact radius.
-        for (&id, animal) in &mut self.animals {
-            let body = &mut animal.body;
-            if body.energy < 0.0 {
-                continue;
-            }
-            self.plants.retain(|plant| {
-                let distance = body.position.distance(plant.position);
-                if distance < 0.8 * (body.radius() + plant.radius()) {
-                    let gain = plant.energy * 0.1;
-                    body.energy += gain;
-                    events.push(Event::Meal {
-                        id,
-                        plant: plant.id,
-                        gain,
-                    });
-                    false
-                } else {
-                    true
-                }
-            });
-        }
-        self.animals.retain(|&id, animal| {
-            if animal.body.energy < 0.0 {
-                events.push(Event::Death { id });
-                false
-            } else {
-                true
-            }
-        });
-    }
-
-    fn replenish_plants(&mut self) -> Result<()> {
-        while self.plants.len() < self.plant_target {
-            let position = self.random_position();
-            self.add_plant(position, 0.0)?;
-        }
-        Ok(())
+        add_plant(&mut self.plants, &mut self.next_plant, position, energy)
     }
 
     fn sense(&self, position: DVec2) -> FoodObservation {
@@ -390,64 +392,43 @@ where
         }
         let mut arrivals = Vec::with_capacity(count);
         for _ in 0..count {
-            let position = admission.position.unwrap_or_else(|| self.random_position());
-            let genome = match &self.immigrant_genome {
-                Some(template) => template.clone(),
-                None => G::random(&mut self.context)?,
-            };
-            let mind = Self::develop(genome)?;
-            arrivals.push(self.spawn(
-                Body {
-                    position,
-                    energy: admission.energy,
-                },
-                mind,
-            )?);
+            let animal = Self::immigrant(
+                self.immigrant_genome.as_ref(),
+                admission,
+                &mut self.rng,
+                &mut self.context,
+            )?;
+            let id = allocate_animal(&mut self.next_animal)?;
+            self.animals.insert(id, animal);
+            arrivals.push(id);
         }
         Ok(arrivals)
+    }
+
+    fn immigrant(
+        template: Option<&G>,
+        admission: Admission,
+        rng: &mut Xoshiro256PlusPlus,
+        context: &mut GeneticContext,
+    ) -> Result<Animal<Body, M>> {
+        let position = admission.position.unwrap_or_else(|| random_position(rng));
+        let genome = match template {
+            Some(template) => template.clone(),
+            None => G::random(context)?,
+        };
+        Ok(Animal {
+            body: Body {
+                position,
+                energy: admission.energy,
+            },
+            mind: Self::develop(genome)?,
+        })
     }
 
     fn develop(genome: G) -> Result<M> {
         let mind = M::try_from(genome).map_err(Into::into)?;
         mind.validate()?;
         Ok(mind)
-    }
-
-    fn reproduce(&mut self, events: &mut Vec<Event>) -> Result<()> {
-        let mut parents: VecDeque<_> = self
-            .animals
-            .iter()
-            .filter_map(|(&id, animal)| (animal.body.energy > BIRTH_THRESHOLD).then_some(id))
-            .collect();
-        while let Some(parent) = parents.pop_front() {
-            let animal = self.animals.get_mut(&parent).expect("parent exists");
-            let body = &mut animal.body;
-            body.energy *= 0.5;
-            let energy = body.energy;
-            let direction = DVec2::new(
-                self.rng.random_range(-0.5..0.5),
-                self.rng.random_range(-0.5..0.5),
-            );
-            let offset = 0.5 * body.radius() * direction.normalize_or(DVec2::X);
-            let child_position = body.position + offset;
-            body.position -= offset;
-            let mut genome = animal.mind.as_ref().clone();
-            genome.mutate(&self.mutation, &mut self.context)?;
-            let mind = Self::develop(genome)?;
-            let child = self.spawn(
-                Body {
-                    position: child_position,
-                    energy,
-                },
-                mind,
-            )?;
-            events.push(Event::Birth { parent, child });
-            // Historical ordered traversal also visits newly appended children.
-            if energy > BIRTH_THRESHOLD {
-                parents.push_back(child);
-            }
-        }
-        Ok(())
     }
 }
 
@@ -459,68 +440,14 @@ where
     P: Clone,
 {
     type Report = TickReport;
+    type Update = EcosystemUpdate<M, M::Update>;
 
-    fn advance(&mut self, tick: u64) -> Result<TickReport> {
-        let observations: Vec<_> = self
-            .animals
-            .iter()
-            .filter(|(_, animal)| animal.body.energy >= 0.0)
-            .map(|(&id, animal)| (id, self.sense(animal.body.position)))
-            .collect();
-        let mut actions = Vec::with_capacity(observations.len());
-        for (id, observation) in observations {
-            let action = self
-                .animals
-                .get_mut(&id)
-                .expect("observed animal exists")
-                .mind
-                .process(&mut self.context, observation)?;
-            ensure!(
-                action.direction.is_finite() && action.speed_fraction.is_finite(),
-                "non-finite movement action"
-            );
-            actions.push((id, observation, action));
-        }
-        let mut decisions = Vec::with_capacity(actions.len());
-        for (id, observation, action) in actions {
-            let body = &mut self
-                .animals
-                .get_mut(&id)
-                .expect("acting animal exists")
-                .body;
-            let position = clamp_position(body.position + action.displacement(), body.radius());
-            decisions.push(Decision {
-                id,
-                observation,
-                action,
-                energy: body.energy,
-                position_before: body.position,
-                position_after: position,
-            });
-            body.position = position;
-        }
-        let mut events = Vec::new();
-        self.feed_and_cull(&mut events);
-        self.replenish_plants()?;
-        let count = self.minimum_population.saturating_sub(self.animals.len());
-        for id in self.admit(count, Admission::default())? {
-            events.push(Event::Immigrant { id });
-        }
-        self.reproduce(&mut events)?;
-        for animal in self.animals.values_mut() {
-            let body = &mut animal.body;
-            body.energy -= UPKEEP;
-            body.position = clamp_position(body.position, body.radius());
-        }
-        for plant in &mut self.plants {
-            plant.energy = (plant.energy + 1.0).min(RIPE_ENERGY);
-            plant.position = clamp_position(plant.position, plant.radius());
-        }
-        Ok(TickReport {
-            tick,
-            events,
-            decisions,
-        })
+    fn prepare_step(&self, tick: u64) -> Result<(Self::Update, TickReport)> {
+        self.prepare_update(tick)
+    }
+
+    fn apply_step(&mut self, update: Self::Update) {
+        update.apply(self);
     }
 
     fn validate(&self) -> Result<()> {
@@ -533,40 +460,15 @@ where
             self.next_animal > 0 && self.next_plant > 0,
             "invalid next ID"
         );
-        ensure!(
-            self.plants.len() == self.plant_target,
-            "plant count differs from target"
-        );
         for (id, animal) in &self.animals {
             ensure!(id.0 > 0 && id.0 < self.next_animal, "invalid animal ID");
-            let body = &animal.body;
-            // Negative energy is legitimate between upkeep and the next cull.
-            ensure!(body.energy.is_finite(), "non-finite animal energy");
-            ensure!(
-                body.position.is_finite() && body.position.abs().cmple(HALF_SIZE).all(),
-                "invalid animal position"
-            );
+            validate_body(&animal.body)?;
             animal.mind.validate()?;
         }
         if let Some(template) = &self.immigrant_genome {
             Self::develop(template.clone())?;
         }
-        let mut ids = BTreeSet::new();
-        for plant in &self.plants {
-            ensure!(
-                plant.id > 0 && plant.id < self.next_plant && ids.insert(plant.id),
-                "invalid or duplicate plant ID"
-            );
-            ensure!(
-                (0.0..=RIPE_ENERGY).contains(&plant.energy),
-                "invalid plant energy"
-            );
-            ensure!(
-                plant.position.is_finite() && plant.position.abs().cmple(HALF_SIZE).all(),
-                "invalid plant position"
-            );
-        }
-        Ok(())
+        validate_plants(&self.plants, self.plant_target, self.next_plant)
     }
 }
 
