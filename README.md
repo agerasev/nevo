@@ -6,9 +6,9 @@ and recorded experiments, with no final endpoint for the research program.
 
 ## Current implementation
 
-The Rust baseline uses the July 26 foraging experiment with a 3–4–3 recurrent
-herbivore agent. One configurable loop runs every experiment; an optional desktop
-viewer reads the shared world. Sensing now precedes movement, feeding, and births.
+The ecosystem has replenishing plants and herbivores with 3–4–3 recurrent
+controllers. One configurable loop runs every experiment; an optional desktop
+viewer reads the shared world. Sensing precedes movement, feeding, and births.
 A fresh checkout needs `git submodule update --init` for the Cargo path dependency.
 
 ```sh
@@ -16,8 +16,8 @@ cargo run --locked --bin nevo -- --viewer --scenario baseline
 cargo run --locked --bin nevo -- --viewer --scenario debug --seed 1 --paused
 cargo run --locked --bin nevo -- --scenario baseline --seed 1 --ticks 256
 cargo run --locked --bin nevo -- --config configs/debug.toml
-cargo run --locked --bin nevo -- runs/foraging --seed 1 --ticks 256
-cargo run --locked --bin nevo -- runs/foraging
+cargo run --locked --bin nevo -- runs/baseline --seed 1 --ticks 256
+cargo run --locked --bin nevo -- runs/baseline
 ```
 
 Use **Pause / Resume** to control playback and **Single step** to advance one tick
@@ -31,7 +31,7 @@ Use `--hz 25` for paced viewing and `--ticks N` for a reproducible budget. Omit
 the budget to run until interrupted. A trial simply supplies initialization and
 a tick limit. The `debug` layout exercises a meal and a birth on tick one. The
 `baseline` starts 20 herbivores among 500 mature plants.
-See the [tick and runner contracts](docs/foraging.md).
+See the [tick and runner contracts](docs/simulation.md).
 
 CLI and TOML configuration share one [conf](https://docs.rs/conf/0.4.5/conf/)
 schema. Load a file explicitly with `--config PATH`; CLI values override it.
@@ -46,7 +46,7 @@ ticks = 32
 All run options use the same names in TOML, including `hz`, `viewer`, `paused`,
 and `smoke`. Booleans accept bare CLI flags or explicit values such as
 `--viewer=false`. Quote seeds larger than TOML's signed integer range. Unknown
-keys are rejected. The former `--seconds` and `--focal` options are removed.
+keys are rejected.
 
 Every run stores its resolved configuration and resumable CBOR checkpoints in
 the supplied directory, or a new directory under `runs/`. Pass that directory
@@ -59,15 +59,37 @@ Build with `--no-default-features` when graphics are unnecessary; the executable
 and runner stay the same. Add `--smoke` to a viewer command to verify twelve
 displayed snapshots and pause/step controls against a seeded reference run.
 
-## Agreed direction
+## Project structure
 
-Decisions through 2026-11-04:
+Component contracts live at their module roots; implementations live beneath them.
+Multi-file modules use `mod.rs` inside their directory.
+
+| Module | Responsibility |
+| --- | --- |
+| [agent](src/agent/mod.rs) | Agent and population contracts; the herbivore sensing/action adapter and population. |
+| [mind](src/mind/mod.rs) | Mind contract; scalar RNN computation, memory, and its genome. |
+| [genome](src/genome/mod.rs) | Representation-independent inheritance and mutation contracts. |
+| [context](src/context/mod.rs) | Execution context contract and CPU implementation. |
+| [environment](src/environment/mod.rs) | World contract; ecosystem bodies, observations, actions, and rules. |
+| [run](src/run/mod.rs) | Shared simulation loop, controls, and checkpoint adapter. |
+| [app](src/app/mod.rs) | CLI configuration, run storage, and optional viewer. |
+
+`main.rs` only enters the application; `lib.rs` exposes the library modules.
+The concrete world is
+`environment::ecosystem::Ecosystem`; both bounded and unlimited runs use `run::Run`.
+See [simulation contracts](docs/simulation.md) for the implemented boundaries.
+
+Keep current documentation in [docs/](docs/README.md), with selected milestone
+conclusions in [history](docs/history/README.md). Run configurations live in
+`configs/`; checkpoints, screenshots, and other run outputs stay in ignored `runs/`.
+
+## Agreed direction
 
 - Use one configurable loop for resettable trials and unlimited experiments;
   the optional viewer reads snapshots independently of simulation stepping.
 - Make agents (genomes, brains, control mappings) and environments (worlds, bodies,
   physical rules) generic and replaceable through compatible contracts/adapters.
-- Use the [July 26 foraging experiment](experiments/2016-07-26-herbivore-foraging/README.md)
+- Use the [July 26 foraging experiment](docs/history/2016-07-26-ecosystem.md)
   as the Rust baseline. Start with continuous 2D space, replenishing food, and one
   herbivore body type. Wrapping boundaries remain part of the planned Rust world.
 - Include internal-state perception. World perception remains an open design:
@@ -75,7 +97,7 @@ Decisions through 2026-11-04:
   sensing as smell, with modality ablations.
 - Begin with the minimum evolutionary degrees of freedom needed to demonstrate
   adaptation. The first baseline evolves weights and biases with fixed topology.
-- Keep a concise history of experiments in [experiments/](experiments/README.md).
+- Record concise conclusions from major research milestones in [history](docs/history/README.md).
 
 ## Proposed design
 
@@ -89,22 +111,7 @@ These are working proposals, not implemented interfaces or settled parameters.
   same network architecture; training without a modality and disabling it only
   during evaluation answer different questions.
 - Record code/configuration/seeds with results. Target repeatability within the
-  same build/platform first; a seeded `SmallRng` alone is not a portability promise.
+  same build/platform first; a seeded RNG alone is not a portability promise.
 
 Open choices include retina and smell definitions, which internal signals to
 expose, and how to select genomes across trials.
-
-## Historical context
-
-Git contains three independent roots; the newer versions are fresh starts.
-
-| Lineage | Useful reference |
-| --- | --- |
-| 2016 C++/Qt | `origin/master` at `b96e415`: plants, herbivores, carnivores, recurrent brains, energy, reproduction, weight mutation, and champion selection. The fullest ecological implementation in source. |
-| 2016 forks | `origin/cpp` has an earlier herbivore simulation; `origin/win32` preserves a simpler Qt4 prototype; `origin/python` is an unfinished PyQt4/NumPy port. |
-| 2022 Rust | Root `27ee89a`; `4b957d4` has custom recurrent networks, weight/memory-size mutations, and an egui animal viewer. World stepping is empty. |
-| 2024-2025 Rust | `origin/develop` at `b5af8cf`: Candle convolutional vision and LSTM brains, deterministic initialization, and a grid viewer. World stepping and animal control remain unimplemented. |
-| 2025-2026 Rust | Root `a5f1138` starts `novel` with `wgame`; `88cf113` updates dependencies and rendering. |
-
-The recurring implementation lesson is to connect perception, action, resources,
-and inheritance early while keeping the boundaries replaceable.

@@ -5,8 +5,9 @@ use std::{
 };
 
 use nevo::{
-    AgentId, AgentResponse, Environment, Population,
-    foraging::Scenario,
+    agent::{AgentId, Population},
+    environment::ecosystem::Scenario,
+    environment::{AgentResponse, Environment},
     run::{Command, Control, LoopOptions, Run, StopReason},
 };
 

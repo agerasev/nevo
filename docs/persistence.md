@@ -2,19 +2,19 @@
 
 Each invocation uses a run directory. Supply its path as the positional argument;
 omit it to create a unique directory under `runs/`. The chosen path is printed to
-stderr. Run artifacts are ignored by Git; experiment evidence belongs in
-[experiments/](../experiments/README.md).
+stderr. Keep screenshots and other run outputs alongside checkpoints in that
+directory, for example under `screenshots/`. All generated run data stays out of Git.
 
 ```sh
 # Create a run, saving every 100 ticks and keeping the latest three checkpoints.
-cargo run --locked -- runs/foraging --seed 1 --ticks 256 \
+cargo run --locked -- runs/baseline --seed 1 --ticks 256 \
   --checkpoint-every 100 --keep-checkpoints 3
 
 # Resume from its newest checkpoint, loading config.toml automatically.
-cargo run --locked -- runs/foraging
+cargo run --locked -- runs/baseline
 
 # Continue for 64 ticks, saving only on exit, retaining one checkpoint.
-cargo run --locked -- runs/foraging --ticks 64 \
+cargo run --locked -- runs/baseline --ticks 64 \
   --checkpoint-every 0 --keep-checkpoints 1
 ```
 
@@ -41,7 +41,7 @@ reinitializes from that saved seed.
 ## Layout and consistency
 
 ```text
-runs/foraging/
+runs/baseline/
   config.toml
   .lock
   checkpoints/
@@ -51,12 +51,16 @@ runs/foraging/
 ```
 
 Each checkpoint is one CBOR file containing the effective configuration, cumulative
-event counts, and a complete [foraging snapshot](../src/checkpoint.rs): world tick,
+event counts, and a complete [ecosystem snapshot](../src/run/checkpoint/mod.rs): world tick,
 bodies, ordered plants, next IDs, replenishment settings, both RNG states, all
 genomes and recurrent memories, and the optional founder genome. Native CBOR arrays
 hold the weights; no safetensors payload is used. Locks, channels, pacing clocks,
 and viewer/device resources are recreated rather than serialized. Generic agent
 and environment contracts have no persistence bounds.
+
+Version 1 uses the stable `foraging-sense-first-v1` world identifier. Rust module/type names are
+not encoded; the herbivore wrapper serializes its mind directly as the existing
+`genome` and `memory` fields.
 
 Only the simulation owner saves, between complete ticks. Snapshot copying holds
 the world's read lock briefly; serialization and file I/O happen after releasing
@@ -73,6 +77,6 @@ while the run is stopped. The format has no checksum or automatic migration yet.
 Hard kills or power loss can lose progress since the last completed save; an
 exit checkpoint requires orderly shutdown.
 
-Exact replay currently targets the same build/platform. See the
-[resume experiment](../experiments/2026-11-04-persistence/README.md) for measured
-equivalence across separate processes and future ticks.
+Exact replay targets the same build/platform. The [snapshot checks](../src/run/checkpoint/tests.rs)
+and [CLI checks](../tests/persistence_cli.rs) cover complete-state continuation
+and resume across separate processes.

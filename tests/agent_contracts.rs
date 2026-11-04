@@ -1,12 +1,59 @@
 use anyhow::Result;
 use glam::DVec2;
 use nevo::{
-    Agent, Context, Cpu, Mutate,
-    foraging::FoodObservation,
-    herbivore::{Herbivore, HerbivoreGenome, WeightMutation},
+    agent::Agent,
+    agent::herbivore::Herbivore,
+    context::{Context, Cpu},
+    environment::ecosystem::FoodObservation,
+    genome::Mutate,
+    mind::rnn::{RnnGenome, WeightMutation},
 };
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
+
+#[test]
+fn herbivore_accepts_another_mind_and_propagates_its_errors() {
+    struct EchoMind;
+
+    impl<C: Context + ?Sized> nevo::mind::Mind<C> for EchoMind {
+        type Input = [f32; 3];
+        type Output = [f32; 3];
+
+        fn process(&mut self, _: &mut C, input: Self::Input) -> Result<Self::Output> {
+            anyhow::ensure!(input.iter().all(|v| v.is_finite()), "invalid signal");
+            Ok(input)
+        }
+    }
+
+    let mut cx = Cpu {
+        rng: Xoshiro256PlusPlus::seed_from_u64(17),
+    };
+    let mut agent = Herbivore::from_mind(EchoMind);
+    let action = agent
+        .process(
+            &mut cx,
+            FoodObservation {
+                gradient: DVec2::new(0.25, -0.5),
+                strength: -1.0,
+            },
+        )
+        .unwrap();
+    assert_eq!(action.direction, DVec2::new(0.25, -0.5));
+    assert_eq!(action.speed_fraction, 1.0_f64.tanh());
+    assert_eq!(
+        agent
+            .process(
+                &mut cx,
+                FoodObservation {
+                    strength: f64::NAN,
+                    ..FoodObservation::default()
+                }
+            )
+            .unwrap_err()
+            .to_string(),
+        "invalid signal"
+    );
+}
 
 #[derive(Clone, Debug, PartialEq)]
 struct ResearchContext {
@@ -48,7 +95,7 @@ fn agent_and_genome_accept_an_alternate_unsized_context() {
         rng: Xoshiro256PlusPlus::seed_from_u64(42),
     };
     let before = context.clone();
-    let mut parent = HerbivoreGenome::default();
+    let mut parent = RnnGenome::default();
     parent.weights[28] = 0.5;
     parent.weights[32] = 1.0;
     parent.weights[46] = 1.0;
@@ -60,7 +107,7 @@ fn agent_and_genome_accept_an_alternate_unsized_context() {
     let action = agent.process(cx, FoodObservation::default()).unwrap();
     assert_eq!(action.direction, DVec2::X * f64::from(0.5_f32.tanh()));
     assert_eq!(action.speed_fraction, 1.0_f64.tanh());
-    assert_ne!(agent.memory, [0.0; 4]);
+    assert_ne!(agent.mind.memory, [0.0; 4]);
     assert_eq!(context, before, "processing must not consume genetic draws");
 
     let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
@@ -81,7 +128,7 @@ fn zero_mutation_preserves_genome_and_random_stream() {
         rng: Xoshiro256PlusPlus::seed_from_u64(17),
     };
     let before = context.clone();
-    let mut genome = HerbivoreGenome { weights: [0.5; 47] };
+    let mut genome = RnnGenome { weights: [0.5; 47] };
     let original = genome.clone();
 
     genome
@@ -97,7 +144,7 @@ fn invalid_mutation_fails_without_changing_genome_or_random_stream() {
         rng: Xoshiro256PlusPlus::seed_from_u64(17),
     };
     let before = context.clone();
-    let mut genome = HerbivoreGenome { weights: [0.5; 47] };
+    let mut genome = RnnGenome { weights: [0.5; 47] };
     let original = genome.clone();
 
     for max_delta in [-1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::MAX] {

@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nevo::{checkpoint::Snapshot, foraging::Scenario, run::Run};
+use nevo::{environment::ecosystem::Scenario, run::Run, run::checkpoint::Snapshot};
 use serde::Deserialize;
 
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);

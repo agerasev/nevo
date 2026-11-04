@@ -1,5 +1,5 @@
 use super::*;
-use crate::AgentId;
+use crate::agent::AgentId;
 
 struct World(u64);
 
