@@ -1,3 +1,4 @@
+mod cli;
 mod config;
 mod persistence;
 
@@ -18,13 +19,14 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, ensure};
+use clap::Parser;
 use nevo::{
     ecosystem::{Event, TickReport},
     run::{Command, Control, Run, StopReason},
 };
 use serde::{Deserialize, Serialize};
 
-use config::Options;
+use cli::Cli;
 use persistence::RunDirectory;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -103,6 +105,7 @@ fn attach_viewer(
     world: nevo::run::UniverseView<nevo::universe::Universe>,
     control: Control,
     seed: u64,
+    vsync: bool,
     smoke: Option<smoke::SmokeCheck>,
     exit_requested: Arc<AtomicBool>,
 ) -> Result<(), String> {
@@ -115,7 +118,7 @@ fn attach_viewer(
             .title("NEvo")
             .logical_size((1200.0, 900.0))
             .resizable(true)
-            .vsync(true);
+            .vsync(vsync);
         let viewed = wgame::app_with_single_window(
             async move |window| {
                 let options = viewer::Options {
@@ -162,17 +165,18 @@ fn attach_viewer(
         .unwrap_or_else(|| Err("viewer exited without a result".into()))
 }
 
-fn execute(mut options: Options) -> Result<()> {
+fn execute(cli: Cli) -> Result<()> {
+    let mut options = cli.load_config(None)?;
     options.loop_options()?;
-    let directory = RunDirectory::open(options.directory.as_deref())?;
+    let directory = RunDirectory::open(cli.directory.as_deref())?;
     // Reload the saved configuration under the writer lock in case another
     // invocation finished between argument parsing and acquiring the directory.
-    if options.directory.is_some() {
-        options = Options::load()?;
+    if cli.directory.is_some() {
+        options = cli.load_config(None)?;
     }
     let (mut run, mut counts) = match directory.load_latest()? {
         Some(checkpoint) => {
-            options = Options::load_with_fallback(&checkpoint.config)?;
+            options = cli.load_config(Some(&checkpoint.config))?;
             ensure!(
                 options.ecosystem == checkpoint.config.ecosystem
                     && options.seed == checkpoint.config.seed,
@@ -263,8 +267,15 @@ fn execute(mut options: Options) -> Result<()> {
         thread: Some(thread),
     };
     #[cfg(feature = "viewer")]
-    let viewed = if options.viewer {
-        let result = attach_viewer(world, control.clone(), seed, smoke, exit_requested);
+    let viewed = if options.viewer.enable {
+        let result = attach_viewer(
+            world,
+            control.clone(),
+            seed,
+            options.viewer.vsync,
+            smoke,
+            exit_requested,
+        );
         let _ = control.send(Command::Stop);
         result
     } else {
@@ -280,17 +291,13 @@ fn execute(mut options: Options) -> Result<()> {
 }
 
 pub fn main() -> ExitCode {
-    let options = match Options::load() {
+    let cli = match Cli::try_parse() {
         Ok(options) => options,
         Err(error) => {
-            if let Some(parse_error) = error.downcast_ref::<conf::Error>() {
-                parse_error.exit();
-            }
-            eprintln!("{error:#}");
-            return ExitCode::from(2);
+            error.exit();
         }
     };
-    match execute(options) {
+    match execute(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{error:#}");

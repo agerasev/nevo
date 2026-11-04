@@ -24,17 +24,17 @@ and pause. With the arena focused, Space toggles playback and Right Arrow steps.
 The toolbar shows the seed, tick, and population counts for the displayed
 world. Green circles are plants and yellow circles are animals.
 
-Runs default to full speed (`--hz 0`) and a seed drawn from system entropy.
+Runs default to full speed (`--tick-hz 0`) and a seed drawn from system entropy.
 The resolved seed is printed before the run starts; supply `--seed N` to replay it.
-Use `--hz 25` for paced viewing and `--ticks N` for a reproducible budget. Omit
+Use `--tick-hz 25` to pace simulation ticks and `--ticks N` for a reproducible budget. Omit
 the budget to run until interrupted. A trial simply supplies initialization and
 a tick limit. The `debug.toml` preset exercises a meal and a birth on tick one. The
 `baseline.toml` preset starts 20 animals among 500 mature plants.
 See the [tick and runner contracts](docs/simulation.md).
 
-CLI and TOML configuration share one [conf](https://docs.rs/conf/0.4.5/conf/)
-schema. Repeat `--config PATH` to layer presets: later files override earlier ones,
-and CLI values override all files. Tables merge by field; arrays replace as a whole.
+TOML describes the full configuration; a separate CLI exposes common shortcuts.
+Repeat `--config PATH` to layer presets: later files override earlier ones,
+and explicit CLI shortcuts override all files. Tables merge by field; arrays replace as a whole.
 [Example configuration](configs/debug.toml):
 
 ```toml
@@ -50,10 +50,13 @@ initial_animal_position = [0.0, 0.0]
 initial_plant_position = [0.0, 0.0]
 ```
 
-Run options use snake_case in TOML and kebab-case on the CLI. Ecosystem options
-use `[ecosystem]` in TOML and `--ecosystem-…` on the CLI. Booleans accept bare flags
-or explicit values such as `--viewer=false`. Unknown keys are rejected in every
-file. See [configuration and precedence](docs/configuration.md).
+The CLI offers `--seed`, `--ticks`, `--tick-hz`, `--viewer`, and `--paused`.
+`--viewer` maps to `viewer.enable`; explicit `--viewer=false` or `--paused=false`
+overrides a true value. Ecosystem details and `viewer.vsync` are configured in files.
+Unknown keys are rejected in every file. See [configuration and precedence](docs/configuration.md).
+
+The viewer runs independently of simulation speed. Its preset enables VSync without
+slowing simulation; there is no additional rendering timer.
 
 Every run stores its resolved configuration and resumable CBOR checkpoints in
 the supplied directory, or a new directory under `runs/`. Pass that directory
@@ -63,7 +66,7 @@ are configurable. `--ticks N` always means N additional ticks for that invocatio
 See [persistence options, format, and recovery](docs/persistence.md).
 
 Build with `--no-default-features` when graphics are unnecessary; the executable
-and runner stay the same. Add `--smoke` to a viewer command to verify twelve
+and runner stay the same. Add `--config configs/smoke.toml` to verify twelve
 displayed snapshots and pause/step controls against a seeded reference run.
 
 ## Project structure

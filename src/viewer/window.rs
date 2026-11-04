@@ -5,7 +5,6 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
 };
 
 use wgame::{
@@ -157,9 +156,6 @@ pub async fn show_with(
         if options.exit_requested.load(Ordering::Relaxed) {
             return Ok(presented);
         }
-        if presented != 0 && pending.borrow().is_empty() {
-            host.wait_for_update(Some(Duration::from_millis(16))).await;
-        }
         for command in pending.take() {
             // A completed simulation remains visible until the window closes.
             let _ = control.send(command);
@@ -173,6 +169,7 @@ pub async fn show_with(
             labels: std::mem::take(&mut drawing.labels),
         };
         // UI layout and GPU work use the collected scene after its state lock ends.
+        // The window/backend schedules presentation; there is no extra frame timer.
         let Some(mut frame) = host.next_frame().await? else {
             return Ok(presented);
         };

@@ -34,6 +34,8 @@
   ignore rules. Commit small reusable configs under `configs/` and useful scripts.
 - Express experiment variations as explicit settings and composable config presets,
   rather than named modes or branches in the executable.
+- Keep the Serde config schema separate from the clap CLI. Expose only common
+  shortcuts with explicit mappings; nested config fields do not imply CLI flags.
 - Keep simulation stepping independent of rendering. Check reproducibility and
   behavioral invariants when changing simulation rules; use checks proportional
   to the change. Documentation-only changes need content/link/whitespace checks.

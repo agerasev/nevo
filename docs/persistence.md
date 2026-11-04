@@ -6,16 +6,14 @@ stderr. Keep screenshots and other run outputs alongside checkpoints in that
 directory, for example under `screenshots/`. All generated run data stays out of Git.
 
 ```sh
-# Create a run, saving every 100 ticks and keeping the latest three checkpoints.
-cargo run --locked -- runs/baseline --seed 1 --ticks 256 \
-  --checkpoint-every 100 --keep-checkpoints 3
+# Create a run with the default checkpoint policy.
+cargo run --locked -- runs/baseline --seed 1 --ticks 256
 
 # Resume from its newest checkpoint, loading config.toml automatically.
 cargo run --locked -- runs/baseline
 
-# Continue for 64 ticks, saving only on exit, retaining one checkpoint.
-cargo run --locked -- runs/baseline --ticks 64 \
-  --checkpoint-every 0 --keep-checkpoints 1
+# Continue for 64 more ticks.
+cargo run --locked -- runs/baseline --ticks 64
 ```
 
 `config.toml` records the last effective configuration, including the resolved
@@ -27,10 +25,18 @@ viewer attachment, tracing, and save policy can change. A tick budget always app
 the current invocation: a saved budget of 256 means another 256 ticks on bare
 resume. Remove `ticks` from `config.toml` for an unlimited continuation.
 
-| CLI | TOML | Default | Meaning |
-| --- | --- | --- | --- |
-| `--checkpoint-every N` | `checkpoint_every` | `10000` | Save at absolute world ticks divisible by N; zero disables periodic saves. |
-| `--keep-checkpoints N` | `keep_checkpoints` | `3` | Retain the newest N checkpoints; must be positive. |
+Checkpoint policy belongs in config files. For example, load this with `--config PATH`
+to save only on exit and retain one checkpoint:
+
+```toml
+checkpoint_every = 0
+keep_checkpoints = 1
+```
+
+| TOML | Default | Meaning |
+| --- | --- | --- |
+| `checkpoint_every` | `10000` | Save at absolute world ticks divisible by N; zero disables periodic saves. |
+| `keep_checkpoints` | `3` | Retain the newest N checkpoints; must be positive. |
 
 The worker also saves when its budget ends, the viewer closes, or a stop signal
 arrives (Ctrl-C; also SIGTERM/SIGHUP on Unix). Saving the same tick replaces that
@@ -65,7 +71,7 @@ Reconstructible caches may be omitted from serialization; recurrent memory and R
 positions are required state. Core simulation and genetics contracts have no
 persistence bounds.
 
-The current format is checkpoint version 5, with `foraging-sense-first-v1` and
+The current format is checkpoint version 6, with `foraging-sense-first-v1` and
 `animal-rnn-3-4-3-v1` model identifiers. Only this format is accepted;
 compatibility and migrations are intentionally unsupported. Rust module/type names
 are not part of the format.

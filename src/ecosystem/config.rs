@@ -3,7 +3,6 @@
 use std::{fmt, str::FromStr};
 
 use anyhow::{Result, ensure};
-use conf::Conf;
 use glam::DVec2;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
@@ -86,32 +85,25 @@ impl<'de> Deserialize<'de> for Placement {
     }
 }
 
-#[derive(Conf, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[conf(serde)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// Number of animals admitted at initialization.
-    #[conf(long, default(Config::default().initial_animals))]
     pub initial_animals: usize,
 
     /// Number of plants, replenished throughout the run.
-    #[conf(long, default(Config::default().plants))]
     pub plants: usize,
 
     /// Population floor maintained by immigration; zero disables it.
-    #[conf(long, default(Config::default().minimum_population))]
     pub minimum_population: usize,
 
     /// Starting energy of initial animals; later immigrants use the model default.
-    #[conf(long, default(Config::default().initial_animal_energy))]
     pub initial_animal_energy: f64,
 
-    /// Initial animal placement: random or X,Y; TOML also accepts [X, Y].
-    #[conf(long, default, allow_hyphen_values)]
+    /// Initial animal placement: random or a fixed world-space point.
     pub initial_animal_position: Placement,
 
-    /// Initial plant placement: random or X,Y; replacement plants remain random.
-    #[conf(long, default, allow_hyphen_values)]
+    /// Initial plant placement; replacement plants remain random.
     pub initial_plant_position: Placement,
 }
 

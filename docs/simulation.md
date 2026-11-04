@@ -108,7 +108,7 @@ last published state and mark the loop failed. A fresh channel can resume a Run.
 The viewer collects geometry and labels through `Draw` under a read lock, then
 releases it before UI layout and rendering. Toolbar labels and arena describe the
 same state; normal viewing never clones the Universe or its minds. Closing the
-application window stops and joins the worker. `--smoke` compares the complete
+application window stops and joins the worker. The `smoke` config setting compares the complete
 state used for twelve displayed scenes, including minds and RNGs, with a reference
 run and checks pause/step commands.
 [Viewer contract](viewer.md) · [Locking and failure checks](../src/run/tests.rs) ·

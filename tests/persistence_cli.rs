@@ -78,6 +78,12 @@ impl Directory {
         let text = fs::read_to_string(self.0.join(run).join("config.toml")).unwrap();
         toml::from_str(&text).unwrap()
     }
+
+    fn overlay(&self, name: &str, content: &str) -> String {
+        let path = self.0.join(name);
+        fs::write(&path, content).unwrap();
+        path.to_str().unwrap().to_owned()
+    }
 }
 
 impl Drop for Directory {
@@ -125,7 +131,7 @@ struct Checkpoint {
 
 fn read_checkpoint(path: &Path) -> Checkpoint {
     let checkpoint: Checkpoint = ciborium::from_reader(fs::File::open(path).unwrap()).unwrap();
-    assert_eq!(checkpoint.format_version, 5);
+    assert_eq!(checkpoint.format_version, 6);
     checkpoint
 }
 
@@ -163,10 +169,11 @@ fn periodic_and_exit_saves_obey_retention_across_resumes() {
         "42",
         "--ticks",
         "25",
-        "--checkpoint-every",
-        "10",
-        "--keep-checkpoints",
-        "2",
+        "--config",
+        &directory.overlay(
+            "policy.toml",
+            "checkpoint_every = 10\nkeep_checkpoints = 2\n",
+        ),
     ]);
     let ticks = || {
         directory
@@ -180,7 +187,13 @@ fn periodic_and_exit_saves_obey_retention_across_resumes() {
     directory.success(&["retained", "--ticks", "6"]);
     assert_eq!(ticks(), vec![30, 31]);
     // Saving the same tick at exit replaces it; it does not consume another slot.
-    directory.success(&["retained", "--ticks", "0", "--keep-checkpoints", "1"]);
+    directory.success(&[
+        "retained",
+        "--ticks",
+        "0",
+        "--config",
+        &directory.overlay("retention.toml", "keep_checkpoints = 1\n"),
+    ]);
     assert_eq!(ticks(), vec![31]);
     assert_eq!(
         directory.config("retained")["keep_checkpoints"].as_integer(),
@@ -200,8 +213,8 @@ fn exit_only_and_zero_tick_runs_are_resumable() {
         "1",
         "--ticks",
         "7",
-        "--checkpoint-every",
-        "0",
+        "--config",
+        &directory.overlay("exit-only.toml", "checkpoint_every = 0\n"),
     ]);
     assert_eq!(directory.checkpoints("exit-only").len(), 1);
     assert_eq!(directory.latest("exit-only").state.step(), 7);
@@ -281,7 +294,11 @@ fn invalid_resume_never_overwrites_the_saved_run() {
         vec!["saved", "--seed", "2"],
         vec!["saved", "--config", &support::preset("debug")],
         vec!["saved", "--config", "replacement.toml"],
-        vec!["saved", "--keep-checkpoints", "0"],
+        vec![
+            "saved",
+            "--config",
+            &directory.overlay("invalid-policy.toml", "keep_checkpoints = 0\n"),
+        ],
     ] {
         let output = directory.run(&args);
         assert!(!output.status.success(), "accepted {args:?}");
@@ -307,10 +324,11 @@ fn checkpoint_recovers_missing_config_and_ignores_an_interrupted_write() {
         "42",
         "--ticks",
         "7",
-        "--checkpoint-every",
-        "3",
-        "--keep-checkpoints",
-        "2",
+        "--config",
+        &directory.overlay(
+            "policy.toml",
+            "checkpoint_every = 3\nkeep_checkpoints = 2\n",
+        ),
     ]);
     let config_path = directory.0.join("recover/config.toml");
     fs::remove_file(&config_path).unwrap();
@@ -331,7 +349,11 @@ fn checkpoint_recovers_missing_config_and_ignores_an_interrupted_write() {
     assert!(!config_path.exists());
     assert_eq!(fs::read(&saved_path).unwrap(), saved);
 
-    fs::write(directory.0.join("replacement.toml"), "ticks = 5\nhz = 0\n").unwrap();
+    fs::write(
+        directory.0.join("replacement.toml"),
+        "ticks = 5\ntick_hz = 0\n",
+    )
+    .unwrap();
     directory.success(&["recover", "--config", "replacement.toml"]);
     let mut reference = Run::new(support::ecosystem("debug"), 42).unwrap();
     for _ in 0..12 {
@@ -366,10 +388,10 @@ fn a_live_run_rejects_another_writer_and_saves_on_ctrl_c() {
         "live",
         "--seed",
         "1",
-        "--hz",
+        "--tick-hz",
         "50",
-        "--checkpoint-every",
-        "1",
+        "--config",
+        &directory.overlay("policy.toml", "checkpoint_every = 1\n"),
     ]);
     let start = Instant::now();
     while !fs::read_dir(directory.0.join("live/checkpoints")).is_ok_and(|entries| {
@@ -410,5 +432,5 @@ fn a_live_run_rejects_another_writer_and_saves_on_ctrl_c() {
     }
     assert_eq!(saved.state.restore().unwrap(), reference);
     // The process released the OS lock; a subsequent invocation can continue.
-    directory.success(&["live", "--ticks", "1", "--hz", "0"]);
+    directory.success(&["live", "--ticks", "1", "--tick-hz", "0"]);
 }

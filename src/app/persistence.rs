@@ -11,9 +11,9 @@ use anyhow::{Context, Result, bail, ensure};
 use nevo::{run::Run, universe::Universe};
 use serde::{Deserialize, Serialize};
 
-use super::{Counts, config::Options};
+use super::{Counts, config::Config};
 
-const FORMAT_VERSION: u32 = 5;
+const FORMAT_VERSION: u32 = 6;
 const WORLD_MODEL: &str = "foraging-sense-first-v1";
 const AGENT_MODEL: &str = "animal-rnn-3-4-3-v1";
 
@@ -23,7 +23,7 @@ pub struct Checkpoint {
     format_version: u32,
     world_model: String,
     agent_model: String,
-    pub config: Options,
+    pub config: Config,
     pub counts: Counts,
     pub state: Universe,
 }
@@ -150,7 +150,7 @@ impl RunDirectory {
         Ok(Some(checkpoint))
     }
 
-    pub fn save_config(&self, options: &Options) -> Result<()> {
+    pub fn save_config(&self, options: &Config) -> Result<()> {
         let text = options.to_toml()?;
         atomic_write(&self.path.join("config.toml"), |writer| {
             writer.write_all(text.as_bytes())?;
@@ -158,7 +158,7 @@ impl RunDirectory {
         })
     }
 
-    pub fn save(&self, run: &Run, options: &Options, counts: &Counts) -> Result<()> {
+    pub fn save(&self, run: &Run, options: &Config, counts: &Counts) -> Result<()> {
         ensure!(
             options.keep_checkpoints > 0,
             "keep-checkpoints must be positive"
@@ -246,7 +246,6 @@ fn sync_directory(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use conf::Conf;
 
     #[test]
     fn checkpoint_version_and_models_are_checked_before_restore() {
@@ -254,10 +253,10 @@ mod tests {
             format_version: FORMAT_VERSION,
             world_model: WORLD_MODEL.into(),
             agent_model: AGENT_MODEL.into(),
-            config: Options::conf_builder()
-                .args(["nevo", "--seed", "1"])
-                .try_parse()
-                .unwrap(),
+            config: Config {
+                seed: Some(1),
+                ..Config::default()
+            },
             counts: Counts::default(),
             state: Universe::new(nevo::ecosystem::Config::default(), 1).unwrap(),
         };
@@ -285,10 +284,11 @@ mod tests {
         let path = std::env::temp_dir().join(format!("nevo-save-failure-{}", std::process::id()));
         fs::create_dir(&path).unwrap();
         let directory = RunDirectory::open(Some(&path)).unwrap();
-        let options = Options::conf_builder()
-            .args(["nevo", "--seed", "1", "--keep-checkpoints", "1"])
-            .try_parse()
-            .unwrap();
+        let options = Config {
+            seed: Some(1),
+            keep_checkpoints: 1,
+            ..Config::default()
+        };
         let mut run = Run::new(nevo::ecosystem::Config::default(), 1).unwrap();
         directory.save(&run, &options, &Counts::default()).unwrap();
         let previous = path.join("checkpoints/00000000000000000000.cbor");

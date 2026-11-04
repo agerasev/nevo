@@ -29,6 +29,11 @@ Pause/resume and single-step use the existing command channel; completion keeps
 the last state visible. Window options supply a title, static labels, and shutdown
 signal. The application owns worker shutdown and joining.
 
+`viewer.enable` attaches the window; `viewer.vsync` is passed to wgame's presentation
+configuration and defaults to true. The window requests the next frame without an
+additional timer. Simulation runs on its own worker, unlimited by default; optional
+`tick_hz` pacing is independent of the viewer. Enabling viewing never changes it.
+
 `show_with` accepts a custom capture callback for instrumentation. It runs once per
 attempted frame, outside UI layout, and can finish after presenting its final scene.
 The returned count includes only presented frames. The application's smoke checker
@@ -41,7 +46,7 @@ Checks:
 cargo test --locked --offline
 cargo test --locked --offline --no-default-features
 cargo test --locked --offline --test viewer_rendering -- --ignored --test-threads=1
-cargo run --locked -- runs/viewer-check --config configs/debug.toml --config configs/viewer.toml --smoke
+cargo run --locked -- runs/viewer-check --config configs/debug.toml --config configs/smoke.toml
 ```
 
 The explicit rendering tests require a GPU or software adapter and fail if none is
