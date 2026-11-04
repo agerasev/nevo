@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nevo::{environment::ecosystem::Scenario, run::Run, run::checkpoint::Snapshot};
+use nevo::{environment::ecosystem::Scenario, run::Run, universe::Universe};
 use serde::Deserialize;
 
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
@@ -117,12 +117,12 @@ struct Counts {
 struct Checkpoint {
     format_version: u32,
     counts: Counts,
-    state: Snapshot,
+    state: Universe,
 }
 
 fn read_checkpoint(path: &Path) -> Checkpoint {
     let checkpoint: Checkpoint = ciborium::from_reader(fs::File::open(path).unwrap()).unwrap();
-    assert_eq!(checkpoint.format_version, 1);
+    assert_eq!(checkpoint.format_version, 2);
     checkpoint
 }
 
@@ -140,13 +140,13 @@ fn a_new_process_resumes_the_complete_seeded_state_and_counts() {
     assert!(resumed_output.contains("tick=256 "));
     let full = directory.latest("full");
     let split = directory.latest("split");
-    assert_eq!(full.state.tick(), 256);
+    assert_eq!(full.state.step(), 256);
     assert_eq!(full.counts, split.counts);
     assert_eq!(full.state, split.state);
     let mut full = full.state.restore().unwrap();
     let mut split = split.state.restore().unwrap();
     for _ in 0..64 {
-        assert_eq!(full.tick(), split.tick());
+        assert_eq!(full.tick().unwrap(), split.tick().unwrap());
     }
     assert_eq!(full, split);
 }
@@ -173,7 +173,7 @@ fn periodic_and_exit_saves_obey_retention_across_resumes() {
             .collect::<Vec<_>>()
     };
     assert_eq!(ticks(), vec![20, 25]);
-    assert_eq!(directory.latest("retained").state.tick(), 25);
+    assert_eq!(directory.latest("retained").state.step(), 25);
     directory.success(&["retained", "--ticks", "6"]);
     assert_eq!(ticks(), vec![30, 31]);
     // Saving the same tick at exit replaces it; it does not consume another slot.
@@ -201,20 +201,20 @@ fn exit_only_and_zero_tick_runs_are_resumable() {
         "0",
     ]);
     assert_eq!(directory.checkpoints("exit-only").len(), 1);
-    assert_eq!(directory.latest("exit-only").state.tick(), 7);
+    assert_eq!(directory.latest("exit-only").state.step(), 7);
     directory.success(&["exit-only", "--ticks", "0"]);
     assert_eq!(directory.checkpoints("exit-only").len(), 1);
-    assert_eq!(directory.latest("exit-only").state.tick(), 7);
+    assert_eq!(directory.latest("exit-only").state.step(), 7);
 
     directory.success(&["zero", "--scenario", "debug", "--seed", "7", "--ticks", "0"]);
     assert_eq!(
         directory.latest("zero").state.restore().unwrap(),
-        Run::new(Scenario::Debug, 7)
+        Run::new(Scenario::Debug, 7).unwrap()
     );
     directory.success(&["zero", "--ticks", "3"]);
-    let mut reference = Run::new(Scenario::Debug, 7);
+    let mut reference = Run::new(Scenario::Debug, 7).unwrap();
     for _ in 0..3 {
-        reference.tick();
+        reference.tick().unwrap();
     }
     assert_eq!(directory.latest("zero").state.restore().unwrap(), reference);
 }
@@ -242,11 +242,11 @@ fn default_directory_records_entropy_and_full_range_seeds() {
         seed
     );
     directory.success(&[run.to_str().unwrap()]);
-    assert_eq!(directory.latest(run.to_str().unwrap()).state.tick(), 4);
+    assert_eq!(directory.latest(run.to_str().unwrap()).state.step(), 4);
     directory.success(&["maximum", "--seed", "18446744073709551615", "--ticks", "0"]);
     directory.success(&["maximum", "--ticks", "1"]);
-    let mut reference = Run::new(Scenario::Baseline, u64::MAX);
-    reference.tick();
+    let mut reference = Run::new(Scenario::Baseline, u64::MAX).unwrap();
+    reference.tick().unwrap();
     assert_eq!(
         directory.latest("maximum").state.restore().unwrap(),
         reference
@@ -313,9 +313,9 @@ fn checkpoint_recovers_missing_config_and_ignores_an_interrupted_write() {
     assert_eq!(fs::read(&saved_path).unwrap(), saved);
 
     directory.success(&["recover", "--ticks", "5"]);
-    let mut reference = Run::new(Scenario::Debug, 42);
+    let mut reference = Run::new(Scenario::Debug, 42).unwrap();
     for _ in 0..12 {
-        reference.tick();
+        reference.tick().unwrap();
     }
     assert_eq!(
         directory.latest("recover").state.restore().unwrap(),
@@ -383,10 +383,10 @@ fn a_live_run_rejects_another_writer_and_saves_on_ctrl_c() {
     );
     assert!(String::from_utf8_lossy(&stopped.stdout).contains("stop=Requested"));
     let saved = directory.latest("live");
-    assert!(saved.state.tick() >= 1);
-    let mut reference = Run::new(Scenario::Baseline, 1);
-    for _ in 0..saved.state.tick() {
-        reference.tick();
+    assert!(saved.state.step() >= 1);
+    let mut reference = Run::new(Scenario::Baseline, 1).unwrap();
+    for _ in 0..saved.state.step() {
+        reference.tick().unwrap();
     }
     assert_eq!(saved.state.restore().unwrap(), reference);
     // The process released the OS lock; a subsequent invocation can continue.

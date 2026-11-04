@@ -8,20 +8,71 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
-use nevo::{run::Run, run::checkpoint::Snapshot};
+use nevo::{
+    run::{
+        Run,
+        checkpoint::{AGENT_MODEL, LegacySnapshot, WORLD_MODEL, validate_models},
+    },
+    universe::Universe,
+};
 use serde::{Deserialize, Serialize};
 
 use super::{Counts, config::Options};
 
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Checkpoint {
     format_version: u32,
+    world_model: String,
+    agent_model: String,
     pub config: Options,
     pub counts: Counts,
-    pub state: Snapshot,
+    pub state: Universe,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyCheckpoint {
+    format_version: u32,
+    config: Options,
+    counts: Counts,
+    state: LegacySnapshot,
+}
+
+impl Checkpoint {
+    fn decode(value: ciborium::Value) -> Result<Self> {
+        let version = value
+            .as_map()
+            .and_then(|fields| {
+                fields
+                    .iter()
+                    .find(|(key, _)| key.as_text() == Some("format_version"))
+            })
+            .and_then(|(_, value)| value.as_integer())
+            .map(i128::from)
+            .context("checkpoint has no integer format version")?;
+        let checkpoint: Self = match version {
+            1 => {
+                let legacy: LegacyCheckpoint = value.deserialized()?;
+                ensure!(legacy.format_version == 1, "unsupported checkpoint version");
+                Self {
+                    format_version: FORMAT_VERSION,
+                    world_model: WORLD_MODEL.into(),
+                    agent_model: AGENT_MODEL.into(),
+                    config: legacy.config,
+                    counts: legacy.counts,
+                    state: legacy.state.into_universe()?,
+                }
+            }
+            2 => value.deserialized()?,
+            _ => bail!("unsupported checkpoint version {version}"),
+        };
+        validate_models(&checkpoint.world_model, &checkpoint.agent_model)?;
+        checkpoint.state.validate_checkpoint()?;
+        Ok(checkpoint)
+    }
 }
 
 /// The OS releases the advisory writer lock even after an interrupted process.
@@ -102,20 +153,16 @@ impl RunDirectory {
             return Ok(None);
         };
         let mut reader = BufReader::new(File::open(&path)?);
-        let checkpoint: Checkpoint = ciborium::from_reader(&mut reader)
+        let value: ciborium::Value = ciborium::from_reader(&mut reader)
             .with_context(|| format!("reading checkpoint {}", path.display()))?;
         ensure!(
             reader.read(&mut [0])? == 0,
             "trailing data in checkpoint {}",
             path.display()
         );
+        let checkpoint = Checkpoint::decode(value)?;
         ensure!(
-            checkpoint.format_version == FORMAT_VERSION,
-            "unsupported checkpoint version {}",
-            checkpoint.format_version
-        );
-        ensure!(
-            checkpoint.state.tick() == tick,
+            checkpoint.state.step() == tick,
             "checkpoint filename/tick mismatch"
         );
         ensure!(
@@ -140,11 +187,13 @@ impl RunDirectory {
         );
         let checkpoint = Checkpoint {
             format_version: FORMAT_VERSION,
+            world_model: WORLD_MODEL.into(),
+            agent_model: AGENT_MODEL.into(),
             config: options.clone(),
             counts: counts.clone(),
-            state: Snapshot::capture(run),
+            state: run.universe().read().clone(),
         };
-        let tick = checkpoint.state.tick();
+        let tick = checkpoint.state.step();
         let path = self
             .path
             .join("checkpoints")
@@ -223,6 +272,39 @@ mod tests {
     use nevo::environment::ecosystem::Scenario;
 
     #[test]
+    fn checkpoint_version_and_models_are_checked_before_restore() {
+        let checkpoint = Checkpoint {
+            format_version: FORMAT_VERSION,
+            world_model: WORLD_MODEL.into(),
+            agent_model: AGENT_MODEL.into(),
+            config: Options::conf_builder()
+                .args(["nevo", "--seed", "1"])
+                .try_parse()
+                .unwrap(),
+            counts: Counts::default(),
+            state: Universe::new(Scenario::Debug, 1).unwrap(),
+        };
+        for (name, invalid) in [
+            ("format_version", ciborium::Value::from(99)),
+            ("world_model", ciborium::Value::from("another-world")),
+            ("agent_model", ciborium::Value::from("another-agent")),
+        ] {
+            let mut value = ciborium::Value::serialized(&checkpoint).unwrap();
+            value
+                .as_map_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|(key, _)| key.as_text() == Some(name))
+                .unwrap()
+                .1 = invalid;
+            assert!(
+                Checkpoint::decode(value).is_err(),
+                "accepted invalid {name}"
+            );
+        }
+    }
+
+    #[test]
     fn failed_publication_preserves_the_previous_checkpoint() {
         let path = std::env::temp_dir().join(format!("nevo-save-failure-{}", std::process::id()));
         fs::create_dir(&path).unwrap();
@@ -231,11 +313,11 @@ mod tests {
             .args(["nevo", "--seed", "1", "--keep-checkpoints", "1"])
             .try_parse()
             .unwrap();
-        let mut run = Run::new(Scenario::Baseline, 1);
+        let mut run = Run::new(Scenario::Baseline, 1).unwrap();
         directory.save(&run, &options, &Counts::default()).unwrap();
         let previous = path.join("checkpoints/00000000000000000000.cbor");
         let bytes = fs::read(&previous).unwrap();
-        run.tick();
+        run.tick().unwrap();
         let blocked = path.join("checkpoints/00000000000000000001.cbor");
         fs::create_dir(&blocked).unwrap();
         assert!(directory.save(&run, &options, &Counts::default()).is_err());

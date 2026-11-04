@@ -8,7 +8,7 @@ and recorded experiments, with no final endpoint for the research program.
 
 The ecosystem has replenishing plants and herbivores with 3–4–3 recurrent
 controllers. One configurable loop runs every experiment; an optional desktop
-viewer reads the shared world. Sensing precedes movement, feeding, and births.
+viewer reads the shared Universe. Sensing precedes movement, feeding, and births.
 A fresh checkout needs `git submodule update --init` for the Cargo path dependency.
 
 ```sh
@@ -66,17 +66,21 @@ Multi-file modules use `mod.rs` inside their directory.
 
 | Module | Responsibility |
 | --- | --- |
-| [agent](src/agent/mod.rs) | Agent and population contracts; the herbivore sensing/action adapter and population. |
+| [actor](src/actor/mod.rs) | Actor contract, generic Population and Factory, opaque handles, and herbivore adapter. |
 | [mind](src/mind/mod.rs) | Mind contract; scalar RNN computation, memory, and its genome. |
 | [genome](src/genome/mod.rs) | Representation-independent inheritance and mutation contracts. |
 | [context](src/context/mod.rs) | Execution context contract and CPU implementation. |
-| [environment](src/environment/mod.rs) | World contract; ecosystem bodies, observations, actions, and rules. |
-| [run](src/run/mod.rs) | Shared simulation loop, controls, and checkpoint adapter. |
+| [environment](src/environment/mod.rs) | Physical state, observations/actions, and ecosystem lifecycle rules. |
+| [universe](src/universe/mod.rs) | Complete serializable state, component orchestration, and experiment intervention policy. |
+| [run](src/run/mod.rs) | Shared read/prepare/write loop, controls, and legacy checkpoint import. |
 | [app](src/app/mod.rs) | CLI configuration, run storage, and optional viewer. |
 
 `main.rs` only enters the application; `lib.rs` exposes the library modules.
-The concrete world is
-`environment::ecosystem::Ecosystem`; both bounded and unlimited runs use `run::Run`.
+The concrete environment is `environment::ecosystem::Ecosystem`. A `Universe` owns
+it together with the actor, RNG context, identity allocator, and intervention policy;
+both bounded and unlimited runs use `run::Run`. Initialization and later immigration
+share one admission path. Physical births/deaths remain environment rules, with
+controller creation and inheritance handled by the population.
 See [simulation contracts](docs/simulation.md) for the implemented boundaries.
 
 Keep current documentation in [docs/](docs/README.md), with selected milestone

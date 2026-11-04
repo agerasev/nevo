@@ -1,90 +1,100 @@
 # Simulation contracts
 
-One [runner](../src/run/mod.rs) advances every experiment. A viewer is an optional
-reader of that run. A trial is an initial configuration plus a stopping condition;
-it can use the same world size and rules as an unlimited experiment.
+A [Universe](../src/universe/mod.rs) owns complete reproducible state: environment,
+actor, execution context, intervention policy, identity allocator, and step counter.
+It serializes directly to CBOR. Recurrent memory and RNG positions are state;
+future reconstructible caches may use serde's skip/default mechanism.
 
-**Agent and genome contracts.** `agent::Agent<C>`, `genome::Genome<C>`,
-`genome::Mutate<C, P>`, and `context::Context` separate processing, inheritance,
-mutation, and execution resources.
-`Agent::process` takes a context and an owned input and returns a fallible output.
-`Genome` requires cloning; `Mutate::mutate` changes a genome using parameters and
-the context's RNG. The [CPU context](../src/context/cpu.rs) wraps the genetic RNG;
-device and dtype metadata are unit values for native Rust scalar execution.
-The scalar RNN consumes no random draws during processing.
+## Components
 
-**Mind contract.** `mind::Mind<C>` processes its own associated input/output types
-without knowing about bodies, food, or movement. `mind::rnn::Rnn` implements it
-for three scalar inputs and outputs, owning `RnnGenome` and recurrent memory.
-`Herbivore<M>` maps the ecosystem's observation/action types to these signals and
-can wrap any compatible mind through `Herbivore::from_mind`. It propagates mind
-errors to its caller. [Mind](../src/mind/mod.rs) · [RNN](../src/mind/rnn/mod.rs)
+| Contract | Responsibility |
+| --- | --- |
+| [Actor](../src/actor/mod.rs) | Accept typed observations, then produce an action. Observation handling can update state without scheduling an action. |
+| [Population](../src/actor/population/mod.rs) | An Actor containing other actors. Route inputs and lifecycle observations; create controllers through a replaceable Factory. |
+| [Environment](../src/environment/mod.rs) | Own physical state; produce observations and apply actions, physical lifecycle rules, and requested external interventions. |
+| [Policy](../src/universe/mod.rs) | Decide experiment interventions from environment requests. The Universe owns and invokes it. |
+| [Mind](../src/mind/mod.rs) | Process internal signals without knowing bodies, food, or movement. |
+| [Genome / Mutate](../src/genome/mod.rs) | Clone inherited representations and mutate them through an execution context. |
+| [Context](../src/context/mod.rs) | Supply RNG and execution resources; the CPU context owns the genetic RNG. |
 
-`Population` owns agent lifetimes and decisions. Its concrete `Herbivores` adapter
-unwraps processing and mutation results: this agent always succeeds and the fixed
-mutation parameters are valid. A future backend that can fail needs an explicit
-population error policy. The population still chooses a concrete herbivore type;
-the contracts do not provide a generic agent factory or sexual reproduction.
-[Agent contracts](../src/agent/mod.rs) · [Population and inheritance](../src/agent/herbivore/population.rs)
+`Actor` replaces the draft's `Agent` name and separates observation handling from
+acting. `Genome`, `Mutate`, `Mind`, and `Context` retain their contracts.
+`Herbivore<M>` maps food observations to a compatible mind's three inputs and maps
+three outputs to movement. `Rnn` owns a 47-parameter genome and four recurrent units;
+all units read the previous hidden state. Processing consumes no random draws.
 
-**World contract and locking.** `Environment<P>::observe` returns owned, typed
-observations with stable agent IDs. `Run::tick` collects these under a read lock,
-releases it, then asks the population for actions. `Environment<P>::update` applies
-the responses and lifecycle changes under a write lock. `Run` is the sole writer;
-its cloneable `WorldView` only exposes read access. Agents execute without a world
-lock, and readers never see a partially updated tick. Cloning a complete `Run`
-creates an independent simulation; cloning its view attaches another reader.
+## Identity and lifecycle
 
-**Ecosystem tick.** Observe all bodies with nonnegative energy in stable ID order.
-Compute their actions, then move and clamp those bodies. Resolve feeding at the
-new positions, remove dead bodies and agents, replace eaten plants, admit
-immigrants, and split eligible parents. Apply upkeep and plant growth, then clamp
-bodies and plants again to account for growth and birth offsets. Newborns and
-immigrants first act on the following tick. Decisions record sensing-time energy
-and movement endpoints before birth offsets or the final clamp.
+The ecosystem owns `Plant`s and `Animal`s; the population owns controllers in
+separate storage. Opaque `Handle`s serialize as integers. A Universe-owned monotonic
+allocator never reuses them. Ascending handle order retains feeding priority.
+There are no serialized pointers or pointer reconstruction on load.
 
-[World rules](../src/environment/ecosystem/mod.rs) · [Order and locking checks](../tests/run_loop.rs)
+The concrete population protocol carries inputs or ordered spawn/despawn changes,
+plus a complete membership roster. The population checks that roster against its
+controllers. Loading validates components and their observation protocol at the
+Universe boundary. Handles prevent arbitrary construction through the regular API;
+validated associations, rather than shared ownership, keep the two stores aligned.
 
-**Reference agent.** Food field strength and its normalized gradient in world
-coordinates feed a fixed 3–4–3 recurrent network with 47 inherited `f32` parameters.
-Outputs specify direction and speed fraction. All recurrent units read the
-previous hidden state. Both scenarios use clamped edges and food-only inputs.
-Children clone the parent genome and call `Mutate` with `WeightMutation::default()`,
-adding independent noise in [-0.02, 0.02) per parameter. Custom bounds must be
-nonnegative with a finite sampling range; zero is a no-op. New agents start with
-fresh memory. `Herbivores::with_founder_genome` supplies a known founder genome;
-immigrants still receive random genomes.
+Physical births and deaths come from the environment as lifecycle observations.
+The factory interprets `Origin::Child { parent }` by copying and mutating the parent
+genome; the new mind starts with zero memory. Default weight mutation adds independent
+noise in [-0.02, 0.02). Invalid bounds fail; zero preserves the RNG stream.
 
-**One loop.** `Run::execute` accepts an optional tick limit, a pacing interval,
-a command receiver, and an after-tick stop predicate. The budget applies to that
-invocation and leaves the live run available for continuation. Pacing defaults
-to zero (full speed). Per-tick rules and RNG draws never depend on
-rendering or elapsed wall time. SplitMix64 expands the master seed into separate
-Xoshiro256++ streams for spatial draws and genetics. Replay targets one build and
-platform. [Continuation checks](../tests/simulation_runs.rs)
+Initialization is immigration into an empty environment. Both startup and later
+arrivals use `Ecosystem::admit` with placement and energy parameters, and
+`Origin::Immigrant` creates their controllers. An optional immigrant genome template
+applies to every such arrival; otherwise each receives random weights. The
+[foraging setup and policy](../src/universe/foraging.rs) choose the initial layout
+and minimum population. The environment only performs physical admission.
 
-Commands take effect between ticks. Pause/resume reset the pacing delay, and
-single-step pauses and advances exactly once. Blocking command acknowledgements
-arrive after application; a step acknowledgement follows the completed update.
-Stop, the tick limit, and a true predicate finish the loop. Dropping all command senders
-also stops it. A fresh channel can resume the same `Run` in another invocation.
+## A complete step
 
-**Viewer.** A separate window loop copies a snapshot under the read lock, releases
-it, and renders the snapshot. The toolbar and arena display the same tick. UI
-controls send commands to the simulation worker; drawing never advances it.
-Completion leaves the final state visible. The application stops and joins its
-worker when the window closes. `--smoke` checks twelve displayed snapshots and
-control acknowledgements, starting from either a fresh or restored run.
-Circle strokes are constructed before scale and
-translation to preserve their centers. [Viewer](../src/app/viewer/mod.rs)
+The [runner](../src/run/mod.rs) holds the Universe read lock while preparing an
+independent next state. It routes observations to the actor, obtains actions,
+advances the environment with the policy's intervention responses, and delivers
+lifecycle feedback to the actor. It then releases the read lock and publishes the
+complete next Universe under a write lock. The Universe does not interpret births,
+deaths, or genomes.
 
-**Persistence.** The worker saves complete state between ticks and reconstructs
-a restored run with `Run::from_parts`. This does not introduce another stepping
-loop. [Storage policy and snapshot contents](persistence.md)
+Viewers can read the previous complete state during preparation. A failure discards
+the prepared state, including controller memory, RNG draws, policy changes, and
+allocated handles. The runner is the sole writer; its `UniverseView` exposes only
+read access. Cloning a Run creates an independent simulation; cloning its view
+attaches a reader. The first implementation clones complete state each step; this
+cost is accepted for a clear atomic boundary. Replacement components must clone
+independently mutable state, not share mutable simulation state through pointers.
 
-**Debug fixture.** One herbivore starts with 390 energy in contact with a ripe
-plant. It senses that plant before its first action. In seed 1 it then eats for
-40 energy and splits; both bodies finish at 213 after upkeep. Only the parent
-acts on tick one. Immigration is disabled. The baseline starts 20 founders and
-500 ripe plants, replenishing random immigrants whenever population falls below
-20. [Behavioral checks](../tests/simulation_runs.rs)
+The ecosystem senses bodies with nonnegative energy in stable handle order, then
+moves and clamps them. Feeding and culling follow. Eaten plants are replaced; the
+policy sees the surviving population count and requests immigrants. Reproduction
+then splits eligible animals, followed by upkeep, plant growth, and final clamping.
+Lifecycle feedback initializes controllers in the same step, but newborns and
+immigrants first act on the next step. Decisions record sensing-time energy and
+movement endpoints before birth offsets and final clamping.
+
+The default policy maintains 20 animals; the debug policy injects no replacements.
+The debug layout admits one animal at energy 390 beside a ripe plant. At seed 1 it
+senses before eating, then splits; both animals finish step one at energy 213.
+The baseline admits 20 animals among 500 ripe plants. Both use clamped boundaries
+and food-field strength plus normalized world-coordinate gradient as perception.
+
+## Execution and viewing
+
+One `Run::execute` loop accepts a per-invocation tick limit, pacing interval,
+command receiver, and after-step stop predicate. A trial is initialization plus a
+limit; an unlimited run omits it. Pacing defaults to full speed. SplitMix64 expands
+the master seed into separate spatial and genetic Xoshiro256++ streams. Rendering
+and wall time never affect draws or physics; replay targets one build/platform.
+
+Commands apply between complete steps. Single-step pauses and advances once;
+its acknowledgement follows publication. Pause/resume reset pacing. Limits,
+predicates, stop commands, or dropped senders finish the loop. Errors return the
+last published state and mark the loop failed. A fresh channel can resume a Run.
+
+The viewer independently clones the complete Universe under its read lock and
+renders its environment. Toolbar and arena show the same step. Closing the window
+stops and joins the worker. `--smoke` compares twelve displayed Universe snapshots,
+including minds and RNGs, with a reference run and checks pause/step commands.
+[Viewer](../src/app/viewer/mod.rs) · [Locking and failure checks](../src/run/tests.rs) ·
+[Continuation checks](../tests/simulation_runs.rs) · [Persistence](persistence.md)

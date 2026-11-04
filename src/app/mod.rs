@@ -46,10 +46,11 @@ impl Counts {
     }
 
     fn print(&self, run: &Run) {
-        let world = run.world().read();
+        let universe = run.universe().read();
+        let world = universe.environment();
         println!(
             "tick={} animals={} plants={} meals={} births={} deaths={} immigrants={}",
-            world.number(),
+            universe.step(),
             world.animals().len(),
             world.plants().len(),
             self.meals,
@@ -96,7 +97,7 @@ impl Drop for Worker {
 
 #[cfg(feature = "viewer")]
 fn attach_viewer(
-    world: nevo::run::WorldView<nevo::environment::ecosystem::Ecosystem>,
+    world: nevo::run::UniverseView<nevo::universe::Universe>,
     control: Control,
     scenario: Scenario,
     seed: u64,
@@ -158,7 +159,7 @@ fn execute(mut options: Options) -> Result<()> {
             eprintln!(
                 "resuming={} tick={}",
                 directory.path().display(),
-                run.world().read().number()
+                run.universe().read().step()
             );
             (run, checkpoint.counts)
         }
@@ -166,7 +167,7 @@ fn execute(mut options: Options) -> Result<()> {
             directory.check_new()?;
             options.seed = Some(options.resolved_seed()?);
             (
-                Run::new(options.scenario, options.seed.unwrap()),
+                Run::new(options.scenario, options.seed.unwrap())?,
                 Counts::default(),
             )
         }
@@ -192,7 +193,7 @@ fn execute(mut options: Options) -> Result<()> {
     })
     .context("installing shutdown handler")?;
     #[cfg(feature = "viewer")]
-    let world = run.world().clone();
+    let world = run.universe().clone();
     #[cfg(feature = "viewer")]
     let smoke = options
         .smoke
@@ -223,16 +224,18 @@ fn execute(mut options: Options) -> Result<()> {
             false
         });
         counts.print(&run);
-        println!("stop={stop:?}");
+        if let Ok(reason) = &stop {
+            println!("stop={reason:?}");
+        }
         let saved = match save_error {
             Some(error) => Err(error),
             None => directory.save(&run, &options, &counts),
         };
-        if saved.is_err() {
+        if saved.is_err() || stop.is_err() {
             worker_exit.store(true, Ordering::Relaxed);
         }
         saved?;
-        Ok(stop)
+        stop
     });
     let worker = Worker {
         control: control.clone(),

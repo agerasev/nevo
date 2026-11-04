@@ -1,6 +1,6 @@
 use nevo::{
-    environment::ecosystem::Ecosystem,
     run::{Command, Control, Run},
+    universe::Universe,
 };
 
 /// Exercise the command channel while checking the snapshots actually presented.
@@ -12,7 +12,7 @@ pub struct SmokeCheck {
 
 impl SmokeCheck {
     pub fn new(reference: Run) -> Self {
-        let previous_tick = reference.world().read().number();
+        let previous_tick = reference.universe().read().step();
         Self {
             reference,
             previous_tick,
@@ -35,10 +35,10 @@ impl SmokeCheck {
     pub fn verify(
         &mut self,
         frame: u32,
-        snapshot: &Ecosystem,
+        snapshot: &Universe,
         control: &Control,
     ) -> wgame::Result<()> {
-        let tick = snapshot.number();
+        let tick = snapshot.step();
         let expected = match frame {
             0 => Some(self.previous_tick),
             1 | 3 | 9 | 10 => Some(self.previous_tick + 1),
@@ -52,10 +52,12 @@ impl SmokeCheck {
                 control.status().paused
             )));
         }
-        while self.reference.world().read().number() < tick {
-            self.reference.tick();
+        while self.reference.universe().read().step() < tick {
+            self.reference
+                .tick()
+                .map_err(|error| wgame::Error::msg(error.to_string()))?;
         }
-        if *self.reference.world().read() != *snapshot {
+        if *self.reference.universe().read() != *snapshot {
             return Err(wgame::Error::msg(format!(
                 "frame {frame}: snapshot differs from the seeded reference at tick {tick}"
             )));

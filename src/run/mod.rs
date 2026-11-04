@@ -8,77 +8,74 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rand::{Rng, SeedableRng};
-use rand_xoshiro::SplitMix64;
+use anyhow::Result;
+use rand_xoshiro::Xoshiro256PlusPlus;
 
 use crate::{
-    agent::Population,
-    agent::herbivore::Herbivores,
-    environment::ecosystem::{Ecosystem, Scenario},
-    environment::{AgentResponse, Environment},
+    actor::{Actor, herbivore::Herbivores},
+    context::{Context, Cpu},
+    environment::{
+        Environment,
+        ecosystem::{Ecosystem, Scenario},
+    },
+    universe::{ForagingPolicy, Policy, Universe},
 };
 
-/// Read-only access to a live world. Cloning this handle attaches another reader.
-pub struct WorldView<W>(Arc<RwLock<W>>);
+/// Read-only access to complete state. Cloning attaches another reader.
+pub struct UniverseView<U = Universe>(Arc<RwLock<U>>);
 
-impl<W> Clone for WorldView<W> {
+impl<U> Clone for UniverseView<U> {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
     }
 }
 
-impl<W> WorldView<W> {
-    pub fn read(&self) -> RwLockReadGuard<'_, W> {
-        self.0.read().expect("world update panicked")
+impl<U> UniverseView<U> {
+    pub fn read(&self) -> RwLockReadGuard<'_, U> {
+        self.0.read().expect("universe publication panicked")
     }
 }
 
-impl<W: fmt::Debug> fmt::Debug for WorldView<W> {
+impl<U: fmt::Debug> fmt::Debug for UniverseView<U> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.read().fmt(f)
     }
 }
 
-/// The sole writer owns agent state; observers can only read the shared world.
+/// The sole writer publishes complete universes; observers only receive readers.
 #[derive(Debug)]
-pub struct Run<W = Ecosystem, P = Herbivores> {
-    world: WorldView<W>,
-    pub population: P,
+pub struct Run<E = Ecosystem, A = Herbivores, C = Cpu<Xoshiro256PlusPlus>, P = ForagingPolicy> {
+    universe: UniverseView<Universe<E, A, C, P>>,
 }
 
-impl<W, P> Run<W, P> {
-    pub fn world(&self) -> &WorldView<W> {
-        &self.world
+impl<E, A, C, P> Run<E, A, C, P> {
+    pub fn universe(&self) -> &UniverseView<Universe<E, A, C, P>> {
+        &self.universe
     }
 
-    pub fn from_parts(world: W, population: P) -> Self {
+    pub fn from_universe(universe: Universe<E, A, C, P>) -> Self {
         Self {
-            world: WorldView(Arc::new(RwLock::new(world))),
-            population,
+            universe: UniverseView(Arc::new(RwLock::new(universe))),
         }
     }
 }
 
-/// Cloning a run makes an independent simulation, unlike cloning its world view.
-impl<W: Clone, P: Clone> Clone for Run<W, P> {
+/// Cloning a run makes an independent simulation, unlike cloning its view.
+impl<E: Clone, A: Clone, C: Clone, P: Clone> Clone for Run<E, A, C, P> {
     fn clone(&self) -> Self {
-        Self::from_parts(self.world.read().clone(), self.population.clone())
+        Self::from_universe(self.universe.read().clone())
     }
 }
 
-impl<W: PartialEq, P: PartialEq> PartialEq for Run<W, P> {
+impl<E: PartialEq, A: PartialEq, C: PartialEq, P: PartialEq> PartialEq for Run<E, A, C, P> {
     fn eq(&self, other: &Self) -> bool {
-        *self.world.read() == *other.world.read() && self.population == other.population
+        *self.universe.read() == *other.universe.read()
     }
 }
 
 impl Run {
-    pub fn new(scenario: Scenario, seed: u64) -> Self {
-        let mut seeds = SplitMix64::seed_from_u64(seed);
-        let world_seed = seeds.next_u64();
-        let mut population = Herbivores::new(seeds.next_u64());
-        let world = Ecosystem::new(scenario, world_seed, &mut population);
-        Self::from_parts(world, population)
+    pub fn new(scenario: Scenario, seed: u64) -> Result<Self> {
+        Ok(Self::from_universe(Universe::new(scenario, seed)?))
     }
 }
 
@@ -105,6 +102,7 @@ pub enum StopReason {
     Condition,
     Requested,
     Disconnected,
+    Failed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,7 +125,7 @@ impl Request {
     }
 }
 
-/// Commands are applied between complete ticks. Readers cannot mutate the world.
+/// Commands are applied between complete ticks. Readers cannot mutate the universe.
 #[derive(Clone)]
 pub struct Control {
     sender: mpsc::Sender<Request>,
@@ -185,37 +183,33 @@ impl Control {
     }
 }
 
-impl<W, P> Run<W, P>
+impl<E, A, C, P> Run<E, A, C, P>
 where
-    W: Environment<P>,
-    P: Population<W::Observation, W::Action, W::Origin>,
+    E: Environment + Clone,
+    A: Actor<C, Observation = E::Observation, Action = E::Action> + Clone,
+    C: Context + Clone,
+    P: Policy<E::Request, Intervention = E::Intervention> + Clone,
 {
-    pub fn tick(&mut self) -> W::Report {
-        let observations = self.world.read().observe();
-        // The read guard is gone before agent processing; observers remain free to read.
-        let responses = observations
-            .into_iter()
-            .map(|(id, observation)| AgentResponse {
-                id,
-                action: self.population.act(id, &observation),
-                observation,
-            })
-            .collect();
-        self.world
+    pub fn tick(&mut self) -> Result<E::Report> {
+        // Keep the read lock for preparation: viewers may read the old complete
+        // state concurrently. Drop it before acquiring the publication lock.
+        let (next, report) = self.universe.read().prepare_step()?;
+        *self
+            .universe
             .0
             .write()
-            .expect("world update panicked")
-            .update(&mut self.population, responses)
+            .expect("universe publication panicked") = next;
+        Ok(report)
     }
 
     /// The single execution loop, with optional limits, pacing and external controls.
-    /// `after_tick` runs without a world lock and returns true to stop.
+    /// `after_tick` runs without a universe lock and returns true to stop.
     pub fn execute(
         &mut self,
         options: LoopOptions,
         commands: Commands,
-        mut after_tick: impl FnMut(&Self, &W::Report) -> bool,
-    ) -> StopReason {
+        mut after_tick: impl FnMut(&Self, &E::Report) -> bool,
+    ) -> Result<StopReason> {
         let mut last_tick = Instant::now();
         let mut status = *commands.status.lock().expect("loop status poisoned");
         status.steps = 0;
@@ -232,14 +226,14 @@ where
             if let Some(reason) = limit(status.steps) {
                 status.stop = Some(reason);
                 publish(status);
-                return reason;
+                return Ok(reason);
             }
             let request = match commands.receiver.try_recv() {
                 Ok(request) => Some(request),
                 Err(mpsc::TryRecvError::Disconnected) => {
                     status.stop = Some(StopReason::Disconnected);
                     publish(status);
-                    return StopReason::Disconnected;
+                    return Ok(StopReason::Disconnected);
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     let until_tick = (!status.paused)
@@ -260,7 +254,7 @@ where
                             Err(mpsc::RecvTimeoutError::Disconnected) => {
                                 status.stop = Some(StopReason::Disconnected);
                                 publish(status);
-                                return StopReason::Disconnected;
+                                return Ok(StopReason::Disconnected);
                             }
                         }
                     }
@@ -279,13 +273,20 @@ where
                 if command != Command::Step {
                     request.expect("request is present").acknowledge();
                     if let Some(reason) = status.stop {
-                        return reason;
+                        return Ok(reason);
                     }
                     continue;
                 }
             }
 
-            let report = self.tick();
+            let report = match self.tick() {
+                Ok(report) => report,
+                Err(error) => {
+                    status.stop = Some(StopReason::Failed);
+                    publish(status);
+                    return Err(error);
+                }
+            };
             status.steps += 1;
             last_tick = Instant::now();
             status.stop = if after_tick(self, &report) {
@@ -298,7 +299,7 @@ where
                 request.acknowledge();
             }
             if let Some(reason) = status.stop {
-                return reason;
+                return Ok(reason);
             }
         }
     }

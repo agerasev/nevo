@@ -1,8 +1,8 @@
 use anyhow::Result;
 use glam::DVec2;
 use nevo::{
-    agent::Agent,
-    agent::herbivore::Herbivore,
+    actor::Actor,
+    actor::herbivore::Herbivore,
     context::{Context, Cpu},
     environment::ecosystem::FoodObservation,
     genome::Mutate,
@@ -29,8 +29,8 @@ fn herbivore_accepts_another_mind_and_propagates_its_errors() {
         rng: Xoshiro256PlusPlus::seed_from_u64(17),
     };
     let mut agent = Herbivore::from_mind(EchoMind);
-    let action = agent
-        .process(
+    agent
+        .observe(
             &mut cx,
             FoodObservation {
                 gradient: DVec2::new(0.25, -0.5),
@@ -38,19 +38,20 @@ fn herbivore_accepts_another_mind_and_propagates_its_errors() {
             },
         )
         .unwrap();
+    let action = agent.act(&mut cx).unwrap();
     assert_eq!(action.direction, DVec2::new(0.25, -0.5));
     assert_eq!(action.speed_fraction, 1.0_f64.tanh());
+    agent
+        .observe(
+            &mut cx,
+            FoodObservation {
+                strength: f64::NAN,
+                ..FoodObservation::default()
+            },
+        )
+        .unwrap();
     assert_eq!(
-        agent
-            .process(
-                &mut cx,
-                FoodObservation {
-                    strength: f64::NAN,
-                    ..FoodObservation::default()
-                }
-            )
-            .unwrap_err()
-            .to_string(),
+        agent.act(&mut cx).unwrap_err().to_string(),
         "invalid signal"
     );
 }
@@ -90,7 +91,7 @@ fn mutated_copy<C: Context + ?Sized, G: Mutate<C, WeightMutation>>(
 }
 
 #[test]
-fn agent_and_genome_accept_an_alternate_unsized_context() {
+fn actor_and_genome_accept_an_alternate_unsized_context() {
     let mut context = ResearchContext {
         rng: Xoshiro256PlusPlus::seed_from_u64(42),
     };
@@ -104,7 +105,8 @@ fn agent_and_genome_accept_an_alternate_unsized_context() {
 
     let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
         &mut context;
-    let action = agent.process(cx, FoodObservation::default()).unwrap();
+    agent.observe(cx, FoodObservation::default()).unwrap();
+    let action = agent.act(cx).unwrap();
     assert_eq!(action.direction, DVec2::X * f64::from(0.5_f32.tanh()));
     assert_eq!(action.speed_fraction, 1.0_f64.tanh());
     assert_ne!(agent.mind.memory, [0.0; 4]);

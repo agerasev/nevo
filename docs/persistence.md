@@ -51,19 +51,28 @@ runs/baseline/
 ```
 
 Each checkpoint is one CBOR file containing the effective configuration, cumulative
-event counts, and a complete [ecosystem snapshot](../src/run/checkpoint/mod.rs): world tick,
-bodies, ordered plants, next IDs, replenishment settings, both RNG states, all
-genomes and recurrent memories, and the optional founder genome. Native CBOR arrays
-hold the weights; no safetensors payload is used. Locks, channels, pacing clocks,
-and viewer/device resources are recreated rather than serialized. Generic agent
-and environment contracts have no persistence bounds.
+event counts, model identifiers, and the directly serialized
+[Universe](../src/universe/mod.rs): step, environment, population, genetic context,
+experiment policy, and handle allocator. This includes ordered plants and animals,
+both RNG states, genomes, recurrent memories, and any immigrant genome template.
+Opaque handles serialize as integer IDs; loading validates component state and
+membership without rebuilding shared pointers. Native CBOR arrays hold weights;
+no safetensors payload is used.
 
-Version 1 uses the stable `foraging-sense-first-v1` world identifier. Rust module/type names are
-not encoded; the herbivore wrapper serializes its mind directly as the existing
-`genome` and `memory` fields.
+Locks, channels, pacing clocks, and viewer/device resources live outside Universe.
+Reconstructible caches may be omitted from serialization; recurrent memory and RNG
+positions are required state. Generic actor and environment contracts have no
+persistence bounds.
+
+New files use checkpoint version 2 with the unchanged `foraging-sense-first-v1`
+and `herbivore-rnn-3-4-3-v1` model identifiers. Version 1 files are
+[imported](../src/run/checkpoint/mod.rs) automatically and subsequent saves use
+version 2. The old founder-only template is validated then discarded: its genomes
+already exist, and retaining it as an immigrant template would change future runs.
+Rust module/type names are not part of the format.
 
 Only the simulation owner saves, between complete ticks. Snapshot copying holds
-the world's read lock briefly; serialization and file I/O happen after releasing
+the Universe's read lock briefly; serialization and file I/O happen after releasing
 it. A file is written to a temporary sibling, flushed and synced, then renamed
 into place. Older checkpoints are removed only after the new file is published.
 An OS lock permits one writer per directory and releases automatically when the
@@ -73,7 +82,8 @@ The newest checkpoint is selected by tick. Schema/model versions and restored
 state invariants are checked before running or replacing configuration. Invalid or
 truncated checkpoints produce an error instead of silently restarting. To recover
 an older retained checkpoint, move newer checkpoint files out of `checkpoints/`
-while the run is stopped. The format has no checksum or automatic migration yet.
+while the run is stopped. The format has no checksum; only the explicit version 1
+import is supported.
 Hard kills or power loss can lose progress since the last completed save; an
 exit checkpoint requires orderly shutdown.
 

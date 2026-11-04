@@ -1,70 +1,112 @@
-//! Complete ecosystem state at a tick boundary. Serialization is an adapter;
-//! the generic agent, environment, and runner contracts stay format-independent.
+//! Import the original checkpoint layout. New checkpoints serialize Universe directly.
+
+use std::collections::BTreeMap;
 
 use anyhow::{Result, ensure};
-use serde::{Deserialize, Serialize};
+use rand_xoshiro::Xoshiro256PlusPlus;
+use serde::Deserialize;
 
-use crate::{agent::herbivore::Herbivores, environment::ecosystem::Ecosystem, run::Run};
+use crate::{
+    actor::{
+        Handle, HandleAllocator,
+        herbivore::{Herbivore, HerbivoreFactory, Herbivores},
+    },
+    context::Cpu,
+    environment::ecosystem::{Animal, Ecosystem, Plant},
+    mind::rnn::{Rnn, RnnGenome},
+    universe::{ForagingPolicy, Universe},
+};
 
-const FORMAT_VERSION: u32 = 1;
-// Stable on-disk identifier; renaming Rust modules does not change the world model.
-const WORLD_MODEL: &str = "foraging-sense-first-v1";
-const AGENT_MODEL: &str = "herbivore-rnn-3-4-3-v1";
+// Stable model identifiers survive source-module and checkpoint-layout changes.
+pub const WORLD_MODEL: &str = "foraging-sense-first-v1";
+pub const AGENT_MODEL: &str = "herbivore-rnn-3-4-3-v1";
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub fn validate_models(world_model: &str, agent_model: &str) -> Result<()> {
+    ensure!(
+        world_model == WORLD_MODEL,
+        "unsupported world model {world_model}"
+    );
+    ensure!(
+        agent_model == AGENT_MODEL,
+        "unsupported agent model {agent_model}"
+    );
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Snapshot {
+pub struct LegacySnapshot {
     format_version: u32,
     world_model: String,
     agent_model: String,
-    world: Ecosystem,
-    population: Herbivores,
+    world: LegacyWorld,
+    population: LegacyPopulation,
 }
 
-impl Snapshot {
-    /// Call from the simulation owner between completed ticks.
-    pub fn capture(run: &Run) -> Self {
-        Self {
-            format_version: FORMAT_VERSION,
-            world_model: WORLD_MODEL.into(),
-            agent_model: AGENT_MODEL.into(),
-            world: run.world().read().clone(),
-            population: run.population.clone(),
-        }
-    }
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyWorld {
+    number: u64,
+    rng: Xoshiro256PlusPlus,
+    next_animal: u64,
+    next_plant: u64,
+    animals: BTreeMap<Handle, Animal>,
+    plants: Vec<Plant>,
+    plant_target: usize,
+    immigrant_floor: usize,
+}
 
-    pub fn tick(&self) -> u64 {
-        self.world.number()
-    }
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyPopulation {
+    live: BTreeMap<Handle, Rnn>,
+    cx: Cpu<Xoshiro256PlusPlus>,
+    founder_genome: Option<RnnGenome>,
+}
 
-    /// Recreate synchronization only; never initialize agents or draw new seeds.
-    pub fn restore(self) -> Result<Run> {
+impl LegacySnapshot {
+    /// Preserve IDs, recurrent memory and both RNG positions without initialization.
+    pub fn into_universe(self) -> Result<Universe> {
         ensure!(
-            self.format_version == FORMAT_VERSION,
+            self.format_version == 1,
             "unsupported snapshot format version {}",
             self.format_version
         );
-        ensure!(
-            self.world_model == WORLD_MODEL,
-            "unsupported world model {}",
-            self.world_model
+        validate_models(&self.world_model, &self.agent_model)?;
+        let world = self.world;
+        // The old template affected founders only. Their genomes already exist;
+        // preserving it as an immigration template would change future evolution.
+        if let Some(genome) = &self.population.founder_genome {
+            ensure!(
+                genome.weights.iter().all(|value| value.is_finite()),
+                "non-finite founder weight"
+            );
+        }
+        let actor = Herbivores::from_parts(
+            self.population
+                .live
+                .into_iter()
+                .map(|(handle, mind)| (handle, Herbivore::from_mind(mind)))
+                .collect(),
+            HerbivoreFactory::default(),
         );
-        ensure!(
-            self.agent_model == AGENT_MODEL,
-            "unsupported agent model {}",
-            self.agent_model
+        let environment = Ecosystem::from_parts(
+            world.rng,
+            world.next_plant,
+            world.animals,
+            world.plants,
+            world.plant_target,
         );
-        self.world.validate_checkpoint()?;
-        self.population.validate_checkpoint()?;
-        ensure!(
-            self.world
-                .animals()
-                .keys()
-                .copied()
-                .eq(self.population.ids()),
-            "world body IDs differ from population IDs"
-        );
-        Ok(Run::from_parts(self.world, self.population))
+        let universe = Universe::from_parts(
+            world.number,
+            environment,
+            actor,
+            self.population.cx,
+            ForagingPolicy::new(world.immigrant_floor),
+            HandleAllocator::from_next(world.next_animal)?,
+        )?;
+        universe.validate_checkpoint()?;
+        Ok(universe)
     }
 }
 

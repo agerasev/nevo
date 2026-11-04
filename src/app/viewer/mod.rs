@@ -11,7 +11,8 @@ use std::{
 
 use nevo::{
     environment::ecosystem::{Ecosystem, HALF_SIZE, Scenario},
-    run::{Command, Control, WorldView},
+    run::{Command, Control, UniverseView},
+    universe::Universe,
 };
 use wgame::{
     ContentFrame, Library, Window, WindowHost,
@@ -36,12 +37,13 @@ struct Status {
 }
 
 impl Status {
-    fn read(world: &Ecosystem, control: &Control) -> Self {
+    fn read(universe: &Universe, control: &Control) -> Self {
+        let world = universe.environment();
         let status = control.status();
         Self {
             paused: status.paused,
             stopped: status.stop.is_some(),
-            tick: world.number(),
+            tick: universe.step(),
             plants: world.plants().len(),
             animals: world.animals().len(),
         }
@@ -109,7 +111,7 @@ fn draw_world(frame: &mut impl ContentFrame, library: &Library, world: &Ecosyste
 
 pub async fn show(
     window: Window<'_>,
-    world: WorldView<Ecosystem>,
+    world: UniverseView<Universe>,
     control: Control,
     scenario: Scenario,
     seed: u64,
@@ -235,7 +237,7 @@ pub async fn show(
                 }
             }
         }
-        draw_world(&mut frame, &library, &snapshot);
+        draw_world(&mut frame, &library, snapshot.environment());
         frame.present();
         if let Some(check) = &mut check {
             check.verify(smoke_frame, &snapshot, &control)?;
