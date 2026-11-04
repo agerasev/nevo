@@ -20,7 +20,9 @@ cargo run --locked --bin nevo -- runs/baseline
 ```
 
 Use **Pause / Resume** to control playback and **Single step** to advance one tick
-and pause. With the arena focused, Space toggles playback and Right Arrow steps.
+and pause. Edit **Tick Hz** for paced playback; **Full speed** toggles unlimited
+speed while remembering the paced rate. With the arena focused, Space toggles
+playback and Right Arrow steps. See [viewer controls](docs/viewer.md).
 The toolbar shows the seed, tick, and population counts for the displayed
 world. Green circles are plants and yellow circles are animals.
 
@@ -68,7 +70,7 @@ See [persistence options, format, and recovery](docs/persistence.md).
 
 Build with `--no-default-features` when graphics are unnecessary; the executable
 and runner stay the same. Add `--config configs/smoke.toml` to verify twelve
-displayed snapshots and pause/step controls against a seeded reference run.
+displayed snapshots and pause/step/pacing controls against a seeded reference run.
 
 ## Project structure
 

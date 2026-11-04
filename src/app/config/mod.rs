@@ -5,11 +5,13 @@ mod seed;
 use std::{
     fs,
     path::{Path, PathBuf},
-    time::Duration,
 };
 
 use anyhow::{Context, Result, ensure};
-use nevo::{ecosystem, run::LoopOptions};
+use nevo::{
+    ecosystem,
+    run::{LoopOptions, tick_interval},
+};
 use rand::{TryRng, rngs::SysRng};
 use serde::{Deserialize, Serialize};
 
@@ -108,18 +110,7 @@ impl Config {
             self.keep_checkpoints > 0,
             "keep-checkpoints must be at least one"
         );
-        ensure!(
-            self.tick_hz.is_finite() && self.tick_hz >= 0.0,
-            "tick-hz must be finite and nonnegative"
-        );
-        let interval = if self.tick_hz == 0.0 {
-            Duration::ZERO
-        } else {
-            let interval =
-                Duration::try_from_secs_f64(1.0 / self.tick_hz).context("tick-hz is too small")?;
-            ensure!(!interval.is_zero(), "tick-hz is too large");
-            interval
-        };
+        let interval = tick_interval(self.tick_hz)?;
         ensure!(
             !self.viewer.enable || cfg!(feature = "viewer"),
             "this build does not include the viewer feature"

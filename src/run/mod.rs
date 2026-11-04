@@ -10,7 +10,7 @@ use crate::{
     ecosystem::{Config, Ecosystem},
     universe::{Simulation, Universe},
 };
-use anyhow::Result;
+use anyhow::{Context, Result, ensure};
 
 /// Read-only access to complete state. Cloning attaches another reader.
 pub struct UniverseView<U = Universe>(Arc<RwLock<U>>);
@@ -78,12 +78,28 @@ pub struct LoopOptions {
     pub interval: Duration,
 }
 
+/// Convert a wall-clock tick rate to pacing; zero means unlimited throughput.
+pub fn tick_interval(tick_hz: f64) -> Result<Duration> {
+    ensure!(
+        tick_hz.is_finite() && tick_hz >= 0.0,
+        "tick-hz must be finite and nonnegative"
+    );
+    if tick_hz == 0.0 {
+        return Ok(Duration::ZERO);
+    }
+    let interval = Duration::try_from_secs_f64(1.0 / tick_hz).context("tick-hz is too small")?;
+    ensure!(!interval.is_zero(), "tick-hz is too large");
+    Ok(interval)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     Pause,
     Resume,
     TogglePause,
     Step,
+    /// Change wall-clock pacing without changing the pause state or simulation timestep.
+    SetInterval(Duration),
     Stop,
 }
 
@@ -99,6 +115,7 @@ pub enum StopReason {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LoopStatus {
     pub paused: bool,
+    pub interval: Duration,
     pub steps: u64,
     pub stop: Option<StopReason>,
 }
@@ -133,6 +150,7 @@ impl Control {
         let (sender, receiver) = mpsc::channel();
         let status = Arc::new(Mutex::new(LoopStatus {
             paused,
+            interval: Duration::ZERO,
             steps: 0,
             stop: None,
         }));
@@ -203,6 +221,7 @@ where
         let mut status = *commands.status.lock().expect("loop status poisoned");
         status.steps = 0;
         status.stop = None;
+        status.interval = options.interval;
         let publish = |state| *commands.status.lock().expect("loop status poisoned") = state;
         let limit = |steps| {
             options
@@ -226,7 +245,7 @@ where
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     let until_tick = (!status.paused)
-                        .then(|| options.interval.saturating_sub(last_tick.elapsed()));
+                        .then(|| status.interval.saturating_sub(last_tick.elapsed()));
                     if until_tick == Some(Duration::ZERO) {
                         None
                     } else {
@@ -255,6 +274,7 @@ where
                     Command::Pause | Command::Step => status.paused = true,
                     Command::Resume => status.paused = false,
                     Command::TogglePause => status.paused = !status.paused,
+                    Command::SetInterval(interval) => status.interval = interval,
                     Command::Stop => status.stop = Some(StopReason::Requested),
                 }
                 last_tick = Instant::now();

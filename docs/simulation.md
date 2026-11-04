@@ -101,7 +101,9 @@ the master seed into separate spatial and genetic Xoshiro256++ streams. Renderin
 and wall time never affect draws or physics; replay targets one build/platform.
 
 Commands apply between complete steps. Single-step pauses and advances once;
-its acknowledgement follows publication. Pause/resume reset pacing. Limits,
+its acknowledgement follows publication. Pause/resume reset pacing. `SetInterval`
+changes the wall-clock interval and wakes a pacing wait without changing pause
+state; `LoopStatus` reports the applied interval. Limits,
 predicates, stop commands, or dropped senders finish the loop. Errors return the
 last published state and mark the loop failed. A fresh channel can resume a Run.
 
@@ -110,7 +112,7 @@ releases it before UI layout and rendering. Toolbar labels and arena describe th
 same state; normal viewing never clones the Universe or its minds. Closing the
 application window stops and joins the worker. The `smoke` config setting compares the complete
 state used for twelve displayed scenes, including minds and RNGs, with a reference
-run and checks pause/step commands.
+run and checks pause/step/pacing commands.
 [Viewer contract](viewer.md) · [Locking and failure checks](../src/run/tests.rs) ·
 [Continuation checks](../tests/simulation_runs.rs) · [Persistence](persistence.md)
 

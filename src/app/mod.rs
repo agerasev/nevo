@@ -147,7 +147,7 @@ fn attach_viewer(
                         presented == 12,
                         "viewer closed before the smoke check finished"
                     );
-                    println!("Verified 12 displayed snapshots and pause/step commands.");
+                    println!("Verified 12 displayed snapshots and pause/step/pacing commands.");
                     Ok(())
                 } else {
                     viewer::show(window, world.clone(), control.clone(), options).await

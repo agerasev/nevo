@@ -25,14 +25,22 @@ The [window loop](../src/viewer/window.rs) knows no ecosystem types.
 It collects the scene while holding a shared state read lock, releases the lock,
 then lays out controls and renders. Neither `Clone` nor `Simulation` is required
 to view a drawable state. Scene and model labels come from the same capture.
-Pause/resume and single-step use the existing command channel; completion keeps
-the last state visible. Window options supply a title, static labels, and shutdown
+Pause/resume, single-step, and tick-rate changes use the command channel;
+completion keeps the last state visible. Window options supply a title, static labels, and shutdown
 signal. The application owns worker shutdown and joining.
 
 `viewer.enable` attaches the window; `viewer.vsync` is passed to wgame's presentation
 configuration and defaults to true. The window requests the next frame without an
 additional timer. Simulation runs on its own worker, unlimited by default; optional
 `tick_hz` pacing is independent of the viewer. Enabling viewing never changes it.
+
+The toolbar's **Tick Hz** field changes pacing during the run; enter a positive
+rate for paced playback or `0` for unlimited speed. **Full speed** toggles between
+unlimited and the last positive rate (initially the configured rate, or 60 Hz).
+Pause remains independent: editing speed while paused does not advance the world.
+Speed commands wake an existing pacing wait and take effect between complete ticks.
+Toolbar changes apply to the current invocation; saved `tick_hz` remains the startup
+setting. No simulation timestep, randomness, or rendering rate is changed.
 
 `show_with` accepts a custom capture callback for instrumentation. It runs once per
 attempted frame, outside UI layout, and can finish after presenting its final scene.
@@ -53,4 +61,4 @@ The explicit rendering tests require a GPU or software adapter and fail if none 
 available. They check overlapping borders, pixels after source objects are dropped
 or advanced, a second non-Clone model, and preservation of ecosystem state.
 Viewer smoke checks require a display and verify twelve presented scenes with
-pause/step controls.
+pause/step/pacing controls.

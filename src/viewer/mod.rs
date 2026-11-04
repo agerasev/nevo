@@ -1,5 +1,6 @@
 //! Model-independent viewing through wgame. Simulation types opt into drawing.
 
+mod controls;
 mod drawing;
 mod window;
 

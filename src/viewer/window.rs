@@ -13,7 +13,7 @@ use wgame::{
 };
 use wgame_egui::{EguiWindow, egui};
 
-use super::{Draw, Drawing, Label};
+use super::{Draw, Drawing, Label, controls::Controls};
 use crate::run::{Command, Control, UniverseView};
 
 /// Window-owned information; model-dependent labels come from `Draw`.
@@ -79,6 +79,7 @@ pub async fn show_with(
     mut capture: impl FnMut(&mut Drawing<'_>) -> wgame::Result<ControlFlow<()>>,
 ) -> wgame::Result<u64> {
     let initial = control.status();
+    let controls = RefCell::new(Controls::new(initial.interval));
     let status = RefCell::new(Status {
         paused: initial.paused,
         stopped: initial.stop.is_some(),
@@ -111,26 +112,9 @@ pub async fn show_with(
             ui.horizontal_wrapped(|ui| {
                 ui.strong(&options.title);
                 ui.separator();
-                if ui
-                    .add_enabled(
-                        options.interactive && !status.stopped,
-                        egui::Button::new(if status.paused { "Resume" } else { "Pause" }),
-                    )
-                    .on_hover_text("Space when the arena has focus")
-                    .clicked()
-                {
-                    click(Command::TogglePause);
-                }
-                if ui
-                    .add_enabled(
-                        options.interactive && !status.stopped,
-                        egui::Button::new("Single step"),
-                    )
-                    .on_hover_text("Pause and advance one tick (Right Arrow in the arena)")
-                    .clicked()
-                {
-                    click(Command::Step);
-                }
+                ui.add_enabled_ui(options.interactive && !status.stopped, |ui| {
+                    controls.borrow_mut().show(ui, status.paused, click);
+                });
                 ui.separator();
                 for item in &options.labels {
                     label(ui, item);
@@ -163,6 +147,7 @@ pub async fn show_with(
         let mut drawing = Drawing::new(&library);
         let finish = capture(&mut drawing)?;
         let loop_status = control.status();
+        controls.borrow_mut().begin_frame(loop_status.interval);
         *status.borrow_mut() = Status {
             paused: loop_status.paused,
             stopped: loop_status.stop.is_some(),

@@ -4,6 +4,7 @@ use clap::Parser;
 use std::{
     env,
     sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
 };
 
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
