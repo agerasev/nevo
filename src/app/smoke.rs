@@ -63,9 +63,6 @@ impl SmokeCheck {
             )));
         }
         self.previous_tick = tick;
-        if frame == 11 {
-            println!("Verified 12 displayed snapshots and pause/step commands; final tick {tick}.");
-        }
         Ok(())
     }
 }

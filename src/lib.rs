@@ -6,3 +6,6 @@ pub mod genome;
 pub mod mind;
 pub mod run;
 pub mod universe;
+
+#[cfg(feature = "viewer")]
+pub mod viewer;

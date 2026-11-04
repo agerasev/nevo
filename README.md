@@ -72,7 +72,8 @@ Multi-file modules use `mod.rs` inside their directory.
 | [ecosystem](src/ecosystem/mod.rs) | Plants and complete animals with body and mind; foraging, reproduction, and immigration rules. |
 | [universe](src/universe/mod.rs) | Complete serializable state and the small Simulation stepping contract. |
 | [run](src/run/mod.rs) | Shared read/prepare/write loop and controls. |
-| [app](src/app/mod.rs) | CLI configuration, run storage, and optional viewer. |
+| [viewer](src/viewer/mod.rs) | Optional Draw contract, wgame scenes, and generic window controls. |
+| [app](src/app/mod.rs) | CLI configuration, run storage, worker and viewer startup. |
 
 `main.rs` only enters the application; `lib.rs` exposes the library modules.
 The concrete experiment is `ecosystem::Ecosystem`. Each animal owns its `body` and
@@ -84,6 +85,10 @@ Each tick prepares component updates under a read lock and applies them under a
 write lock, without cloning the Universe or existing minds.
 See [simulation contracts](docs/simulation.md) for the implemented boundaries.
 
+Objects compose their default drawing through `Draw`; the viewer collects a wgame
+scene under a read lock and renders after releasing it. Viewing requires no model
+or mind cloning. See [drawing and viewer contracts](docs/viewer.md).
+
 Keep current documentation in [docs/](docs/README.md), with selected milestone
 conclusions in [history](docs/history/README.md). Run configurations live in
 `configs/`; checkpoints, screenshots, and other run outputs stay in ignored `runs/`.
@@ -94,6 +99,7 @@ conclusions in [history](docs/history/README.md). Run configurations live in
   the optional viewer reads snapshots independently of simulation stepping.
 - Make agents (genomes, brains, control mappings) and environments (worlds, bodies,
   physical rules) generic and replaceable through compatible contracts/adapters.
+- Use wgame as the drawing backend, with one default presentation per object.
 - Use the [July 26 foraging experiment](docs/history/2016-07-26-ecosystem.md)
   as the Rust baseline. Start with continuous 2D space, replenishing food, and one
   herbivore body type. Wrapping boundaries remain part of the planned Rust world.

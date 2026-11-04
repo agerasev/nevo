@@ -2,6 +2,9 @@
 
 mod update;
 
+#[cfg(feature = "viewer")]
+mod draw;
+
 pub use update::EcosystemUpdate;
 
 use std::collections::{BTreeMap, BTreeSet};

@@ -1,5 +1,8 @@
 //! Complete simulation state, independent of the experiment's internal ownership.
 
+#[cfg(feature = "viewer")]
+mod draw;
+
 use anyhow::{Result, ensure};
 
 use crate::{

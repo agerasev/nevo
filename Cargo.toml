@@ -24,3 +24,7 @@ wgame-egui = { path = "wgame/wgame-egui", optional = true }
 rand = { version = "0.10.2", default-features = false, features = ["std", "sys_rng"] }
 rand_xoshiro = { version = "0.8.1", features = ["serde"] }
 glam = { version = "0.33.7", features = ["rand", "serde"] }
+
+[dev-dependencies]
+futures = { version = "0.3.34", features = ["executor"] }
+wgpu = { version = "30.0.1", default-features = false }

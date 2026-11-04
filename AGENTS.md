@@ -35,6 +35,9 @@
 - Keep simulation stepping independent of rendering. Check reproducibility and
   behavioral invariants when changing simulation rules; use checks proportional
   to the change. Documentation-only changes need content/link/whitespace checks.
+- Use wgame as the sole drawing backend through the optional `viewer::Draw`
+  contract. Each object supplies one default drawing; keep ecosystem presentation
+  separate from generic window controls.
 - Commit each completed editing milestone after its relevant checks pass.
 - `wgame/` is a separate Git submodule with its own [instructions](wgame/AGENTS.md).
   Follow those when working there; keep NEvo-specific knowledge in this repository.

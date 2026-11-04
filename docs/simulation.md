@@ -74,7 +74,7 @@ for the child. Immutable experiment parameters are borrowed during preparation.
 Updates are transient; the serialized Universe layout is unchanged.
 
 Cloning a Run still creates an independent simulation; cloning its view attaches a
-reader. Snapshot copies for rendering and persistence remain independent of stepping.
+reader. Persistence copies complete state; viewing collects drawing instances.
 Reconstructible caches may be omitted from serialization; recurrent memory and RNG
 positions are required state.
 
@@ -104,9 +104,11 @@ its acknowledgement follows publication. Pause/resume reset pacing. Limits,
 predicates, stop commands, or dropped senders finish the loop. Errors return the
 last published state and mark the loop failed. A fresh channel can resume a Run.
 
-The viewer clones a complete Universe under its read lock and renders animal bodies
-and plants. Toolbar and arena show the same step. Closing the window stops and joins
-the worker. `--smoke` compares twelve displayed Universe snapshots, including minds
-and RNGs, with a reference run and checks pause/step commands.
-[Viewer](../src/app/viewer/mod.rs) · [Locking and failure checks](../src/run/tests.rs) ·
+The viewer collects geometry and labels through `Draw` under a read lock, then
+releases it before UI layout and rendering. Toolbar labels and arena describe the
+same state; normal viewing never clones the Universe or its minds. Closing the
+application window stops and joins the worker. `--smoke` compares the complete
+state used for twelve displayed scenes, including minds and RNGs, with a reference
+run and checks pause/step commands.
+[Viewer contract](viewer.md) · [Locking and failure checks](../src/run/tests.rs) ·
 [Continuation checks](../tests/simulation_runs.rs) · [Persistence](persistence.md)

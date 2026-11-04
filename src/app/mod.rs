@@ -2,7 +2,10 @@ mod config;
 mod persistence;
 
 #[cfg(feature = "viewer")]
-mod viewer;
+mod smoke;
+
+#[cfg(feature = "viewer")]
+use nevo::viewer::{self, Draw, Label};
 
 use std::{
     process::ExitCode,
@@ -101,7 +104,7 @@ fn attach_viewer(
     control: Control,
     scenario: Scenario,
     seed: u64,
-    smoke: Option<viewer::smoke::SmokeCheck>,
+    smoke: Option<smoke::SmokeCheck>,
     exit_requested: Arc<AtomicBool>,
 ) -> Result<(), String> {
     use std::sync::{Arc, Mutex};
@@ -116,16 +119,40 @@ fn attach_viewer(
             .vsync(true);
         let viewed = wgame::app_with_single_window(
             async move |window| {
-                viewer::show(
-                    window,
-                    world.clone(),
-                    control.clone(),
-                    scenario,
-                    seed,
-                    smoke.clone(),
-                    exit_requested.clone(),
-                )
-                .await
+                let options = viewer::Options {
+                    labels: vec![
+                        Label::new(format!("{scenario:?}")),
+                        Label::new(format!("Seed {seed}")),
+                    ],
+                    exit_requested: exit_requested.clone(),
+                    interactive: smoke.is_none(),
+                    ..Default::default()
+                };
+                if let Some(mut check) = smoke.clone() {
+                    let mut frame = 0;
+                    let presented =
+                        viewer::show_with(window, control.clone(), options, |drawing| {
+                            check.command(frame, &control)?;
+                            let snapshot = world.read();
+                            snapshot.draw(drawing);
+                            check.verify(frame, &snapshot, &control)?;
+                            frame += 1;
+                            Ok(if frame == 12 {
+                                std::ops::ControlFlow::Break(())
+                            } else {
+                                std::ops::ControlFlow::Continue(())
+                            })
+                        })
+                        .await?;
+                    ensure!(
+                        presented == 12,
+                        "viewer closed before the smoke check finished"
+                    );
+                    println!("Verified 12 displayed snapshots and pause/step commands.");
+                    Ok(())
+                } else {
+                    viewer::show(window, world.clone(), control.clone(), options).await
+                }
             },
             config,
         )
@@ -195,9 +222,7 @@ fn execute(mut options: Options) -> Result<()> {
     #[cfg(feature = "viewer")]
     let world = run.universe().clone();
     #[cfg(feature = "viewer")]
-    let smoke = options
-        .smoke
-        .then(|| viewer::smoke::SmokeCheck::new(run.clone()));
+    let smoke = options.smoke.then(|| smoke::SmokeCheck::new(run.clone()));
     let worker_options = options.clone();
     let worker_exit = Arc::clone(&exit_requested);
     let thread = thread::spawn(move || {

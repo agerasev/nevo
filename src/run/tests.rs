@@ -159,7 +159,7 @@ fn preparation_holds_read_lock_and_callback_runs_after_atomic_publication() {
 fn discarding_an_update_preserves_state_and_randomness() {
     let mut state = universe();
     let before = encoded(&state);
-    drop(state.prepare_step().unwrap());
+    let _ = state.prepare_step().unwrap();
     assert_eq!(encoded(&state), before);
 
     let mut expected_rng = state.world.rng.clone();
