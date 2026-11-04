@@ -72,7 +72,7 @@ Multi-file modules use `mod.rs` inside their directory.
 | [context](src/context/mod.rs) | Execution context contract and CPU implementation. |
 | [environment](src/environment/mod.rs) | Physical state, observations/actions, and ecosystem lifecycle rules. |
 | [universe](src/universe/mod.rs) | Complete serializable state, component orchestration, and experiment intervention policy. |
-| [run](src/run/mod.rs) | Shared read/prepare/write loop, controls, and legacy checkpoint import. |
+| [run](src/run/mod.rs) | Shared read/prepare/write loop and controls. |
 | [app](src/app/mod.rs) | CLI configuration, run storage, and optional viewer. |
 
 `main.rs` only enters the application; `lib.rs` exposes the library modules.

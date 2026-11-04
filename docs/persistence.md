@@ -64,12 +64,10 @@ Reconstructible caches may be omitted from serialization; recurrent memory and R
 positions are required state. Generic actor and environment contracts have no
 persistence bounds.
 
-New files use checkpoint version 2 with the unchanged `foraging-sense-first-v1`
-and `herbivore-rnn-3-4-3-v1` model identifiers. Version 1 files are
-[imported](../src/run/checkpoint/mod.rs) automatically and subsequent saves use
-version 2. The old founder-only template is validated then discarded: its genomes
-already exist, and retaining it as an immigrant template would change future runs.
-Rust module/type names are not part of the format.
+The current format is checkpoint version 2, with `foraging-sense-first-v1` and
+`herbivore-rnn-3-4-3-v1` model identifiers. Only this format is accepted;
+compatibility and migrations are intentionally unsupported. Rust module/type names
+are not part of the format.
 
 Only the simulation owner saves, between complete ticks. Snapshot copying holds
 the Universe's read lock briefly; serialization and file I/O happen after releasing
@@ -82,11 +80,10 @@ The newest checkpoint is selected by tick. Schema/model versions and restored
 state invariants are checked before running or replacing configuration. Invalid or
 truncated checkpoints produce an error instead of silently restarting. To recover
 an older retained checkpoint, move newer checkpoint files out of `checkpoints/`
-while the run is stopped. The format has no checksum; only the explicit version 1
-import is supported.
+while the run is stopped. The format has no checksum.
 Hard kills or power loss can lose progress since the last completed save; an
 exit checkpoint requires orderly shutdown.
 
-Exact replay targets the same build/platform. The [snapshot checks](../src/run/checkpoint/tests.rs)
+Exact replay targets the same build/platform. The [Universe checks](../src/universe/tests.rs)
 and [CLI checks](../tests/persistence_cli.rs) cover complete-state continuation
 and resume across separate processes.

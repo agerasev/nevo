@@ -138,3 +138,6 @@ where
         Ok(report)
     }
 }
+
+#[cfg(test)]
+mod tests;

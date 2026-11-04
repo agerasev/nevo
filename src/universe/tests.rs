@@ -4,6 +4,7 @@ use rand::SeedableRng;
 use crate::{
     actor::Actor,
     environment::ecosystem::{Admission, Event, Scenario},
+    mind::rnn::RnnGenome,
     run::Run,
 };
 
@@ -169,94 +170,4 @@ fn zero_rngs_and_wrong_weight_dimensions_are_rejected() {
             .to_string()
             .contains("expected 47 weights")
     );
-}
-
-// Build the previous wire layout, independently of the importer, to exercise all
-// migrated fields and model guards without committing a large generated fixture.
-fn legacy_value(universe: &Universe) -> Value {
-    let mut state = Value::serialized(universe).unwrap();
-    let mut world = field(&mut state, &["environment"]).clone();
-    world.as_map_mut().unwrap().extend([
-        (Value::from("number"), Value::from(universe.step())),
-        (
-            Value::from("next_animal"),
-            Value::from(universe.handles().next_serial()),
-        ),
-        (
-            Value::from("immigrant_floor"),
-            field(&mut state, &["policy", "minimum_population"]).clone(),
-        ),
-    ]);
-    let live = field(&mut state, &["actor", "live"])
-        .as_map()
-        .unwrap()
-        .iter()
-        .map(|(key, actor)| {
-            let mut actor = actor.clone();
-            (key.clone(), field(&mut actor, &["mind"]).clone())
-        })
-        .collect();
-    let population = Value::Map(vec![
-        (Value::from("live"), Value::Map(live)),
-        (Value::from("cx"), field(&mut state, &["context"]).clone()),
-        (
-            Value::from("founder_genome"),
-            field(&mut state, &["actor", "factory", "immigrant_genome"]).clone(),
-        ),
-    ]);
-    Value::Map(vec![
-        (Value::from("format_version"), Value::from(1)),
-        (Value::from("world_model"), Value::from(WORLD_MODEL)),
-        (Value::from("agent_model"), Value::from(AGENT_MODEL)),
-        (Value::from("world"), world),
-        (Value::from("population"), population),
-    ])
-}
-
-#[test]
-fn original_snapshot_layout_imports_without_changing_continuation() {
-    let mut reference = Run::new(Scenario::Baseline, 42).unwrap();
-    for _ in 0..73 {
-        reference.tick().unwrap();
-    }
-    let legacy: LegacySnapshot = legacy_value(&reference.universe().read())
-        .deserialized()
-        .unwrap();
-    let mut imported = legacy.into_universe().unwrap().restore().unwrap();
-    assert_eq!(imported, reference);
-    for _ in 0..64 {
-        assert_eq!(reference.tick().unwrap(), imported.tick().unwrap());
-    }
-    assert_eq!(imported, reference);
-}
-
-#[test]
-fn original_snapshot_version_and_model_guards_remain_enforced() {
-    let universe = Universe::new(Scenario::Debug, 1).unwrap();
-    for (name, replacement) in [
-        ("format_version", Value::from(2)),
-        ("world_model", Value::from("other-world")),
-        ("agent_model", Value::from("other-agent")),
-    ] {
-        let mut value = legacy_value(&universe);
-        *field(&mut value, &[name]) = replacement;
-        let invalid: LegacySnapshot = value.deserialized().unwrap();
-        assert!(invalid.into_universe().is_err(), "accepted invalid {name}");
-    }
-}
-
-#[test]
-fn old_founder_template_does_not_become_an_immigration_template() {
-    let universe = Universe::new(Scenario::Baseline, 1).unwrap();
-    let mut value = legacy_value(&universe);
-    *field(&mut value, &["population", "founder_genome"]) =
-        Value::serialized(&RnnGenome::default()).unwrap();
-    let imported: LegacySnapshot = value.deserialized().unwrap();
-    assert_eq!(imported.into_universe().unwrap(), universe);
-
-    let mut invalid = RnnGenome::default();
-    invalid.weights[0] = f32::NAN;
-    *field(&mut value, &["population", "founder_genome"]) = Value::serialized(&invalid).unwrap();
-    let imported: LegacySnapshot = value.deserialized().unwrap();
-    assert!(imported.into_universe().is_err());
 }

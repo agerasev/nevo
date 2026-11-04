@@ -50,20 +50,10 @@ impl HandleAllocator {
     pub fn validate_handle(&self, handle: Handle) -> Result<()> {
         self.validate()?;
         ensure!(
-            handle.0 != 0 && handle.0 < self.next_serial(),
+            handle.0 != 0 && handle.0 < self.next,
             "handle {handle:?} was not allocated"
         );
         Ok(())
-    }
-
-    pub(crate) fn from_next(next: u64) -> Result<Self> {
-        let allocator = Self { next };
-        allocator.validate()?;
-        Ok(allocator)
-    }
-
-    pub(crate) fn next_serial(&self) -> u64 {
-        self.next
     }
 }
 
@@ -96,9 +86,9 @@ mod tests {
 
     #[test]
     fn invalid_or_exhausted_allocator_returns_errors_without_wrapping() {
-        assert!(HandleAllocator::from_next(0).is_err());
-        let mut allocator = HandleAllocator::from_next(u64::MAX).unwrap();
+        assert!(HandleAllocator { next: 0 }.validate().is_err());
+        let mut allocator = HandleAllocator { next: u64::MAX };
         assert!(allocator.allocate().is_err());
-        assert_eq!(allocator.next_serial(), u64::MAX);
+        assert_eq!(allocator.next, u64::MAX);
     }
 }

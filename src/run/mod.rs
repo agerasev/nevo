@@ -1,7 +1,5 @@
 //! Simulation stepping and execution controls.
 
-pub mod checkpoint;
-
 use std::{
     fmt,
     sync::{Arc, Mutex, RwLock, RwLockReadGuard, mpsc},

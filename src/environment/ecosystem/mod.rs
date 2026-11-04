@@ -233,22 +233,6 @@ impl Ecosystem {
         &self.plants
     }
 
-    pub(crate) fn from_parts(
-        rng: Xoshiro256PlusPlus,
-        next_plant: u64,
-        animals: BTreeMap<Handle, Animal>,
-        plants: Vec<Plant>,
-        plant_target: usize,
-    ) -> Self {
-        Self {
-            rng,
-            next_plant,
-            animals,
-            plants,
-            plant_target,
-        }
-    }
-
     fn lifecycle(&self, changes: Vec<Lifecycle<Origin>>) -> Observation {
         PopulationObservation::Lifecycle {
             members: self.animals.keys().copied().collect(),

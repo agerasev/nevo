@@ -8,18 +8,14 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
-use nevo::{
-    run::{
-        Run,
-        checkpoint::{AGENT_MODEL, LegacySnapshot, WORLD_MODEL, validate_models},
-    },
-    universe::Universe,
-};
+use nevo::{run::Run, universe::Universe};
 use serde::{Deserialize, Serialize};
 
 use super::{Counts, config::Options};
 
 const FORMAT_VERSION: u32 = 2;
+const WORLD_MODEL: &str = "foraging-sense-first-v1";
+const AGENT_MODEL: &str = "herbivore-rnn-3-4-3-v1";
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,46 +28,24 @@ pub struct Checkpoint {
     pub state: Universe,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LegacyCheckpoint {
-    format_version: u32,
-    config: Options,
-    counts: Counts,
-    state: LegacySnapshot,
-}
-
 impl Checkpoint {
-    fn decode(value: ciborium::Value) -> Result<Self> {
-        let version = value
-            .as_map()
-            .and_then(|fields| {
-                fields
-                    .iter()
-                    .find(|(key, _)| key.as_text() == Some("format_version"))
-            })
-            .and_then(|(_, value)| value.as_integer())
-            .map(i128::from)
-            .context("checkpoint has no integer format version")?;
-        let checkpoint: Self = match version {
-            1 => {
-                let legacy: LegacyCheckpoint = value.deserialized()?;
-                ensure!(legacy.format_version == 1, "unsupported checkpoint version");
-                Self {
-                    format_version: FORMAT_VERSION,
-                    world_model: WORLD_MODEL.into(),
-                    agent_model: AGENT_MODEL.into(),
-                    config: legacy.config,
-                    counts: legacy.counts,
-                    state: legacy.state.into_universe()?,
-                }
-            }
-            2 => value.deserialized()?,
-            _ => bail!("unsupported checkpoint version {version}"),
-        };
-        validate_models(&checkpoint.world_model, &checkpoint.agent_model)?;
-        checkpoint.state.validate_checkpoint()?;
-        Ok(checkpoint)
+    fn validate(&self) -> Result<()> {
+        ensure!(
+            self.format_version == FORMAT_VERSION,
+            "unsupported checkpoint version {} (expected {FORMAT_VERSION})",
+            self.format_version
+        );
+        ensure!(
+            self.world_model == WORLD_MODEL,
+            "unsupported world model {}",
+            self.world_model
+        );
+        ensure!(
+            self.agent_model == AGENT_MODEL,
+            "unsupported agent model {}",
+            self.agent_model
+        );
+        self.state.validate_checkpoint()
     }
 }
 
@@ -153,14 +127,18 @@ impl RunDirectory {
             return Ok(None);
         };
         let mut reader = BufReader::new(File::open(&path)?);
-        let value: ciborium::Value = ciborium::from_reader(&mut reader)
-            .with_context(|| format!("reading checkpoint {}", path.display()))?;
+        let checkpoint: Checkpoint = ciborium::from_reader(&mut reader).with_context(|| {
+            format!(
+                "reading checkpoint {} (only format {FORMAT_VERSION} is supported)",
+                path.display()
+            )
+        })?;
         ensure!(
             reader.read(&mut [0])? == 0,
             "trailing data in checkpoint {}",
             path.display()
         );
-        let checkpoint = Checkpoint::decode(value)?;
+        checkpoint.validate()?;
         ensure!(
             checkpoint.state.step() == tick,
             "checkpoint filename/tick mismatch"
@@ -285,6 +263,7 @@ mod tests {
             state: Universe::new(Scenario::Debug, 1).unwrap(),
         };
         for (name, invalid) in [
+            ("format_version", ciborium::Value::from(1)),
             ("format_version", ciborium::Value::from(99)),
             ("world_model", ciborium::Value::from("another-world")),
             ("agent_model", ciborium::Value::from("another-agent")),
@@ -297,10 +276,8 @@ mod tests {
                 .find(|(key, _)| key.as_text() == Some(name))
                 .unwrap()
                 .1 = invalid;
-            assert!(
-                Checkpoint::decode(value).is_err(),
-                "accepted invalid {name}"
-            );
+            let invalid: Checkpoint = value.deserialized().unwrap();
+            assert!(invalid.validate().is_err(), "accepted invalid {name}");
         }
     }
 

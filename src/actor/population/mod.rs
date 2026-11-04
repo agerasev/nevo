@@ -69,14 +69,6 @@ impl<A, F> Population<A, F> {
         self.live.keys().copied()
     }
 
-    pub(crate) fn from_parts(live: BTreeMap<Handle, A>, factory: F) -> Self {
-        Self {
-            live,
-            factory,
-            pending: None,
-        }
-    }
-
     fn check_members(&self, members: Vec<Handle>) -> Result<()> {
         let count = members.len();
         let members: BTreeSet<_> = members.into_iter().collect();
