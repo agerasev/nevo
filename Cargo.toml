@@ -11,7 +11,6 @@ viewer = ["dep:wgame", "dep:wgame-egui"]
 [[bin]]
 name = "nevo"
 path = "src/main.rs"
-required-features = ["viewer"]
 
 [dependencies]
 anyhow = "1.0.104"

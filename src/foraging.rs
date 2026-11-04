@@ -4,7 +4,7 @@ use glam::DVec2;
 use rand::{RngExt, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 
-use crate::{AgentId, Environment, Population};
+use crate::{AgentId, AgentResponse, Environment, Population};
 
 pub const HALF_SIZE: DVec2 = DVec2::new(630.0, 350.0);
 const RIPE_ENERGY: f64 = 400.0;
@@ -107,8 +107,10 @@ pub struct Decision {
     pub id: AgentId,
     pub observation: FoodObservation,
     pub action: MoveAction,
+    /// Energy when sensed, before feeding, splitting, and upkeep.
     pub energy: f64,
     pub position_before: DVec2,
+    /// Movement endpoint, before birth offsets and clamping after growth.
     pub position_after: DVec2,
 }
 
@@ -294,7 +296,7 @@ impl ForagingWorld {
         }
     }
 
-    fn observe(&self, position: DVec2) -> FoodObservation {
+    fn sense(&self, position: DVec2) -> FoodObservation {
         let mut field = FoodObservation::default();
         for plant in &self.plants {
             let displacement = (plant.position - position) * (0.5 / HALF_SIZE.y);
@@ -317,26 +319,33 @@ impl ForagingWorld {
 }
 
 impl<P: Population<FoodObservation, MoveAction, Origin>> Environment<P> for ForagingWorld {
+    type Observation = FoodObservation;
+    type Action = MoveAction;
+    type Origin = Origin;
     type Report = TickReport;
 
-    fn tick(&mut self, population: &mut P) -> TickReport {
+    fn observe(&self) -> Vec<(AgentId, FoodObservation)> {
+        self.animals
+            .iter()
+            .filter(|(_, body)| body.energy >= 0.0)
+            .map(|(&id, body)| (id, self.sense(body.position)))
+            .collect()
+    }
+
+    fn update(
+        &mut self,
+        population: &mut P,
+        responses: Vec<AgentResponse<FoodObservation, MoveAction>>,
+    ) -> TickReport {
         self.number += 1;
-        let mut events = Vec::new();
-        self.feed_and_cull(population, &mut events);
-        self.replenish(population, &mut events);
-        self.reproduce(population, &mut events);
-
-        for body in self.animals.values_mut() {
-            body.energy -= UPKEEP;
-        }
-        for plant in &mut self.plants {
-            plant.energy = (plant.energy + 1.0).min(RIPE_ENERGY);
-        }
-
-        let mut decisions = Vec::with_capacity(self.animals.len());
-        for (&id, body) in &self.animals {
-            let observation = self.observe(body.position);
-            let action = population.act(id, &observation);
+        let mut decisions = Vec::with_capacity(responses.len());
+        for AgentResponse {
+            id,
+            observation,
+            action,
+        } in responses
+        {
+            let body = self.animals.get_mut(&id).expect("response requires a body");
             let position = clamp_position(body.position + action.displacement(), body.radius());
             decisions.push(Decision {
                 id,
@@ -346,12 +355,23 @@ impl<P: Population<FoodObservation, MoveAction, Origin>> Environment<P> for Fora
                 position_before: body.position,
                 position_after: position,
             });
+            body.position = position;
         }
-        // Every controller above saw the same pre-movement state.
-        for decision in &decisions {
-            self.animals.get_mut(&decision.id).unwrap().position = decision.position_after;
+
+        // Every decision uses the same pre-update state. Contacts use the resulting
+        // positions; children and immigrants first observe on the following tick.
+        let mut events = Vec::new();
+        self.feed_and_cull(population, &mut events);
+        self.replenish(population, &mut events);
+        self.reproduce(population, &mut events);
+
+        for body in self.animals.values_mut() {
+            body.energy -= UPKEEP;
+            // Feeding can enlarge a body and reproduction can offset it past an edge.
+            body.position = clamp_position(body.position, body.radius());
         }
         for plant in &mut self.plants {
+            plant.energy = (plant.energy + 1.0).min(RIPE_ENERGY);
             plant.position = clamp_position(plant.position, plant.radius());
         }
         TickReport {

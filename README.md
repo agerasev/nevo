@@ -6,13 +6,15 @@ and recorded experiments, with no final endpoint for the research program.
 
 ## Current implementation
 
-The Rust baseline runs the July 26 foraging rules with a 3–4–3 recurrent
-herbivore controller. The desktop viewer and headless runs share the same fixed tick.
+The Rust baseline uses the July 26 foraging experiment with a 3–4–3 recurrent
+herbivore agent. One configurable loop runs every experiment; an optional desktop
+viewer reads the shared world. Sensing now precedes movement, feeding, and births.
 A fresh checkout needs `git submodule update --init` for the Cargo path dependency.
 
 ```sh
-cargo run --locked --bin nevo -- --scenario baseline --seed 1
-cargo run --locked --bin nevo -- --scenario debug --seed 1 --paused
+cargo run --locked --bin nevo -- --viewer --scenario baseline --seed 1
+cargo run --locked --bin nevo -- --viewer --scenario debug --seed 1 --paused
+cargo run --locked --bin nevo -- --scenario baseline --seed 1 --ticks 256 --hz 0
 ```
 
 Use **Pause / Resume** to control playback and **Single step** to advance one tick
@@ -20,29 +22,24 @@ and pause. With the arena focused, Space toggles playback and Right Arrow steps.
 The toolbar shows the seed, scenario, tick, and population counts for the displayed
 world. Green circles are plants and yellow circles are herbivores.
 
-For headless runs:
+All commands accept `--ticks`, `--seconds`, and `--hz` (default 25; zero removes
+pacing). Omit limits to run until interrupted. A trial simply uses an initial
+configuration and a limit. Use `--focal 1` to trace a founder and stop on its death.
+`--seconds` counts wall time, including pauses; tick limits give reproducible
+budgets. The `debug` layout exercises a meal and a birth on tick one. The
+`baseline` starts 20 herbivores among 500 mature plants.
+See the [tick and runner contracts](docs/foraging.md).
 
-```sh
-cargo run --locked --no-default-features --bin forage -- trial --scenario debug --seed 1 --ticks 1
-cargo run --locked --no-default-features --bin forage -- check --scenario debug --seed 1 --ticks 128
-cargo run --locked --no-default-features --bin forage -- continuous --scenario baseline --seed 1 --ticks 256
-```
-
-Omit `--ticks` in continuous mode to run until interrupted. Use `trial --focal 1`
-to trace a founder and stop on its death or the tick budget. The `debug` layout
-exercises a meal and a birth on tick one. The `baseline` starts 20 herbivores
-among 500 mature plants. See the [tick and runner contracts](docs/foraging.md).
-
-The headless commands build with graphics disabled. To verify the viewer on a
-desktop, add `--smoke` to either viewer command. It presents twelve frames with a
-scripted sequence of controls and checks the run against headless at each tick.
+Build with `--no-default-features` when graphics are unnecessary; the executable
+and runner stay the same. Add `--smoke` to a viewer command to verify twelve
+displayed snapshots and pause/step controls against a seeded reference run.
 
 ## Agreed direction
 
-Decisions from 2026-11-03:
+Decisions through 2026-11-04:
 
-- Support controlled, resettable trials for debugging and evaluation first, then
-  long-running continuous ecology, sharing the simulation machinery.
+- Use one configurable loop for resettable trials and unlimited experiments;
+  the optional viewer reads snapshots independently of simulation stepping.
 - Make agents (genomes, brains, control mappings) and environments (worlds, bodies,
   physical rules) generic and replaceable through compatible contracts/adapters.
 - Use the [July 26 foraging experiment](experiments/2016-07-26-herbivore-foraging/README.md)

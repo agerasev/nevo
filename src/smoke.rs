@@ -1,69 +1,66 @@
-use std::time::Duration;
+use nevo::{
+    foraging::{ForagingWorld, Scenario},
+    run::{Command, Control, Run},
+};
 
-use nevo::{foraging::Scenario, run::Run};
-
-use crate::playback::{Command, Playback};
-
-/// Fixed input and elapsed times for the bounded window smoke check.
+/// Exercise the command channel while checking the snapshots actually presented.
 pub struct SmokeCheck {
-    headless: Run,
-    initially_paused: bool,
+    reference: Run,
+    previous_tick: u64,
 }
 
 impl SmokeCheck {
-    pub fn new(scenario: Scenario, seed: u64, paused: bool) -> Self {
+    pub fn new(scenario: Scenario, seed: u64) -> Self {
         Self {
-            headless: Run::new(scenario, seed),
-            initially_paused: paused,
+            reference: Run::new(scenario, seed),
+            previous_tick: 0,
         }
     }
 
-    /// (elapsed milliseconds, input, expected displayed tick, expected pause state)
-    fn stage(&self, frame: u32) -> (u64, Option<Command>, u64, bool) {
-        use Command::{Step, TogglePause};
-        match frame {
-            0 => (0, None, 0, self.initially_paused),
-            1 => (0, self.initially_paused.then_some(TogglePause), 0, false),
-            2 => (120, None, 3, false),
-            3 => (80, Some(TogglePause), 3, true),
-            4 => (60_000, None, 3, true),
-            5 => (60_000, Some(Step), 4, true),
-            6 => (0, Some(Step), 5, true),
-            7 => (60_000, Some(TogglePause), 5, false),
-            8 => (40, None, 6, false),
-            9 => (80, None, 8, false),
-            10 => (40, Some(Step), 9, true),
-            11 => (60_000, None, 9, true),
-            _ => unreachable!("smoke check has twelve frames"),
+    pub fn command(&self, frame: u32, control: &Control) -> wgame::Result<()> {
+        let command = match frame {
+            0 | 7 => Some(Command::Pause),
+            1 | 3 | 9 | 10 => Some(Command::Step),
+            4 => Some(Command::Resume),
+            _ => None,
+        };
+        if let Some(command) = command {
+            control.request(command).map_err(wgame::Error::msg)?;
         }
+        Ok(())
     }
 
-    pub fn frame(&self, frame: u32) -> (Duration, Vec<Command>) {
-        let (millis, command, _, _) = self.stage(frame);
-        (Duration::from_millis(millis), command.into_iter().collect())
-    }
-
-    pub fn verify(&mut self, frame: u32, playback: &Playback) -> wgame::Result<()> {
-        let (_, _, tick, paused) = self.stage(frame);
-        if playback.run.world.number() != tick || playback.paused() != paused {
+    pub fn verify(
+        &mut self,
+        frame: u32,
+        snapshot: &ForagingWorld,
+        control: &Control,
+    ) -> wgame::Result<()> {
+        let tick = snapshot.number();
+        let expected = match frame {
+            0 => Some(0),
+            1 | 3 | 9 | 10 => Some(self.previous_tick + 1),
+            2 | 8 | 11 => Some(self.previous_tick),
+            _ => None,
+        };
+        let paused = !matches!(frame, 4..=6);
+        if expected.is_some_and(|expected| tick != expected) || control.status().paused != paused {
             return Err(wgame::Error::msg(format!(
-                "frame {frame}: expected tick {tick}, paused={paused}; got tick {}, paused={}",
-                playback.run.world.number(),
-                playback.paused()
+                "frame {frame}: expected tick {expected:?}, paused={paused}; got tick {tick}, paused={}",
+                control.status().paused
             )));
         }
-        while self.headless.world.number() < tick {
-            self.headless.tick();
+        while self.reference.world().read().number() < tick {
+            self.reference.tick();
         }
-        if playback.run != self.headless {
+        if *self.reference.world().read() != *snapshot {
             return Err(wgame::Error::msg(format!(
-                "frame {frame}: viewer differs from headless at tick {tick}"
+                "frame {frame}: snapshot differs from the seeded reference at tick {tick}"
             )));
         }
+        self.previous_tick = tick;
         if frame == 11 {
-            println!(
-                "Verified 12 presented frames against headless; final tick {tick}, paused={paused}."
-            );
+            println!("Verified 12 displayed snapshots and pause/step commands; final tick {tick}.");
         }
         Ok(())
     }

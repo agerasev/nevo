@@ -3,20 +3,19 @@ use std::{
     time::Duration,
 };
 
-use nevo::foraging::{ForagingWorld, HALF_SIZE, Scenario};
+use nevo::{
+    foraging::{ForagingWorld, HALF_SIZE, Scenario},
+    run::{Command, Control, WorldView},
+};
 use wgame::{
     ContentFrame, Library, Window, WindowHost,
-    app::time::Instant,
     canvas::{Event, Key},
     prelude::*,
     rgb::Rgb,
 };
 use wgame_egui::{EguiWindow, egui};
 
-use crate::{
-    playback::{Command, Playback},
-    smoke::SmokeCheck,
-};
+use crate::smoke::SmokeCheck;
 
 const PLANT: Rgb<f32> = Rgb::new(0.20, 0.74, 0.32);
 const HERBIVORE: Rgb<f32> = Rgb::new(1.0, 0.85, 0.25);
@@ -24,16 +23,18 @@ const HERBIVORE: Rgb<f32> = Rgb::new(1.0, 0.85, 0.25);
 #[derive(Clone, Copy)]
 struct Status {
     paused: bool,
+    stopped: bool,
     tick: u64,
     plants: usize,
     animals: usize,
 }
 
 impl Status {
-    fn read(playback: &Playback) -> Self {
-        let world = &playback.run.world;
+    fn read(world: &ForagingWorld, control: &Control) -> Self {
+        let status = control.status();
         Self {
-            paused: playback.paused(),
+            paused: status.paused,
+            stopped: status.stop.is_some(),
             tick: world.number(),
             plants: world.plants().len(),
             animals: world.animals().len(),
@@ -60,25 +61,40 @@ fn draw_world(frame: &mut impl ContentFrame, library: &Library, world: &Foraging
             .order(-1),
     );
     let circle = library.shapes().unit_circle();
+    // Stroke expansion must happen before translation, so it cannot move the center.
     for plant in world.plants() {
-        let shape = circle
-            .scale(plant.radius() as f32)
-            .move_to(plant.position.as_vec2());
-        scene.add(&shape.fill_color(PLANT).order(0));
+        let position = plant.position.as_vec2();
+        let radius = plant.radius() as f32;
         scene.add(
-            &shape
+            &circle
+                .fill_color(PLANT)
+                .scale(radius)
+                .move_to(position)
+                .order(0),
+        );
+        scene.add(
+            &circle
                 .stroke_color(0.10, Rgb::new(0.08, 0.35, 0.15))
+                .scale(radius)
+                .move_to(position)
                 .order(1),
         );
     }
     for body in world.animals().values() {
-        let shape = circle
-            .scale(body.radius() as f32)
-            .move_to(body.position.as_vec2());
-        scene.add(&shape.fill_color(HERBIVORE).order(2));
+        let position = body.position.as_vec2();
+        let radius = body.radius() as f32;
         scene.add(
-            &shape
+            &circle
+                .fill_color(HERBIVORE)
+                .scale(radius)
+                .move_to(position)
+                .order(2),
+        );
+        scene.add(
+            &circle
                 .stroke_color(0.14, Rgb::new(0.48, 0.35, 0.08))
+                .scale(radius)
+                .move_to(position)
                 .order(3),
         );
     }
@@ -87,14 +103,15 @@ fn draw_world(frame: &mut impl ContentFrame, library: &Library, world: &Foraging
 
 pub async fn show(
     window: Window<'_>,
+    world: WorldView<ForagingWorld>,
+    control: Control,
     scenario: Scenario,
     seed: u64,
-    paused: bool,
     smoke: bool,
 ) -> wgame::Result<()> {
-    let mut playback = Playback::new(scenario, seed, paused);
-    let mut check = smoke.then(|| SmokeCheck::new(scenario, seed, paused));
-    let status = Cell::new(Status::read(&playback));
+    let mut check = smoke.then(|| SmokeCheck::new(scenario, seed));
+    let initial_snapshot = world.read().clone();
+    let status = Cell::new(Status::read(&initial_snapshot, &control));
     let pending: RefCell<Vec<Command>> = RefCell::default();
     // egui can retry a layout; latch one command for a click across its passes.
     let click = |command| {
@@ -124,14 +141,17 @@ pub async fn show(
                 ui.strong("NEvo · Foraging");
                 ui.separator();
                 if ui
-                    .button(if status.paused { "Resume" } else { "Pause" })
+                    .add_enabled(
+                        !status.stopped,
+                        egui::Button::new(if status.paused { "Resume" } else { "Pause" }),
+                    )
                     .on_hover_text("Space when the arena has focus")
                     .clicked()
                 {
                     click(Command::TogglePause);
                 }
                 if ui
-                    .button("Single step")
+                    .add_enabled(!status.stopped, egui::Button::new("Single step"))
                     .on_hover_text("Pause and advance one tick (Right Arrow in the arena)")
                     .clicked()
                 {
@@ -143,6 +163,9 @@ pub async fn show(
             });
             ui.horizontal_wrapped(|ui| {
                 ui.monospace(format!("Tick {}", status.tick));
+                if status.stopped {
+                    ui.label("Stopped");
+                }
                 ui.separator();
                 ui.colored_label(
                     egui::Color32::from_rgb(85, 205, 112),
@@ -160,34 +183,25 @@ pub async fn show(
             .inner
     });
     let library = Library::new(host.graphics());
-    let mut last_update = Instant::now();
     let mut initial = true;
     let mut smoke_frame = 0;
     loop {
-        if !initial && check.is_none() && pending.borrow().is_empty() {
-            let timeout = playback
-                .wait_duration()
-                .map(|until_tick| until_tick.saturating_sub(last_update.elapsed()));
-            host.wait_for_update(timeout).await;
+        if !initial && pending.borrow().is_empty() {
+            host.wait_for_update(Some(Duration::from_millis(16))).await;
         }
-        let now = Instant::now();
-        let (elapsed, commands) = match &mut check {
-            Some(check) => check.frame(smoke_frame),
-            None => (
-                if initial {
-                    Duration::ZERO
-                } else {
-                    now - last_update
-                },
-                pending.take(),
-            ),
-        };
         initial = false;
-        last_update = now;
-        playback.advance(elapsed, &commands);
+        if let Some(check) = &mut check {
+            check.command(smoke_frame, &control)?;
+        } else {
+            for command in pending.take() {
+                // A completed experiment remains visible until the window closes.
+                let _ = control.send(command);
+            }
+        }
 
-        // Layout snapshots the advanced tick before the arena draws that same state.
-        status.set(Status::read(&playback));
+        // The lock covers the copy only. Layout and GPU work use one immutable tick.
+        let snapshot = world.read().clone();
+        status.set(Status::read(&snapshot, &control));
         let Some(mut frame) = host.next_frame().await? else {
             if smoke {
                 return Err(wgame::Error::msg(
@@ -196,7 +210,7 @@ pub async fn show(
             }
             return Ok(());
         };
-        if check.is_none() {
+        if check.is_none() && control.status().stop.is_none() {
             for event in &frame.input().events {
                 if let Event::Key {
                     key,
@@ -212,10 +226,10 @@ pub async fn show(
                 }
             }
         }
-        draw_world(&mut frame, &library, &playback.run.world);
+        draw_world(&mut frame, &library, &snapshot);
         frame.present();
         if let Some(check) = &mut check {
-            check.verify(smoke_frame, &playback)?;
+            check.verify(smoke_frame, &snapshot, &control)?;
             smoke_frame += 1;
             if smoke_frame == 12 {
                 return Ok(());

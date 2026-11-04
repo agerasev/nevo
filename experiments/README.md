@@ -11,6 +11,8 @@ experiment. It may contain several runs, seeds, and comparisons.
   seeded state after presenting frames, pausing, resuming, and single-stepping.
 - [Draft trait reuse](2026-11-04-draft-traits/README.md) compares seeded trajectories
   before and after restoring the agent and genome contracts.
+- [One loop with an optional viewer](2026-11-04-unified-loop/README.md) checks
+  read–act–write locking, shared execution controls, and the new sensing-first order.
 
 Each experiment needs a short `README.md` recording:
 
