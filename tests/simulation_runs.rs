@@ -1,10 +1,49 @@
+#[allow(dead_code)]
+mod support;
+
 use std::time::Duration;
 
 use nevo::{
-    ecosystem::{Event, Scenario},
+    ecosystem::{Config, Event, Placement},
     run::{Control, LoopOptions, Run, StopReason},
     universe::Universe,
 };
+
+#[test]
+fn initialization_settings_control_independent_parts_of_the_world() {
+    let config = Config {
+        initial_animals: 2,
+        plants: 7,
+        minimum_population: 1,
+        initial_animal_energy: 90.0,
+        initial_animal_position: Placement::Fixed(glam::DVec2::new(10.0, 20.0)),
+        initial_plant_position: Placement::Fixed(glam::DVec2::new(-20.0, 12.0)),
+    };
+    let universe = Universe::new(config, 7).unwrap();
+    let world = universe.world();
+    assert_eq!(world.animals().len(), 2);
+    assert_eq!(world.plants().len(), 7);
+    assert_eq!(world.minimum_population(), 1);
+    for animal in world.animals().values() {
+        assert_eq!(animal.body.energy, 90.0);
+        assert_eq!(animal.body.position, glam::DVec2::new(10.0, 20.0));
+    }
+    for plant in world.plants() {
+        assert_eq!(plant.position, glam::DVec2::new(-20.0, 12.0));
+    }
+    // Placement validation applies even if the corresponding collection is empty.
+    assert!(
+        Universe::new(
+            Config {
+                initial_animals: 0,
+                initial_animal_position: Placement::Fixed(glam::DVec2::splat(f64::NAN)),
+                ..config
+            },
+            7
+        )
+        .is_err()
+    );
+}
 
 fn bounded(ticks: u64) -> LoopOptions {
     LoopOptions {
@@ -15,7 +54,7 @@ fn bounded(ticks: u64) -> LoopOptions {
 
 #[test]
 fn agents_sense_before_feeding_and_newborns_act_next_tick() {
-    let mut run = Run::new(Scenario::Debug, 1).unwrap();
+    let mut run = Run::new(support::ecosystem("debug"), 1).unwrap();
     let (parent, genome) = {
         let universe = run.universe().read();
         let parent = *universe.world().animals().keys().next().unwrap();
@@ -93,8 +132,8 @@ fn agents_sense_before_feeding_and_newborns_act_next_tick() {
 
 #[test]
 fn limits_and_stop_conditions_preserve_every_tick_and_continuation() {
-    for scenario in [Scenario::Debug, Scenario::Baseline] {
-        let mut limited = Run::new(scenario, 42).unwrap();
+    for config in [support::ecosystem("debug"), support::ecosystem("baseline")] {
+        let mut limited = Run::new(config, 42).unwrap();
         let mut reports = Vec::new();
         let (_control, commands) = Control::channel(false);
         assert_eq!(
@@ -107,7 +146,7 @@ fn limits_and_stop_conditions_preserve_every_tick_and_continuation() {
             StopReason::TickLimit,
         );
 
-        let mut conditional = Run::new(scenario, 42).unwrap();
+        let mut conditional = Run::new(config, 42).unwrap();
         let (_control, commands) = Control::channel(false);
         assert_eq!(
             conditional
@@ -134,7 +173,7 @@ fn limits_and_stop_conditions_preserve_every_tick_and_continuation() {
 
 #[test]
 fn a_condition_stop_can_resume_the_same_run() {
-    let mut resumed = Run::new(Scenario::Debug, 1).unwrap();
+    let mut resumed = Run::new(support::ecosystem("debug"), 1).unwrap();
     let mut uninterrupted = resumed.clone();
     let (_control, commands) = Control::channel(false);
     let stop = resumed
@@ -166,7 +205,7 @@ fn a_condition_stop_can_resume_the_same_run() {
 
 #[test]
 fn minimum_population_is_an_experiment_setting() {
-    let mut unsupported = Universe::new(Scenario::Debug, 1).unwrap();
+    let mut unsupported = Universe::new(support::ecosystem("debug"), 1).unwrap();
     let mut supported_world = unsupported.world().clone();
     supported_world.set_minimum_population(20);
     assert_eq!(unsupported.world().animals(), supported_world.animals());

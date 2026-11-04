@@ -1,10 +1,12 @@
 //! The foraging experiment: physical bodies and their minds share one lifetime.
 
+mod config;
 mod update;
 
 #[cfg(feature = "viewer")]
 mod draw;
 
+pub use config::{Config, Placement};
 pub use update::EcosystemUpdate;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -34,24 +36,6 @@ const MAX_SPEED: f64 = 100.0;
 const DT: f64 = 0.1;
 
 type GeneticContext = Cpu<Xoshiro256PlusPlus>;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Scenario {
-    Debug,
-    Baseline,
-}
-
-impl std::str::FromStr for Scenario {
-    type Err = String;
-    fn from_str(name: &str) -> std::result::Result<Self, Self::Err> {
-        match name {
-            "debug" => Ok(Self::Debug),
-            "baseline" => Ok(Self::Baseline),
-            _ => Err(format!("unknown scenario '{name}'")),
-        }
-    }
-}
 
 /// Stable identity for lineage, event reports, and references within the experiment.
 #[derive(
@@ -250,8 +234,8 @@ pub struct Ecosystem<M = AnimalMind, G = RnnGenome, P = WeightMutation> {
 }
 
 impl Ecosystem {
-    pub fn new(scenario: Scenario, seed: u64) -> Result<Self> {
-        Self::with_genetics(scenario, seed, None, WeightMutation::default())
+    pub fn new(config: Config, seed: u64) -> Result<Self> {
+        Self::with_genetics(config, seed, None, WeightMutation::default())
     }
 }
 
@@ -350,36 +334,25 @@ where
     P: Clone,
 {
     pub fn with_genetics(
-        scenario: Scenario,
+        config: Config,
         seed: u64,
         immigrant_genome: Option<G>,
         mutation: P,
     ) -> Result<Self> {
+        config.validate()?;
         let mut seeds = SplitMix64::seed_from_u64(seed);
         let world_seed = seeds.next_u64();
         let genetic_seed = seeds.next_u64();
-        let (arrivals, plants, minimum, admission) = match scenario {
-            Scenario::Debug => (
-                1,
-                1,
-                0,
-                Admission {
-                    position: Some(DVec2::ZERO),
-                    energy: 390.0,
-                },
-            ),
-            Scenario::Baseline => (20, 500, 20, Admission::default()),
-        };
         let mut world = Self::empty(
-            plants,
-            minimum,
+            config.plants,
+            config.minimum_population,
             world_seed,
             genetic_seed,
             immigrant_genome,
             mutation,
         );
-        world.admit(arrivals, admission)?;
-        world.seed_plants(admission.position)?;
+        world.admit(config.initial_animals, config.admission())?;
+        world.seed_plants(config.initial_plant_position.position())?;
         world.validate()?;
         Ok(world)
     }

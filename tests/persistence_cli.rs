@@ -1,3 +1,6 @@
+#[allow(dead_code)]
+mod support;
+
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -7,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nevo::{ecosystem::Scenario, run::Run, universe::Universe};
+use nevo::{run::Run, universe::Universe};
 use serde::Deserialize;
 
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
@@ -122,7 +125,7 @@ struct Checkpoint {
 
 fn read_checkpoint(path: &Path) -> Checkpoint {
     let checkpoint: Checkpoint = ciborium::from_reader(fs::File::open(path).unwrap()).unwrap();
-    assert_eq!(checkpoint.format_version, 4);
+    assert_eq!(checkpoint.format_version, 5);
     checkpoint
 }
 
@@ -191,8 +194,8 @@ fn exit_only_and_zero_tick_runs_are_resumable() {
     let directory = Directory::new();
     directory.success(&[
         "exit-only",
-        "--scenario",
-        "debug",
+        "--config",
+        &support::preset("debug"),
         "--seed",
         "1",
         "--ticks",
@@ -206,13 +209,21 @@ fn exit_only_and_zero_tick_runs_are_resumable() {
     assert_eq!(directory.checkpoints("exit-only").len(), 1);
     assert_eq!(directory.latest("exit-only").state.step(), 7);
 
-    directory.success(&["zero", "--scenario", "debug", "--seed", "7", "--ticks", "0"]);
+    directory.success(&[
+        "zero",
+        "--config",
+        &support::preset("debug"),
+        "--seed",
+        "7",
+        "--ticks",
+        "0",
+    ]);
     assert_eq!(
         directory.latest("zero").state.restore().unwrap(),
-        Run::new(Scenario::Debug, 7).unwrap()
+        Run::new(support::ecosystem("debug"), 7).unwrap()
     );
     directory.success(&["zero", "--ticks", "3"]);
-    let mut reference = Run::new(Scenario::Debug, 7).unwrap();
+    let mut reference = Run::new(support::ecosystem("debug"), 7).unwrap();
     for _ in 0..3 {
         reference.tick().unwrap();
     }
@@ -222,7 +233,7 @@ fn exit_only_and_zero_tick_runs_are_resumable() {
 #[test]
 fn default_directory_records_entropy_and_full_range_seeds() {
     let directory = Directory::new();
-    let output = directory.success(&["--scenario", "debug", "--ticks", "2"]);
+    let output = directory.success(&["--ticks", "2"]);
     let seed: u64 = output
         .split_whitespace()
         .find_map(|field| field.strip_prefix("seed="))
@@ -245,7 +256,7 @@ fn default_directory_records_entropy_and_full_range_seeds() {
     assert_eq!(directory.latest(run.to_str().unwrap()).state.step(), 4);
     directory.success(&["maximum", "--seed", "18446744073709551615", "--ticks", "0"]);
     directory.success(&["maximum", "--ticks", "1"]);
-    let mut reference = Run::new(Scenario::Baseline, u64::MAX).unwrap();
+    let mut reference = Run::new(support::ecosystem("baseline"), u64::MAX).unwrap();
     reference.tick().unwrap();
     assert_eq!(
         directory.latest("maximum").state.restore().unwrap(),
@@ -261,10 +272,14 @@ fn invalid_resume_never_overwrites_the_saved_run() {
     let config = fs::read(&config_path).unwrap();
     let checkpoint_path = directory.checkpoints("saved").pop().unwrap();
     let checkpoint = fs::read(&checkpoint_path).unwrap();
-    fs::write(directory.0.join("replacement.toml"), "ticks = 0\n").unwrap();
+    fs::write(
+        directory.0.join("replacement.toml"),
+        "seed = 999\nticks = 0\n",
+    )
+    .unwrap();
     for args in [
         vec!["saved", "--seed", "2"],
-        vec!["saved", "--scenario", "debug"],
+        vec!["saved", "--config", &support::preset("debug")],
         vec!["saved", "--config", "replacement.toml"],
         vec!["saved", "--keep-checkpoints", "0"],
     ] {
@@ -286,8 +301,8 @@ fn checkpoint_recovers_missing_config_and_ignores_an_interrupted_write() {
     let directory = Directory::new();
     directory.success(&[
         "recover",
-        "--scenario",
-        "debug",
+        "--config",
+        &support::preset("debug"),
         "--seed",
         "42",
         "--ticks",
@@ -303,7 +318,11 @@ fn checkpoint_recovers_missing_config_and_ignores_an_interrupted_write() {
         .0
         .join("recover/checkpoints/.00000000000000000009.cbor.tmp");
     fs::write(&partial, b"incomplete checkpoint").unwrap();
-    fs::write(directory.0.join("replacement.toml"), "ticks = 0\n").unwrap();
+    fs::write(
+        directory.0.join("replacement.toml"),
+        "seed = 999\nticks = 0\n",
+    )
+    .unwrap();
     let saved_path = directory.checkpoints("recover").pop().unwrap();
     let saved = fs::read(&saved_path).unwrap();
 
@@ -312,8 +331,9 @@ fn checkpoint_recovers_missing_config_and_ignores_an_interrupted_write() {
     assert!(!config_path.exists());
     assert_eq!(fs::read(&saved_path).unwrap(), saved);
 
-    directory.success(&["recover", "--ticks", "5"]);
-    let mut reference = Run::new(Scenario::Debug, 42).unwrap();
+    fs::write(directory.0.join("replacement.toml"), "ticks = 5\nhz = 0\n").unwrap();
+    directory.success(&["recover", "--config", "replacement.toml"]);
+    let mut reference = Run::new(support::ecosystem("debug"), 42).unwrap();
     for _ in 0..12 {
         reference.tick().unwrap();
     }
@@ -322,7 +342,7 @@ fn checkpoint_recovers_missing_config_and_ignores_an_interrupted_write() {
         reference
     );
     let config = directory.config("recover");
-    assert_eq!(config["scenario"].as_str(), Some("debug"));
+    assert_eq!(config["ecosystem"]["initial_animals"].as_integer(), Some(1));
     assert_eq!(config["seed"].as_str(), Some("42"));
     assert_eq!(config["ticks"].as_integer(), Some(5));
     assert_eq!(config["checkpoint_every"].as_integer(), Some(3));
@@ -384,7 +404,7 @@ fn a_live_run_rejects_another_writer_and_saves_on_ctrl_c() {
     assert!(String::from_utf8_lossy(&stopped.stdout).contains("stop=Requested"));
     let saved = directory.latest("live");
     assert!(saved.state.step() >= 1);
-    let mut reference = Run::new(Scenario::Baseline, 1).unwrap();
+    let mut reference = Run::new(support::ecosystem("baseline"), 1).unwrap();
     for _ in 0..saved.state.step() {
         reference.tick().unwrap();
     }

@@ -1,13 +1,13 @@
+#[allow(dead_code)]
+mod support;
+
 use std::{
     sync::mpsc::{self},
     thread,
     time::Duration,
 };
 
-use nevo::{
-    ecosystem::Scenario,
-    run::{Command, Control, LoopOptions, Run, StopReason},
-};
+use nevo::run::{Command, Control, LoopOptions, Run, StopReason};
 
 const TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -23,7 +23,7 @@ fn request(control: &Control, command: Command) {
 
 #[test]
 fn pause_and_step_commands_control_the_same_worker() {
-    let mut run = Run::new(Scenario::Baseline, 42).unwrap();
+    let mut run = Run::new(support::ecosystem("baseline"), 42).unwrap();
     let mut expected = run.clone();
     let world = run.universe().clone();
     let (control, commands) = Control::channel(true);
@@ -77,7 +77,7 @@ fn pause_and_step_commands_control_the_same_worker() {
 
 #[test]
 fn zero_tick_limit_works_while_paused() {
-    let mut run = Run::new(Scenario::Debug, 1).unwrap();
+    let mut run = Run::new(support::ecosystem("debug"), 1).unwrap();
     let original = run.clone();
     let (_control, commands) = Control::channel(true);
     let (done, finished) = mpsc::channel();
@@ -101,7 +101,7 @@ fn zero_tick_limit_works_while_paused() {
 
 #[test]
 fn dropping_last_control_wakes_a_paused_loop() {
-    let mut run = Run::new(Scenario::Debug, 1).unwrap();
+    let mut run = Run::new(support::ecosystem("debug"), 1).unwrap();
     let original = run.clone();
     let (control, commands) = Control::channel(true);
     let (done, finished) = mpsc::channel();

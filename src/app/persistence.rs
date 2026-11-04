@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Counts, config::Options};
 
-const FORMAT_VERSION: u32 = 4;
+const FORMAT_VERSION: u32 = 5;
 const WORLD_MODEL: &str = "foraging-sense-first-v1";
 const AGENT_MODEL: &str = "animal-rnn-3-4-3-v1";
 
@@ -247,7 +247,6 @@ fn sync_directory(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use conf::Conf;
-    use nevo::ecosystem::Scenario;
 
     #[test]
     fn checkpoint_version_and_models_are_checked_before_restore() {
@@ -260,7 +259,7 @@ mod tests {
                 .try_parse()
                 .unwrap(),
             counts: Counts::default(),
-            state: Universe::new(Scenario::Debug, 1).unwrap(),
+            state: Universe::new(nevo::ecosystem::Config::default(), 1).unwrap(),
         };
         for (name, invalid) in [
             ("format_version", ciborium::Value::from(3)),
@@ -290,7 +289,7 @@ mod tests {
             .args(["nevo", "--seed", "1", "--keep-checkpoints", "1"])
             .try_parse()
             .unwrap();
-        let mut run = Run::new(Scenario::Baseline, 1).unwrap();
+        let mut run = Run::new(nevo::ecosystem::Config::default(), 1).unwrap();
         directory.save(&run, &options, &Counts::default()).unwrap();
         let previous = path.join("checkpoints/00000000000000000000.cbor");
         let bytes = fs::read(&previous).unwrap();

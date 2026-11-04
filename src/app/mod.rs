@@ -19,7 +19,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, ensure};
 use nevo::{
-    ecosystem::{Event, Scenario, TickReport},
+    ecosystem::{Event, TickReport},
     run::{Command, Control, Run, StopReason},
 };
 use serde::{Deserialize, Serialize};
@@ -102,7 +102,6 @@ impl Drop for Worker {
 fn attach_viewer(
     world: nevo::run::UniverseView<nevo::universe::Universe>,
     control: Control,
-    scenario: Scenario,
     seed: u64,
     smoke: Option<smoke::SmokeCheck>,
     exit_requested: Arc<AtomicBool>,
@@ -120,10 +119,7 @@ fn attach_viewer(
         let viewed = wgame::app_with_single_window(
             async move |window| {
                 let options = viewer::Options {
-                    labels: vec![
-                        Label::new(format!("{scenario:?}")),
-                        Label::new(format!("Seed {seed}")),
-                    ],
+                    labels: vec![Label::new(format!("Seed {seed}"))],
                     exit_requested: exit_requested.clone(),
                     interactive: smoke.is_none(),
                     ..Default::default()
@@ -178,9 +174,9 @@ fn execute(mut options: Options) -> Result<()> {
         Some(checkpoint) => {
             options = Options::load_with_fallback(&checkpoint.config)?;
             ensure!(
-                options.scenario == checkpoint.config.scenario
+                options.ecosystem == checkpoint.config.ecosystem
                     && options.seed == checkpoint.config.seed,
-                "cannot change the seed or scenario of an existing run"
+                "cannot change the seed or ecosystem settings of an existing run"
             );
             let run = checkpoint.state.restore().context("restoring checkpoint")?;
             eprintln!(
@@ -194,7 +190,7 @@ fn execute(mut options: Options) -> Result<()> {
             directory.check_new()?;
             options.seed = Some(options.resolved_seed()?);
             (
-                Run::new(options.scenario, options.seed.unwrap())?,
+                Run::new(options.ecosystem, options.seed.unwrap())?,
                 Counts::default(),
             )
         }
@@ -207,8 +203,8 @@ fn execute(mut options: Options) -> Result<()> {
     directory.save_config(&options)?;
     eprintln!("run={}", directory.path().display());
     println!(
-        "scenario={:?} seed={} ticks={:?} interval={:?}",
-        options.scenario, seed, limits.ticks, limits.interval,
+        "seed={} ticks={:?} interval={:?}",
+        seed, limits.ticks, limits.interval,
     );
     let (control, commands) = Control::channel(options.paused || options.smoke);
     let exit_requested = Arc::new(AtomicBool::new(false));
@@ -232,7 +228,7 @@ fn execute(mut options: Options) -> Result<()> {
         let mut save_error = None;
         let stop = run.execute(limits, commands, |state, report| {
             counts.record(report);
-            if options.scenario == Scenario::Debug && report.tick <= 3 {
+            if report.tick <= options.trace_ticks {
                 print_trace(report);
             }
             if last_report.elapsed() >= Duration::from_secs(2) {
@@ -268,14 +264,7 @@ fn execute(mut options: Options) -> Result<()> {
     };
     #[cfg(feature = "viewer")]
     let viewed = if options.viewer {
-        let result = attach_viewer(
-            world,
-            control.clone(),
-            options.scenario,
-            seed,
-            smoke,
-            exit_requested,
-        );
+        let result = attach_viewer(world, control.clone(), seed, smoke, exit_requested);
         let _ = control.send(Command::Stop);
         result
     } else {

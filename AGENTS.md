@@ -32,6 +32,8 @@
 - Store run artifacts, including screenshots, alongside checkpoints in the ignored
   `runs/` directory. Keep large generated files out of Git; do not add image-wide
   ignore rules. Commit small reusable configs under `configs/` and useful scripts.
+- Express experiment variations as explicit settings and composable config presets,
+  rather than named modes or branches in the executable.
 - Keep simulation stepping independent of rendering. Check reproducibility and
   behavioral invariants when changing simulation rules; use checks proportional
   to the change. Documentation-only changes need content/link/whitespace checks.

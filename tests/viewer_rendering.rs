@@ -2,11 +2,14 @@
 //! Requires a GPU or software Vulkan adapter; explicit execution must not skip it.
 #![cfg(feature = "viewer")]
 
+#[allow(dead_code)]
+mod support;
+
 use std::{sync::mpsc, thread, time::Duration};
 
 use glam::{DVec2, Vec2};
 use nevo::{
-    ecosystem::{Animal, Body, Ecosystem, Plant, Scenario},
+    ecosystem::{Animal, Body, Ecosystem, Plant},
     run::Run,
     universe::{Simulation, Universe},
     viewer::{Bounds, Draw, Drawing, Label},
@@ -271,9 +274,9 @@ fn a_second_world_can_advance_while_its_previous_drawing_is_rendered() {
 fn ecosystem_drawing_preserves_complete_state_and_same_tick_labels() {
     let graphics = graphics();
     let library = Library::new(&graphics);
-    for scenario in [Scenario::Debug, Scenario::Baseline] {
+    for config in [support::ecosystem("debug"), support::ecosystem("baseline")] {
         for seed in [1, 42] {
-            let mut universe = Universe::new(scenario, seed).unwrap();
+            let mut universe = Universe::new(config, seed).unwrap();
             for tick in 0..3 {
                 let before = universe.clone();
                 let mut drawing = Drawing::new(&library);

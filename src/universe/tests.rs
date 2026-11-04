@@ -1,7 +1,7 @@
 use ciborium::Value;
 
 use crate::{
-    ecosystem::{Admission, Event, Scenario},
+    ecosystem::{Admission, Event},
     mind::rnn::{RnnGenome, WeightMutation},
     run::Run,
 };
@@ -38,9 +38,12 @@ fn field<'a>(value: &'a mut Value, path: &[&str]) -> &'a mut Value {
 
 #[test]
 fn cbor_continuation_matches_every_report_and_complete_state() {
-    for scenario in [Scenario::Debug, Scenario::Baseline] {
+    for config in [
+        crate::test_support::ecosystem("debug"),
+        crate::test_support::ecosystem("baseline"),
+    ] {
         for seed in [1, 42] {
-            let mut uninterrupted = Run::new(scenario, seed).unwrap();
+            let mut uninterrupted = Run::new(config, seed).unwrap();
             for _ in 0..73 {
                 uninterrupted.tick().unwrap();
             }
@@ -131,7 +134,7 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
 
 #[test]
 fn animals_cannot_deserialize_without_a_body_or_mind() {
-    let universe = Universe::new(Scenario::Debug, 1).unwrap();
+    let universe = Universe::new(crate::test_support::ecosystem("debug"), 1).unwrap();
     for missing in ["body", "mind"] {
         let mut value = Value::serialized(&universe).unwrap();
         let animal = &mut field(&mut value, &["world", "animals"])
@@ -151,7 +154,7 @@ fn animals_cannot_deserialize_without_a_body_or_mind() {
 
 #[test]
 fn zero_rngs_and_wrong_weight_dimensions_are_rejected() {
-    let universe = Universe::new(Scenario::Debug, 1).unwrap();
+    let universe = Universe::new(crate::test_support::ecosystem("debug"), 1).unwrap();
     for path in [
         ["world", "rng", "s"].as_slice(),
         ["world", "context", "rng", "s"].as_slice(),

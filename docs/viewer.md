@@ -21,7 +21,7 @@ Circle borders are slightly larger filled circles beneath every entity fill.
 Overlapping entities therefore have no border crossing their interiors; animal
 fills remain above plant fills. Individual bounds include the border.
 
-The [window loop](../src/viewer/window.rs) knows no ecosystem or scenario types.
+The [window loop](../src/viewer/window.rs) knows no ecosystem types.
 It collects the scene while holding a shared state read lock, releases the lock,
 then lays out controls and renders. Neither `Clone` nor `Simulation` is required
 to view a drawable state. Scene and model labels come from the same capture.
@@ -41,7 +41,7 @@ Checks:
 cargo test --locked --offline
 cargo test --locked --offline --no-default-features
 cargo test --locked --offline --test viewer_rendering -- --ignored --test-threads=1
-cargo run --locked -- runs/viewer-check --viewer --scenario debug --seed 1 --smoke
+cargo run --locked -- runs/viewer-check --config configs/debug.toml --config configs/viewer.toml --smoke
 ```
 
 The explicit rendering tests require a GPU or software adapter and fail if none is

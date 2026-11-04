@@ -6,7 +6,7 @@ mod draw;
 use anyhow::{Result, ensure};
 
 use crate::{
-    ecosystem::{Ecosystem, Scenario},
+    ecosystem::{Config, Ecosystem},
     run::Run,
 };
 
@@ -108,8 +108,8 @@ impl<S: Simulation> Universe<S> {
 }
 
 impl Universe {
-    pub fn new(scenario: Scenario, seed: u64) -> Result<Self> {
-        Self::from_world(Ecosystem::new(scenario, seed)?)
+    pub fn new(config: Config, seed: u64) -> Result<Self> {
+        Self::from_world(Ecosystem::new(config, seed)?)
     }
 }
 

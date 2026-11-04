@@ -223,9 +223,13 @@ fn parent_senses_ripe_food_and_newborn_waits_to_process_it() {
 
     let mut genome = RnnGenome::default();
     genome.weights[28] = 0.5;
-    let mut world: Ecosystem =
-        Ecosystem::with_genetics(Scenario::Debug, 7, Some(genome), WeightMutation::default())
-            .unwrap();
+    let mut world: Ecosystem = Ecosystem::with_genetics(
+        crate::test_support::ecosystem("debug"),
+        7,
+        Some(genome),
+        WeightMutation::default(),
+    )
+    .unwrap();
     let before = world.clone();
     let sensed = world.sense(world.animals[&id(1)].body.position);
     assert_eq!(world, before, "sensing must not change the world");

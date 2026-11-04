@@ -12,41 +12,48 @@ viewer reads the shared Universe. Sensing precedes movement, feeding, and births
 A fresh checkout needs `git submodule update --init` for the Cargo path dependency.
 
 ```sh
-cargo run --locked --bin nevo -- --viewer --scenario baseline
-cargo run --locked --bin nevo -- --viewer --scenario debug --seed 1 --paused
-cargo run --locked --bin nevo -- --scenario baseline --seed 1 --ticks 256
-cargo run --locked --bin nevo -- --config configs/debug.toml
+cargo run --locked -- --config configs/baseline.toml --config configs/viewer.toml
+cargo run --locked -- --config configs/debug.toml --config configs/viewer.toml --paused
+cargo run --locked -- --config configs/baseline.toml --seed 1 --ticks 256
 cargo run --locked --bin nevo -- runs/baseline --seed 1 --ticks 256
 cargo run --locked --bin nevo -- runs/baseline
 ```
 
 Use **Pause / Resume** to control playback and **Single step** to advance one tick
 and pause. With the arena focused, Space toggles playback and Right Arrow steps.
-The toolbar shows the seed, scenario, tick, and population counts for the displayed
+The toolbar shows the seed, tick, and population counts for the displayed
 world. Green circles are plants and yellow circles are animals.
 
 Runs default to full speed (`--hz 0`) and a seed drawn from system entropy.
 The resolved seed is printed before the run starts; supply `--seed N` to replay it.
 Use `--hz 25` for paced viewing and `--ticks N` for a reproducible budget. Omit
 the budget to run until interrupted. A trial simply supplies initialization and
-a tick limit. The `debug` layout exercises a meal and a birth on tick one. The
-`baseline` starts 20 animals among 500 mature plants.
+a tick limit. The `debug.toml` preset exercises a meal and a birth on tick one. The
+`baseline.toml` preset starts 20 animals among 500 mature plants.
 See the [tick and runner contracts](docs/simulation.md).
 
 CLI and TOML configuration share one [conf](https://docs.rs/conf/0.4.5/conf/)
-schema. Load a file explicitly with `--config PATH`; CLI values override it.
+schema. Repeat `--config PATH` to layer presets: later files override earlier ones,
+and CLI values override all files. Tables merge by field; arrays replace as a whole.
 [Example configuration](configs/debug.toml):
 
 ```toml
-scenario = "debug"
 seed = 1
-ticks = 32
+trace_ticks = 3
+
+[ecosystem]
+initial_animals = 1
+plants = 1
+minimum_population = 0
+initial_animal_energy = 390.0
+initial_animal_position = [0.0, 0.0]
+initial_plant_position = [0.0, 0.0]
 ```
 
-All run options use the same names in TOML, including `hz`, `viewer`, `paused`,
-and `smoke`. Booleans accept bare CLI flags or explicit values such as
-`--viewer=false`. Quote seeds larger than TOML's signed integer range. Unknown
-keys are rejected.
+Run options use snake_case in TOML and kebab-case on the CLI. Ecosystem options
+use `[ecosystem]` in TOML and `--ecosystem-…` on the CLI. Booleans accept bare flags
+or explicit values such as `--viewer=false`. Unknown keys are rejected in every
+file. See [configuration and precedence](docs/configuration.md).
 
 Every run stores its resolved configuration and resumable CBOR checkpoints in
 the supplied directory, or a new directory under `runs/`. Pass that directory

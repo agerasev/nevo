@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{
-    ecosystem::{Ecosystem, Scenario},
+    ecosystem::{Config, Ecosystem},
     universe::{Simulation, Universe},
 };
 use anyhow::Result;
@@ -65,8 +65,8 @@ impl<S: PartialEq> PartialEq for Run<S> {
 }
 
 impl Run {
-    pub fn new(scenario: Scenario, seed: u64) -> Result<Self> {
-        Ok(Self::from_universe(Universe::new(scenario, seed)?))
+    pub fn new(config: Config, seed: u64) -> Result<Self> {
+        Ok(Self::from_universe(Universe::new(config, seed)?))
     }
 }
 

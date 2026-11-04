@@ -19,11 +19,11 @@ cargo run --locked -- runs/baseline --ticks 64 \
 ```
 
 `config.toml` records the last effective configuration, including the resolved
-entropy seed. CLI values override it. `--config PATH` remains available for
-initializing a new directory, but cannot replace an existing directory's config.
+entropy seed. Ordered `--config PATH` files override individual settings, then CLI
+values override the files. See [configuration precedence](configuration.md).
 If `config.toml` is missing, the checkpoint's embedded configuration is recovered.
-Resume rejects changed seeds or scenarios. Runtime settings such as pacing,
-viewer attachment, and save policy can change. A tick budget always applies to
+Resume rejects changed seeds or ecosystem settings. Runtime settings such as pacing,
+viewer attachment, tracing, and save policy can change. A tick budget always applies to
 the current invocation: a saved budget of 256 means another 256 ticks on bare
 resume. Remove `ticks` from `config.toml` for an unlimited continuation.
 
@@ -65,7 +65,7 @@ Reconstructible caches may be omitted from serialization; recurrent memory and R
 positions are required state. Core simulation and genetics contracts have no
 persistence bounds.
 
-The current format is checkpoint version 4, with `foraging-sense-first-v1` and
+The current format is checkpoint version 5, with `foraging-sense-first-v1` and
 `animal-rnn-3-4-3-v1` model identifiers. Only this format is accepted;
 compatibility and migrations are intentionally unsupported. Rust module/type names
 are not part of the format.

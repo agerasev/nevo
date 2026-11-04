@@ -9,3 +9,7 @@ pub mod universe;
 
 #[cfg(feature = "viewer")]
 pub mod viewer;
+
+#[cfg(test)]
+#[path = "../tests/support/mod.rs"]
+mod test_support;

@@ -85,11 +85,12 @@ population, and eligible animals reproduce. Upkeep, plant growth, and final clam
 complete the tick. Newborns and immigrants first act on the following tick. Decisions
 record sensing-time energy and movement endpoints before birth offsets/final clamping.
 
-The baseline admits 20 animals among 500 ripe plants and maintains a minimum of 20.
-The debug layout admits one animal at energy 390 beside a ripe plant, with no later
+The baseline preset admits 20 animals among 500 ripe plants and maintains a minimum
+of 20. The debug preset admits one animal at energy 390 beside a ripe plant, with no later
 immigration. At seed 1 it senses before eating and then splits; both animals finish
-step one at energy 213. Both scenarios use clamped boundaries and food-field strength
-plus its normalized world-coordinate gradient as perception.
+step one at energy 213. These are [configurations](configuration.md) of the same model,
+with independent counts, starting energy, and placements. Both use clamped boundaries
+and food-field strength plus its normalized world-coordinate gradient as perception.
 
 ## Execution and viewing
 

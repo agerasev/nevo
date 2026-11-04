@@ -2,7 +2,7 @@ use std::{env, ffi::OsString, fmt, fs, path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result, ensure};
 use conf::Conf;
-use nevo::{ecosystem::Scenario, run::LoopOptions};
+use nevo::{ecosystem, run::LoopOptions};
 use rand::{TryRng, rngs::SysRng};
 use serde::{
     Deserialize, Serialize, Serializer,
@@ -11,21 +11,26 @@ use serde::{
 
 /// Run a seeded experiment, optionally attaching a viewer.
 #[derive(Conf, Clone, Debug, Serialize, Deserialize)]
-#[conf(serde, name = "nevo")]
+#[conf(serde, name = "nevo", test)]
+#[serde(deny_unknown_fields)]
 pub struct Options {
     /// Run directory: resume if it contains checkpoints, otherwise create a run.
     #[conf(pos, serde(skip))]
     #[serde(skip)]
     pub directory: Option<PathBuf>,
 
-    /// Read a TOML configuration file. CLI values override the file.
-    #[conf(long = "config", serde(skip))]
+    /// Read TOML files in order; later files override earlier ones, then CLI wins.
+    #[conf(repeat, long = "config", serde(skip))]
     #[serde(skip)]
-    pub config: Option<PathBuf>,
+    pub config: Vec<PathBuf>,
 
-    /// Initial layout: baseline or debug.
-    #[conf(long, default_value = "baseline", serde(use_value_parser))]
-    pub scenario: Scenario,
+    /// Ecosystem initialization and population support.
+    #[conf(flatten, long_prefix)]
+    pub ecosystem: ecosystem::Config,
+
+    /// Print decisions and events through this absolute tick; zero disables tracing.
+    #[conf(long, default_value = "0")]
+    pub trace_ticks: u64,
 
     /// Master seed. If omitted, obtain and print a seed from system entropy.
     #[conf(long, serde(deserialize_with = "deserialize_seed"))]
@@ -86,24 +91,26 @@ impl Options {
             .as_ref()
             .map(|directory| directory.join("config.toml"))
             .filter(|path| path.exists());
-        ensure!(
-            cli.config.is_none() || (saved_config.is_none() && fallback.is_none()),
-            "--config cannot replace an existing run's configuration; use CLI overrides"
-        );
-        let (name, text) = match cli.config.as_ref().or(saved_config.as_ref()) {
-            Some(path) => (
-                path.display().to_string(),
-                fs::read_to_string(path)
-                    .with_context(|| format!("reading configuration {}", path.display()))?,
-            ),
-            None => match fallback {
-                Some(saved) => ("checkpoint configuration".to_string(), saved.to_toml()?),
-                None => return Ok(cli),
-            },
-        };
-        let document = toml::de::Deserializer::parse(&text)
-            .with_context(|| format!("parsing configuration {name}"))?;
-        Ok(builder().doc(name, document).try_parse()?)
+        let mut merged = toml::Value::Table(Default::default());
+        if saved_config.is_none()
+            && let Some(saved) = fallback
+        {
+            merged = toml::from_str(&saved.to_toml()?)?;
+        }
+        for path in saved_config.iter().chain(&cli.config) {
+            let name = path.display().to_string();
+            let text = fs::read_to_string(path)
+                .with_context(|| format!("reading configuration {name}"))?;
+            let document: toml::Value =
+                toml::from_str(&text).with_context(|| format!("parsing configuration {name}"))?;
+            // Reject bad keys/types in every file, even when later files hide them.
+            Self::conf_builder()
+                .args(["nevo"])
+                .doc(&name, document.clone())
+                .try_parse()?;
+            merge(&mut merged, document);
+        }
+        Ok(builder().doc("merged configuration", merged).try_parse()?)
     }
 
     pub fn to_toml(&self) -> Result<String> {
@@ -111,6 +118,7 @@ impl Options {
     }
 
     pub fn loop_options(&self) -> Result<LoopOptions> {
+        self.ecosystem.validate()?;
         ensure!(
             self.keep_checkpoints > 0,
             "keep-checkpoints must be at least one"
@@ -144,6 +152,23 @@ impl Options {
                 .try_next_u64()
                 .context("obtaining a seed from system entropy"),
         }
+    }
+}
+
+// Merge tables recursively; scalar values and arrays are replaced as a whole.
+fn merge(base: &mut toml::Value, overlay: toml::Value) {
+    match (base, overlay) {
+        (toml::Value::Table(base), toml::Value::Table(overlay)) => {
+            for (key, value) in overlay {
+                match base.get_mut(&key) {
+                    Some(previous) => merge(previous, value),
+                    None => {
+                        base.insert(key, value);
+                    }
+                }
+            }
+        }
+        (base, overlay) => *base = overlay,
     }
 }
 
@@ -227,8 +252,10 @@ mod tests {
     fn saved_configuration_loads_from_directory_with_cli_overrides() {
         let directory = Directory::new();
         let original = load(&[
-            "--scenario",
-            "debug",
+            "--ecosystem-initial-animals",
+            "1",
+            "--ecosystem-initial-animal-position",
+            "0,0",
             "--seed",
             "18446744073709551615",
             "--ticks",
@@ -253,7 +280,7 @@ mod tests {
             "0",
         ])
         .unwrap();
-        assert_eq!(restored.scenario, Scenario::Debug);
+        assert_eq!(restored.ecosystem, original.ecosystem);
         assert_eq!(restored.seed, Some(u64::MAX));
         assert_eq!(restored.ticks, Some(5));
         assert_eq!(restored.checkpoint_every, 0);
@@ -272,17 +299,20 @@ mod tests {
     }
 
     #[test]
-    fn existing_run_rejects_another_config_and_zero_retention() {
+    fn existing_run_loads_an_overlay_and_rejects_zero_retention() {
         let directory = Directory::new();
         let path = directory.0.join("config.toml");
-        fs::write(&path, "ticks = 0\n").unwrap();
-        let error = load(&[
+        fs::write(&path, "ticks = 0\nseed = 42\n").unwrap();
+        let overlay = directory.0.join("overlay.toml");
+        fs::write(&overlay, "ticks = 7\n").unwrap();
+        let restored = load(&[
             directory.0.to_str().unwrap(),
             "--config",
-            path.to_str().unwrap(),
+            overlay.to_str().unwrap(),
         ])
-        .unwrap_err();
-        assert!(error.to_string().contains("--config cannot replace"));
+        .unwrap();
+        assert_eq!(restored.ticks, Some(7));
+        assert_eq!(restored.seed, Some(42));
         let options = load(&["--keep-checkpoints", "0"]).unwrap();
         assert!(options.loop_options().is_err());
     }
@@ -292,8 +322,10 @@ mod tests {
         let directory = Directory::new();
         let path = directory.0.to_str().unwrap();
         let saved = load(&[
-            "--scenario",
-            "debug",
+            "--ecosystem-initial-animals",
+            "1",
+            "--ecosystem-initial-animal-position",
+            "0,0",
             "--seed",
             "42",
             "--ticks",
@@ -305,7 +337,7 @@ mod tests {
         ])
         .unwrap();
         let recovered = load_with(&[path, "--ticks", "5"], Some(&saved)).unwrap();
-        assert_eq!(recovered.scenario, Scenario::Debug);
+        assert_eq!(recovered.ecosystem, saved.ecosystem);
         assert_eq!(recovered.seed, Some(42));
         assert_eq!(recovered.ticks, Some(5));
         assert_eq!(recovered.checkpoint_every, 7);
@@ -313,11 +345,11 @@ mod tests {
         assert_eq!(recovered.directory.as_ref(), Some(&directory.0));
 
         let error = load_with(&[path, "--config", "missing.toml"], Some(&saved)).unwrap_err();
-        assert!(error.to_string().contains("--config cannot replace"));
+        assert!(error.to_string().contains("reading configuration"));
 
         fs::write(
             directory.0.join("config.toml"),
-            "scenario = 'debug'\nseed = 42\nticks = 4\ncheckpoint_every = 8\n",
+            "seed = 42\nticks = 4\ncheckpoint_every = 8\n",
         )
         .unwrap();
         let restored = load_with(&[path, "--ticks", "6"], Some(&saved)).unwrap();

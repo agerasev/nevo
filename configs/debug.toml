@@ -1,3 +1,10 @@
-scenario = "debug"
 seed = 1
-ticks = 32
+trace_ticks = 3
+
+[ecosystem]
+initial_animals = 1
+plants = 1
+minimum_population = 0
+initial_animal_energy = 390.0
+initial_animal_position = [0.0, 0.0]
+initial_plant_position = [0.0, 0.0]
