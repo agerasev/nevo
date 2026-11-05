@@ -11,3 +11,6 @@ checks are available through Git history.
 - [First million-tick run, November 2026](2026-11-05-long-run.md): near
   self-sufficiency and food-production saturation in one seed; controlled
   evolutionary comparisons remain open.
+- [Evolved RNNs versus a gradient follower, November 2026](2026-11-05-gradient-comparison.md):
+  similar food collection and population across 32 matched worlds without
+  immigration; RNNs showed lower turnover.
