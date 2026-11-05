@@ -37,7 +37,6 @@ impl<U: fmt::Debug> fmt::Debug for UniverseView<U> {
 #[derive(Debug)]
 pub struct Run<S: Simulation = Ecosystem> {
     universe: UniverseView<Universe<S>>,
-    config: S::Config,
 }
 
 impl<S: Simulation> Run<S> {
@@ -45,25 +44,18 @@ impl<S: Simulation> Run<S> {
         &self.universe
     }
 
-    pub fn config(&self) -> &S::Config {
-        &self.config
-    }
-
-    pub fn from_universe(universe: Universe<S>, config: S::Config) -> Self {
+    /// Wrap an already configured universe. Use `Universe::restore` after decoding.
+    pub fn from_universe(universe: Universe<S>) -> Self {
         Self {
             universe: UniverseView(Arc::new(RwLock::new(universe))),
-            config,
         }
     }
 }
 
 /// Cloning a run makes an independent simulation, unlike cloning its view.
-impl<S: Simulation + Clone> Clone for Run<S>
-where
-    S::Config: Clone,
-{
+impl<S: Simulation + Clone> Clone for Run<S> {
     fn clone(&self) -> Self {
-        Self::from_universe(self.universe.read().clone(), self.config.clone())
+        Self::from_universe(self.universe.read().clone())
     }
 }
 
@@ -76,10 +68,7 @@ impl<S: Simulation + PartialEq> PartialEq for Run<S> {
 
 impl Run {
     pub fn new(config: Config, seed: u64) -> Result<Self> {
-        Ok(Self::from_universe(
-            Universe::new(config.clone(), seed)?,
-            config,
-        ))
+        Ok(Self::from_universe(Universe::new(config, seed)?))
     }
 }
 
@@ -212,7 +201,7 @@ where
     pub fn tick(&mut self) -> Result<S::Report> {
         // Keep the read lock for computation: viewers may read the old complete
         // state concurrently. Drop it before acquiring the publication lock.
-        let (report, update) = self.universe.read().compute_update(&self.config)?;
+        let (report, update) = self.universe.read().compute_update()?;
         self.universe
             .0
             .write()

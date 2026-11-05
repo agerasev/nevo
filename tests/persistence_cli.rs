@@ -12,6 +12,7 @@ use std::{
 };
 
 use nevo::{
+    metrics::Metrics,
     metrics::log::{FILE_NAME, Reader, Record, Sample},
     run::Run,
     universe::Universe,
@@ -280,6 +281,10 @@ fn one_cbor_log_records_full_and_partial_windows_without_duplicate_endpoints() {
         "disabled",
         "--config",
         &support::preset("debug"),
+        "--config",
+        &support::preset("metrics"),
+        "--config",
+        &directory.overlay("off.toml", "[ecosystem.metrics]\nenabled = false\n"),
         "--ticks",
         "8",
     ]);
@@ -298,6 +303,81 @@ fn one_cbor_log_records_full_and_partial_windows_without_duplicate_endpoints() {
             .unwrap()
             .iter()
             .all(|(key, _)| key.as_text() != Some("counts"))
+    );
+}
+
+#[test]
+fn lightweight_defaults_and_resume_setup_work_without_a_metrics_preset() {
+    let directory = Directory::new();
+    directory.success(&[
+        "defaults",
+        "--config",
+        &support::preset("debug"),
+        "--ticks",
+        "2",
+    ]);
+    let original = directory.metrics("defaults");
+    let points = samples(&original);
+    assert_eq!(points.len(), 1);
+    let values = metric_values(points[0]);
+    assert!(values["population"]["animals"].is_number());
+    assert!(values["events"]["births"].is_number());
+    for energy in [
+        &values["animal"]["body"]["energy"],
+        &values["plant"]["energy"],
+    ] {
+        assert_eq!(
+            energy
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["max", "mean", "min"]
+        );
+    }
+    assert!(values.get("genome").is_none());
+    assert!(values["animal"]["mind"].as_object().unwrap().is_empty());
+    assert!(values["animal"]["body"].get("distance").is_none());
+
+    // A zero-tick resume must configure existing components before any step.
+    directory.success(&[
+        "defaults", "--ticks", "0", "--config",
+        &directory.overlay("selectors.toml", "[ecosystem.animal.body.metrics.energy]\nmean = false\n[ecosystem.animal.mind.brain.metrics.activation]\nmean = true\n"),
+    ]);
+    let restored = directory.latest("defaults").restore();
+    {
+        let state = restored.universe().read();
+        assert!(state.world().metrics_enabled());
+        assert!(state.world().metrics_window().is_none());
+        let summary = serde_json::to_value(state.metrics()).unwrap();
+        assert!(summary["animal"]["body"]["energy"].get("mean").is_none());
+        assert!(summary["animal"]["body"]["energy"]["min"].is_number());
+        assert!(summary["animal"]["body"]["energy"]["max"].is_number());
+        assert!(
+            summary.get("events").is_none(),
+            "no rates before an observed tick"
+        );
+    }
+    assert_eq!(samples(&directory.metrics("defaults")).len(), 1);
+    directory.success(&["defaults", "--ticks", "1"]);
+    let records = directory.metrics("defaults");
+    let latest = metric_values(samples(&records).last().unwrap());
+    assert_eq!(latest["window"]["start_tick"], 2);
+    assert_eq!(latest["window"]["end_tick"], 3);
+    assert_eq!(latest["window"]["samples"], 1);
+    assert!(latest["animal"]["mind"]["activation"]["mean"].is_number());
+    assert!(latest["animal"]["body"]["energy"].get("mean").is_none());
+    directory.success(&[
+        "reference",
+        "--config",
+        &support::preset("debug"),
+        "--ticks",
+        "3",
+    ]);
+    assert_eq!(
+        directory.latest("defaults").state,
+        directory.latest("reference").state
     );
 }
 
@@ -392,6 +472,23 @@ fn the_same_reader_follows_resumes_and_metadata_preserves_changed_selections() {
     ]);
     assert_eq!(fs::read(&path).unwrap(), previous);
     assert!(reader.poll().unwrap().is_empty());
+    let mut disabled = directory.latest("resumed").restore();
+    disabled.tick().unwrap();
+    {
+        let state = disabled.universe().read();
+        assert!(!state.world().metrics_enabled());
+        assert!(state.world().metrics_window().is_none());
+        for animal in state.world().animals().values() {
+            assert!(!animal.body.metrics().energy.enabled());
+            assert_eq!(
+                serde_json::to_value(animal.mind.metrics()).unwrap(),
+                serde_json::json!({})
+            );
+        }
+        for plant in state.world().plants() {
+            assert!(!plant.metrics().energy.enabled());
+        }
+    }
     directory.success(&[
         "reference",
         "--config",

@@ -180,10 +180,10 @@ pub struct MetricsConfig {
 impl Default for MetricsConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             window_ticks: 100,
-            population: false,
-            event_rates: false,
+            population: true,
+            event_rates: true,
             genetic_diversity: false,
         }
     }
@@ -212,9 +212,10 @@ pub struct AnimalMetricsConfig {
 pub struct BodyConfig {
     pub metrics: BodyMetricsConfig,
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BodyMetricsConfig {
+    #[serde(deserialize_with = "deserialize_energy_selection")]
     pub energy: Selection,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -222,8 +223,68 @@ pub struct BodyMetricsConfig {
 pub struct PlantConfig {
     pub metrics: PlantMetricsConfig,
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct PlantMetricsConfig {
+    #[serde(deserialize_with = "deserialize_energy_selection")]
     pub energy: Selection,
+}
+
+fn default_energy_selection() -> Selection {
+    Selection {
+        mean: true,
+        min: true,
+        max: true,
+        ..Selection::default()
+    }
+}
+
+impl Default for BodyMetricsConfig {
+    fn default() -> Self {
+        Self {
+            energy: default_energy_selection(),
+        }
+    }
+}
+
+impl Default for PlantMetricsConfig {
+    fn default() -> Self {
+        Self {
+            energy: default_energy_selection(),
+        }
+    }
+}
+
+// A partially specified energy table overrides the lightweight field defaults.
+fn deserialize_energy_selection<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Selection, D::Error> {
+    fn enabled() -> bool {
+        true
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Fields {
+        #[serde(default)]
+        count: bool,
+        #[serde(default)]
+        sum: bool,
+        #[serde(default = "enabled")]
+        mean: bool,
+        #[serde(default = "enabled")]
+        min: bool,
+        #[serde(default = "enabled")]
+        max: bool,
+        #[serde(default)]
+        variance: bool,
+    }
+    let fields = Fields::deserialize(deserializer)?;
+    Ok(Selection {
+        count: fields.count,
+        sum: fields.sum,
+        mean: fields.mean,
+        min: fields.min,
+        max: fields.max,
+        variance: fields.variance,
+    })
 }

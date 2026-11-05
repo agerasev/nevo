@@ -8,7 +8,7 @@ use crate::{
 
 use super::*;
 
-fn round_trip(run: &Run) -> Run {
+fn round_trip(run: &Run, config: Config) -> Run {
     let state = run.universe().read().clone();
     let mut bytes = Vec::new();
     ciborium::into_writer(&state, &mut bytes).unwrap();
@@ -17,7 +17,7 @@ fn round_trip(run: &Run) -> Run {
     let mut reencoded = Vec::new();
     ciborium::into_writer(&decoded, &mut reencoded).unwrap();
     assert_eq!(reencoded, bytes);
-    let restored = decoded.restore(run.config().clone()).unwrap();
+    let restored = decoded.restore(config).unwrap();
     assert_eq!(&restored, run);
     restored
 }
@@ -47,7 +47,7 @@ fn cbor_continuation_matches_every_report_and_complete_state() {
             for _ in 0..73 {
                 uninterrupted.tick().unwrap();
             }
-            let mut resumed = round_trip(&uninterrupted);
+            let mut resumed = round_trip(&uninterrupted, config.clone());
             let mut turnover = false;
             for _ in 73..256 {
                 let report = uninterrupted.tick().unwrap();
@@ -97,8 +97,8 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
         field(&mut value, &["world", "immigrant_genome"]),
         Value::Null
     ));
-    let mut run = Run::from_universe(universe, Config::default());
-    assert_eq!(round_trip(&run), run);
+    let mut run = universe.restore(Config::default()).unwrap();
+    assert_eq!(round_trip(&run, Config::default()), run);
     run.tick().unwrap();
     assert!(
         run.universe()
@@ -108,7 +108,7 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
             .values()
             .any(|animal| animal.mind.brain.memory != [0.0; 4])
     );
-    let mut restored = round_trip(&run);
+    let mut restored = round_trip(&run, Config::default());
     for _ in 1..108 {
         assert_eq!(run.tick().unwrap(), restored.tick().unwrap());
     }
@@ -120,7 +120,7 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
             .values()
             .any(|animal| animal.body.energy < 0.0)
     );
-    let mut restored = round_trip(&run);
+    let mut restored = round_trip(&run, Config::default());
     let report = run.tick().unwrap();
     assert!(
         report

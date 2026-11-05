@@ -1,3 +1,4 @@
+# Detailed metrics overlay; lightweight statistics are already enabled by default.
 # Compose with any simulation preset. Statistics restart after resume.
 [ecosystem.metrics]
 enabled = true

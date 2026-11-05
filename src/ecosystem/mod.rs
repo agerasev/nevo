@@ -242,7 +242,12 @@ fn validate_plants(plants: &[Plant], target: usize, next_plant: u64) -> Result<(
 /// during inference; memory and other learned state belong to `Mind::Update`.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Ecosystem<M = AnimalMind, G = RnnGenome, P = WeightMutation> {
+pub struct Ecosystem<
+    M = AnimalMind,
+    G = RnnGenome,
+    P = WeightMutation,
+    MC = <M as Mind<GeneticContext>>::Config,
+> {
     rng: Xoshiro256PlusPlus,
     context: GeneticContext,
     next_animal: u64,
@@ -255,6 +260,8 @@ pub struct Ecosystem<M = AnimalMind, G = RnnGenome, P = WeightMutation> {
     mutation: P,
     #[serde(skip)]
     metrics: metrics::Cache,
+    #[serde(skip)]
+    mind_config: Option<MC>,
 }
 
 impl Ecosystem {
@@ -263,7 +270,7 @@ impl Ecosystem {
     }
 }
 
-impl<M, G, P> Ecosystem<M, G, P> {
+impl<M, G, P, MC> Ecosystem<M, G, P, MC> {
     pub fn empty(
         plant_target: usize,
         minimum_population: usize,
@@ -286,6 +293,7 @@ impl<M, G, P> Ecosystem<M, G, P> {
             immigrant_genome,
             mutation,
             metrics: Default::default(),
+            mind_config: None,
         }
     }
 
@@ -326,7 +334,13 @@ impl<M, G, P> Ecosystem<M, G, P> {
     }
 
     fn add_plant(&mut self, position: DVec2, energy: f64) -> Result<()> {
-        add_plant(&mut self.plants, &mut self.next_plant, position, energy)
+        add_plant(&mut self.plants, &mut self.next_plant, position, energy)?;
+        self.plants
+            .last_mut()
+            .expect("new plant exists")
+            .metrics
+            .energy = self.metrics.plant_config.energy;
+        Ok(())
     }
 
     fn sense(&self, position: DVec2) -> FoodObservation {
@@ -376,6 +390,7 @@ where
             immigrant_genome,
             mutation,
         );
+        world.configure(&config)?;
         world.admit(config.initial_animals, config.admission())?;
         world.seed_plants(config.initial_plant_position.position())?;
         world.validate()?;
@@ -398,6 +413,8 @@ where
                 admission,
                 &mut self.rng,
                 &mut self.context,
+                &self.metrics,
+                self.mind_config.as_ref(),
             )?;
             let id = allocate_animal(&mut self.next_animal)?;
             self.animals.insert(id, animal);
@@ -411,20 +428,28 @@ where
         admission: Admission,
         rng: &mut Xoshiro256PlusPlus,
         context: &mut GeneticContext,
+        metrics: &metrics::Cache,
+        mind_config: Option<&M::Config>,
     ) -> Result<Animal<Body, M>> {
         let position = admission.position.unwrap_or_else(|| random_position(rng));
         let genome = match template {
             Some(template) => template.clone(),
             None => G::random(context)?,
         };
+        let mut body = Body::new(position, admission.energy);
+        body.metrics = metrics::BodyCache::new(metrics.body_config, metrics.animal_config);
         Ok(Animal {
-            body: Body::new(position, admission.energy),
-            mind: Self::develop(genome)?,
+            body,
+            mind: Self::develop(genome, mind_config, metrics.config.enabled)?,
         })
     }
 
-    fn develop(genome: G) -> Result<M> {
-        let mind = M::try_from(genome).map_err(Into::into)?;
+    fn develop(genome: G, config: Option<&M::Config>, metrics_enabled: bool) -> Result<M> {
+        let mut mind = M::try_from(genome).map_err(Into::into)?;
+        match config {
+            Some(config) => mind.configure(config, metrics_enabled)?,
+            None => mind.configure(&M::Config::default(), false)?,
+        }
         mind.validate()?;
         Ok(mind)
     }
@@ -441,12 +466,27 @@ where
     type Report = TickReport;
     type Update = EcosystemUpdate<M, M::Update>;
 
-    fn compute_update(
-        &self,
-        tick: u64,
-        config: &Self::Config,
-    ) -> Result<(TickReport, Self::Update)> {
-        self.compute_tick(tick, config)
+    fn configure(&mut self, config: &Self::Config) -> Result<()> {
+        config.validate()?;
+        for animal in self.animals.values_mut() {
+            animal
+                .mind
+                .configure(&config.animal.mind, config.metrics.enabled)?;
+        }
+        self.metrics = metrics::Cache::new(config);
+        self.mind_config = Some(config.animal.mind.clone());
+        for animal in self.animals.values_mut() {
+            animal.body.metrics =
+                metrics::BodyCache::new(self.metrics.body_config, self.metrics.animal_config);
+        }
+        for plant in &mut self.plants {
+            plant.metrics.energy = self.metrics.plant_config.energy;
+        }
+        Ok(())
+    }
+
+    fn compute_update(&self, tick: u64) -> Result<(TickReport, Self::Update)> {
+        self.compute_tick(tick)
     }
 
     fn apply_update(&mut self, update: Self::Update) {
@@ -469,7 +509,9 @@ where
             animal.mind.validate()?;
         }
         if let Some(template) = &self.immigrant_genome {
-            Self::develop(template.clone())?;
+            // Validation also runs before runtime settings are restored.
+            let mind = M::try_from(template.clone()).map_err(Into::into)?;
+            mind.validate()?;
         }
         validate_plants(&self.plants, self.plant_target, self.next_plant)
     }
@@ -488,7 +530,7 @@ impl PartialEq for Plant {
         self.id == other.id && self.position == other.position && self.energy == other.energy
     }
 }
-impl<M: PartialEq, G: PartialEq, P: PartialEq> PartialEq for Ecosystem<M, G, P> {
+impl<M: PartialEq, G: PartialEq, P: PartialEq, MC> PartialEq for Ecosystem<M, G, P, MC> {
     fn eq(&self, other: &Self) -> bool {
         self.rng == other.rng
             && self.context == other.context

@@ -1,17 +1,21 @@
 # Metrics
 
-Layer the [metrics preset](../configs/metrics.toml) over an experiment configuration:
+Lightweight metrics are enabled by default. Layer the
+[detailed metrics preset](../configs/metrics.toml) over an experiment configuration:
 
 ```sh
 cargo run --locked -- --config configs/baseline.toml --config configs/metrics.toml --seed 1 --ticks 250
 cargo run --locked -- runs/my-run --config configs/metrics.toml --ticks 250
 ```
 
-Metrics default off. `[ecosystem.metrics] enabled = true` enables observation windows
-and output; component selectors choose their contents. `window_ticks` defaults to
-100 and must be positive when enabled. Windows are consecutive, non-overlapping
-tick intervals `(start_tick, end_tick]`. Each summary gives its actual bounds,
-completed tick count (`samples`), and whether the window is complete.
+Defaults collect animal/plant counts, event totals and rates, and animal/plant
+energy mean/min/max. Brain diagnostics, genetic diversity, movement distance,
+and other detailed reductions are opt-in. `[ecosystem.metrics] enabled = false`
+disables all collectors, including nested brain diagnostics, and log output.
+`window_ticks` defaults to 100 and must be positive when enabled. Windows are
+consecutive, non-overlapping tick intervals `(start_tick, end_tick]`. Each summary
+gives its actual bounds, completed tick count (`samples`), and whether the window
+is complete.
 
 Each run has one append-only `metrics.cborseq`, a CBOR Sequence of independently
 encoded records. Each metrics-enabled invocation appends immutable metadata: its
@@ -76,8 +80,8 @@ Switching to Metrics skips world scene collection and drawing in the normal view
 
 ## Selection and interpretation
 
-Scalar selections accept `count`, `sum`, `mean`, `min`, `max`, and `variance` booleans;
-each defaults to false. For example:
+Scalar selections accept `count`, `sum`, `mean`, `min`, `max`, and `variance` booleans.
+They default to false except energy's `mean`, `min`, and `max`. For example:
 
 ```toml
 [ecosystem.metrics]
@@ -99,10 +103,13 @@ mean = true
 max = true
 ```
 
-Selections belong to the component which defines the measurement. The typed
-configuration is borrowed down the same ownership tree used for computation.
-Configuration files, including these selections, are saved with the run; selectors
-and window length can change on resume.
+Selections belong to the component which defines the measurement. Typed settings
+are applied once on creation and resume, down the component ownership tree.
+Newborns, immigrants, and replacement plants receive the current settings at
+creation. Steps use stored settings; window rollover clears counters while
+preserving selections. Configuration files are saved with the run; selectors and
+window length can change on resume. Setup resets accumulation without changing
+physical state, recurrent memory, or randomness.
 
 | Selection | Measurement |
 | --- | --- |
@@ -158,7 +165,10 @@ them with the physical and mind updates under the write lock. Failed or discarde
 updates publish no metrics. Collection itself is read-only and consumes no randomness.
 Neither `Mind` nor `Simulation` requires the `Metrics` trait.
 
-All accumulators are omitted from checkpoints. Resume starts the next window at the restored
-tick and fills it from new observations. New records append to the same log;
+Runtime metric settings and accumulators are omitted from the Universe checkpoint
+state. Resume reapplies the effective run configuration before stepping, starts
+the next window at the restored tick, and fills it from new observations.
+Before the first observed tick, population and energy snapshots are available,
+but there is no window or event-rate summary. New records append to the same log;
 previous records are never used to reconstruct accumulators. Recurrent
 memory and RNG state remain checkpointed, so resetting metrics preserves dynamics.

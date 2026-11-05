@@ -18,7 +18,7 @@ pub struct Window {
 pub(super) struct PlantCache {
     pub energy: Selection,
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct BodyCache {
     pub body: BodyMetricsConfig,
     pub animal: AnimalMetricsConfig,
@@ -27,15 +27,30 @@ pub(super) struct BodyCache {
     pub distance: f64,
     pub active_ticks: u64,
 }
+impl Default for BodyCache {
+    fn default() -> Self {
+        Self {
+            body: BodyMetricsConfig {
+                energy: Selection::default(),
+            },
+            animal: AnimalMetricsConfig::default(),
+            food_gained: 0.0,
+            offspring: 0,
+            distance: 0.0,
+            active_ticks: 0,
+        }
+    }
+}
 impl BodyCache {
-    pub fn configure<MC>(&mut self, config: &Config<MC>, reset: bool) {
-        if reset || !config.metrics.enabled {
-            *self = Self::default();
+    pub fn new(body: BodyMetricsConfig, animal: AnimalMetricsConfig) -> Self {
+        Self {
+            body,
+            animal,
+            ..Self::default()
         }
-        if config.metrics.enabled {
-            self.body = config.animal.body.metrics;
-            self.animal = config.animal.metrics;
-        }
+    }
+    pub fn reset(&mut self) {
+        *self = Self::new(self.body, self.animal);
     }
     pub fn observe_action(&mut self, distance: f64) {
         if self.animal.distance.enabled() {
@@ -47,7 +62,7 @@ impl BodyCache {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct Cache {
     pub config: MetricsConfig,
     pub animal_config: AnimalMetricsConfig,
@@ -62,29 +77,67 @@ pub(super) struct Cache {
     pub active_animal_ticks: u64,
     pub observed_survival: SelectedStats,
 }
-impl Cache {
-    /// Changing the selection also starts a fresh window, never mixed denominators.
-    pub fn begin<MC>(&self, tick: u64, config: &Config<MC>) -> (Self, bool) {
-        if !config.metrics.enabled {
-            return (Self::default(), true);
+impl Default for Cache {
+    fn default() -> Self {
+        Self {
+            config: MetricsConfig {
+                enabled: false,
+                population: false,
+                event_rates: false,
+                genetic_diversity: false,
+                window_ticks: 100,
+            },
+            animal_config: AnimalMetricsConfig::default(),
+            body_config: BodyMetricsConfig {
+                energy: Selection::default(),
+            },
+            plant_config: PlantMetricsConfig {
+                energy: Selection::default(),
+            },
+            window: None,
+            meals: 0,
+            births: 0,
+            deaths: 0,
+            immigrants: 0,
+            food_gained: 0.0,
+            active_animal_ticks: 0,
+            observed_survival: SelectedStats::default(),
         }
-        let reset = self.window.is_none_or(|window| window.complete)
-            || self.config != config.metrics
-            || self.animal_config != config.animal.metrics
-            || self.body_config != config.animal.body.metrics
-            || self.plant_config != config.plant.metrics;
+    }
+}
+impl Cache {
+    pub fn new<MC>(config: &Config<MC>) -> Self {
+        if !config.metrics.enabled {
+            return Self::default();
+        }
+        Self {
+            config: config.metrics,
+            animal_config: config.animal.metrics,
+            body_config: config.animal.body.metrics,
+            plant_config: config.plant.metrics,
+            observed_survival: SelectedStats::new(config.animal.metrics.observed_survival),
+            ..Self::default()
+        }
+    }
+
+    /// Start a fresh window without changing the configured collectors.
+    pub fn begin(&self, tick: u64) -> (Self, bool) {
+        if !self.config.enabled {
+            return (self.clone(), false);
+        }
+        let reset = self.window.is_none_or(|window| window.complete);
         let mut next = if reset {
             Self {
-                config: config.metrics,
-                animal_config: config.animal.metrics,
-                body_config: config.animal.body.metrics,
-                plant_config: config.plant.metrics,
+                config: self.config,
+                animal_config: self.animal_config,
+                body_config: self.body_config,
+                plant_config: self.plant_config,
                 window: Some(Window {
                     start_tick: tick.saturating_sub(1),
                     end_tick: tick.saturating_sub(1),
                     ..Window::default()
                 }),
-                observed_survival: SelectedStats::new(config.animal.metrics.observed_survival),
+                observed_survival: SelectedStats::new(self.animal_config.observed_survival),
                 ..Self::default()
             }
         } else {
@@ -93,7 +146,7 @@ impl Cache {
         let window = next.window.as_mut().expect("enabled metrics have a window");
         window.end_tick = tick;
         window.samples += 1;
-        window.complete = window.samples >= config.metrics.window_ticks;
+        window.complete = window.samples >= self.config.window_ticks;
         (next, reset)
     }
     pub fn observe(&mut self, report: &TickReport) {
@@ -257,7 +310,7 @@ pub struct Summary<M: Default, G: Default> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub genome: Option<G>,
 }
-impl<M, G, P> Ecosystem<M, G, P> {
+impl<M, G, P, MC> Ecosystem<M, G, P, MC> {
     pub fn metrics_enabled(&self) -> bool {
         self.metrics.config.enabled
     }
@@ -265,7 +318,7 @@ impl<M, G, P> Ecosystem<M, G, P> {
         self.metrics.window
     }
 }
-impl<M: Metrics + AsRef<G>, G: Metrics, P> Metrics for Ecosystem<M, G, P> {
+impl<M: Metrics + AsRef<G>, G: Metrics, P, MC> Metrics for Ecosystem<M, G, P, MC> {
     type Summary = Summary<M::Summary, G::Summary>;
     fn collect_metrics(&self, summary: &mut Self::Summary) {
         *summary = Self::Summary::default();
@@ -280,8 +333,10 @@ impl<M: Metrics + AsRef<G>, G: Metrics, P> Metrics for Ecosystem<M, G, P> {
                 plants: self.plants.len() as u64,
             });
         }
-        if cache.config.event_rates {
-            let ticks = cache.window.expect("enabled cache has a window").samples as f64;
+        if cache.config.event_rates
+            && let Some(window) = cache.window
+        {
+            let ticks = window.samples as f64;
             let exposure = cache.active_animal_ticks as f64;
             summary.events = Some(EventSummary {
                 meals: cache.meals,

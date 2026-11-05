@@ -63,7 +63,7 @@ and an optional metrics log reinitializes from that saved seed. Recorded history
 runs/baseline/
   config.toml
   .lock
-  metrics.cborseq          # when enabled; all invocations append to this file
+  metrics.cborseq          # enabled by default; appends across invocations
   checkpoints/
     00000000000000000100.cbor
     00000000000000000200.cbor

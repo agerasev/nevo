@@ -135,7 +135,7 @@ fn entities_collect_owned_geometry_without_mind_traits() {
     assert_pixel(&image, 74, 50, [255, 217, 64, 255]);
     assert_pixel(&image, 50, 50, [14, 18, 19, 255]);
     // No genetic or inference bounds leak through the world's drawing interface.
-    let world = Ecosystem::<UnrelatedMind, (), ()>::empty(0, 0, 1, 2, None, ());
+    let world = Ecosystem::<UnrelatedMind, (), (), ()>::empty(0, 0, 1, 2, None, ());
     world.draw(&mut Drawing::new(&library));
 }
 
@@ -193,7 +193,7 @@ impl Simulation for Marker {
     type Update = f32;
     type Report = ();
 
-    fn compute_update(&self, _: u64, _: &()) -> anyhow::Result<((), f32)> {
+    fn compute_update(&self, _: u64) -> anyhow::Result<((), f32)> {
         Ok(((), self.x + 1.0))
     }
 
@@ -226,7 +226,7 @@ impl Draw for Marker {
 fn a_second_world_can_advance_while_its_previous_drawing_is_rendered() {
     let graphics = graphics();
     let library = Library::new(&graphics);
-    let mut run = Run::from_universe(Universe::from_world(Marker { x: 10.5 }).unwrap(), ());
+    let mut run = Run::from_universe(Universe::from_world(Marker { x: 10.5 }).unwrap());
     let state = run.universe().clone();
     let mut drawing = Drawing::new(&library);
     state.read().draw(&mut drawing);
@@ -287,7 +287,7 @@ fn ecosystem_drawing_preserves_complete_state_and_same_tick_labels() {
                     universe, before,
                     "drawing changed model state or consumed randomness"
                 );
-                universe.advance(&config).unwrap();
+                universe.advance().unwrap();
             }
         }
     }

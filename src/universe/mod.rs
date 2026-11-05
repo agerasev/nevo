@@ -21,15 +21,17 @@ pub trait Simulation {
     type Update;
     type Report;
 
-    fn compute_update(
-        &self,
-        step: u64,
-        config: &Self::Config,
-    ) -> Result<(Self::Report, Self::Update)>;
+    /// Initialize runtime settings and reset derived caches before execution.
+    /// This must preserve physical state, recurrent memory, and random streams.
+    fn configure(&mut self, _config: &Self::Config) -> Result<()> {
+        Ok(())
+    }
+
+    fn compute_update(&self, step: u64) -> Result<(Self::Report, Self::Update)>;
     fn apply_update(&mut self, update: Self::Update);
 
-    fn advance(&mut self, step: u64, config: &Self::Config) -> Result<Self::Report> {
-        let (report, update) = self.compute_update(step, config)?;
+    fn advance(&mut self, step: u64) -> Result<Self::Report> {
+        let (report, update) = self.compute_update(step)?;
         self.apply_update(update);
         Ok(report)
     }
@@ -81,21 +83,19 @@ impl<S: Simulation> Universe<S> {
         self.world.validate()
     }
 
-    pub fn restore(self, config: S::Config) -> Result<Run<S>> {
+    pub fn restore(mut self, config: S::Config) -> Result<Run<S>> {
         self.validate()?;
-        Ok(Run::from_universe(self, config))
+        self.world.configure(&config)?;
+        Ok(Run::from_universe(self))
     }
 
-    pub(crate) fn compute_update(
-        &self,
-        config: &S::Config,
-    ) -> Result<(S::Report, UniverseUpdate<S>)> {
+    pub(crate) fn compute_update(&self) -> Result<(S::Report, UniverseUpdate<S>)> {
         let step = self
             .step
             .checked_add(1)
             .ok_or_else(|| anyhow::anyhow!("universe step counter is exhausted"))?;
         ensure!(step < u64::MAX, "universe step counter is exhausted");
-        let (report, world) = self.world.compute_update(step, config)?;
+        let (report, world) = self.world.compute_update(step)?;
         Ok((report, UniverseUpdate { step, world }))
     }
 
@@ -104,8 +104,8 @@ impl<S: Simulation> Universe<S> {
         self.step = update.step;
     }
 
-    pub fn advance(&mut self, config: &S::Config) -> Result<S::Report> {
-        let (report, update) = self.compute_update(config)?;
+    pub fn advance(&mut self) -> Result<S::Report> {
+        let (report, update) = self.compute_update()?;
         self.apply_update(update);
         Ok(report)
     }

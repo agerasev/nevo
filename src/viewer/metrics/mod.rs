@@ -157,9 +157,7 @@ impl Panel {
         if history.total_windows() == 0 {
             ui.add_space(12.0);
             ui.label("Waiting for recorded metric windows…");
-            ui.weak(
-                "Enable collection with configs/metrics.toml. New records appear automatically.",
-            );
+            ui.weak("New windows appear automatically as the run advances.");
             return;
         }
         let mut fit = false;

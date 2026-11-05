@@ -3,6 +3,8 @@ use crate::context::Cpu;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
+type Cx = Cpu<Xoshiro256PlusPlus>;
+
 #[test]
 fn recurrent_units_read_previous_memory() {
     let mut genome = RnnGenome::default();
@@ -18,12 +20,11 @@ fn recurrent_units_read_previous_memory() {
     let before = cx.clone();
 
     assert_eq!(
-        mind.process([1.0, 0.0, 0.0], &Config::default(), &mut cx)
-            .unwrap(),
+        mind.process([1.0, 0.0, 0.0], &mut cx).unwrap(),
         [1.0_f32.tanh(), 0.0, -1.0]
     );
     assert_eq!(
-        mind.process([0.0; 3], &Config::default(), &mut cx).unwrap(),
+        mind.process([0.0; 3], &mut cx).unwrap(),
         [0.0, 1.0_f32.tanh().tanh(), -1.0]
     );
     assert_eq!(mind.memory, [0.0, 1.0_f32.tanh().tanh(), 0.0, 0.0]);
@@ -42,17 +43,13 @@ fn preparing_and_discarding_memory_does_not_change_the_mind() {
     };
     let original_cx = cx.clone();
 
-    let (output, discarded) = mind
-        .compute_update([0.0; 3], &Config::default(), &mut cx)
-        .unwrap();
+    let (output, discarded) = mind.compute_update([0.0; 3], &mut cx).unwrap();
     assert_eq!(output, [0.5_f32.tanh(), 0.0, 0.0]);
     assert_ne!(discarded.memory, mind.memory);
     assert_eq!(mind, original);
     assert_eq!(cx, original_cx);
 
-    let (repeated_output, update) = mind
-        .compute_update([0.0; 3], &Config::default(), &mut cx)
-        .unwrap();
+    let (repeated_output, update) = mind.compute_update([0.0; 3], &mut cx).unwrap();
     assert_eq!((repeated_output, update), (output, discarded));
     <Rnn as Mind<Cpu<Xoshiro256PlusPlus>>>::apply_update(&mut mind, update);
     assert_eq!(mind.memory, update.memory);
@@ -70,16 +67,13 @@ fn invalid_prepared_memory_fails_before_changing_the_mind() {
     let original_cx = cx.clone();
 
     assert!(
-        mind.compute_update([f32::NAN, 0.0, 0.0], &Config::default(), &mut cx)
+        mind.compute_update([f32::NAN, 0.0, 0.0], &mut cx)
             .unwrap_err()
             .to_string()
             .contains("prepared recurrent memory")
     );
     assert_eq!(mind, original);
-    assert!(
-        mind.process([f32::NAN, 0.0, 0.0], &Config::default(), &mut cx)
-            .is_err()
-    );
+    assert!(mind.process([f32::NAN, 0.0, 0.0], &mut cx).is_err());
     assert_eq!(mind, original);
     assert_eq!(cx, original_cx);
 }
@@ -100,18 +94,16 @@ fn metrics_follow_applied_memory_and_restart_after_deserialization() {
             saturation: true,
         },
     };
+    <Rnn as Mind<Cx>>::configure(&mut mind, &config, true).unwrap();
     let before = mind.metrics();
-    let (_, update) = mind.compute_update([0.0; 3], &config, &mut cx).unwrap();
+    let (_, update) = mind.compute_update([0.0; 3], &mut cx).unwrap();
     assert_eq!(mind.metrics(), before, "computing must not publish metrics");
     <Rnn as Mind<Cpu<Xoshiro256PlusPlus>>>::apply_update(&mut mind, update);
     let first_metrics = mind.metrics();
     assert_eq!(first_metrics.value().activation.unwrap().count, Some(4));
     assert_eq!(first_metrics.value().saturation_fraction, Some(0.25));
     assert_eq!(mind.metrics(), first_metrics, "queries are pure");
-    assert!(
-        mind.compute_update([f32::NAN, 0.0, 0.0], &config, &mut cx)
-            .is_err()
-    );
+    assert!(mind.compute_update([f32::NAN, 0.0, 0.0], &mut cx).is_err());
     assert_eq!(
         mind.metrics(),
         first_metrics,
@@ -120,20 +112,34 @@ fn metrics_follow_applied_memory_and_restart_after_deserialization() {
 
     let mut encoded = Vec::new();
     ciborium::into_writer(&mind, &mut encoded).unwrap();
-    let restored: Rnn = ciborium::from_reader(encoded.as_slice()).unwrap();
+    let mut restored: Rnn = ciborium::from_reader(encoded.as_slice()).unwrap();
     assert_eq!(mind, restored, "cache state is outside simulation equality");
     assert_eq!(restored.metrics(), Summary::default());
+    assert_eq!(restored.metrics_config, None);
     let mut reencoded = Vec::new();
     ciborium::into_writer(&restored, &mut reencoded).unwrap();
     assert_eq!(encoded, reencoded, "metrics never enter checkpoint bytes");
 
-    mind.process([0.0; 3], &config, &mut cx).unwrap();
+    <Rnn as Mind<Cx>>::configure(&mut restored, &config, true).unwrap();
+    assert_eq!(mind, restored, "configuration preserves recurrent state");
+    assert_eq!(restored.metrics(), Summary::default());
+    let restored_output = restored.process([0.0; 3], &mut cx).unwrap();
+    assert_eq!(mind.process([0.0; 3], &mut cx).unwrap(), restored_output);
+    assert_eq!(mind, restored);
+    assert_eq!(mind.metrics(), restored.metrics());
+
+    mind.process([0.0; 3], &mut cx).unwrap();
     assert_eq!(
         mind.metrics().value().activation.unwrap().count,
         Some(4),
         "activations describe current units, not a temporal accumulator"
     );
-    mind.process([0.0; 3], &Config::default(), &mut cx).unwrap();
+    let before_disable = mind.clone();
+    <Rnn as Mind<Cx>>::configure(&mut mind, &config, false).unwrap();
+    assert_eq!(mind, before_disable);
+    assert_eq!(mind.metrics_config, None);
+    assert_eq!(mind.metrics(), Summary::default());
+    mind.process([0.0; 3], &mut cx).unwrap();
     assert_eq!(mind.metrics(), Summary::default());
 }
 
@@ -152,8 +158,10 @@ fn activation_reductions_merge_across_brains_and_genetic_variance_across_genomes
     };
     let mut first = Rnn::new(RnnGenome { weights: [0.0; 47] });
     let mut second = Rnn::new(RnnGenome { weights: [1.0; 47] });
-    first.process([0.0; 3], &config, &mut cx).unwrap();
-    second.process([0.0; 3], &config, &mut cx).unwrap();
+    <Rnn as Mind<Cx>>::configure(&mut first, &config, true).unwrap();
+    <Rnn as Mind<Cx>>::configure(&mut second, &config, true).unwrap();
+    first.process([0.0; 3], &mut cx).unwrap();
+    second.process([0.0; 3], &mut cx).unwrap();
     let mut summary = first.metrics();
     second.collect_metrics(&mut summary);
     assert_eq!(summary.value().activation.unwrap().count, Some(8));

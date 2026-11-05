@@ -46,6 +46,8 @@ impl<const FAIL_INIT: bool> Mutate<GeneticContext, FixedMutation> for FixedGenom
 struct FixedMind<const FAIL_INIT: bool = false> {
     genome: FixedGenome<FAIL_INIT>,
     calls: usize,
+    configurations: usize,
+    metrics_enabled: bool,
 }
 
 impl<const FAIL_INIT: bool> AsRef<FixedGenome<FAIL_INIT>> for FixedMind<FAIL_INIT> {
@@ -59,7 +61,12 @@ impl<const FAIL_INIT: bool> TryFrom<FixedGenome<FAIL_INIT>> for FixedMind<FAIL_I
 
     fn try_from(genome: FixedGenome<FAIL_INIT>) -> Result<Self> {
         ensure!(!genome.reject_mind, "mind construction failed");
-        Ok(Self { genome, calls: 0 })
+        Ok(Self {
+            genome,
+            calls: 0,
+            configurations: 0,
+            metrics_enabled: false,
+        })
     }
 }
 
@@ -69,10 +76,15 @@ impl<const FAIL_INIT: bool> Mind<GeneticContext> for FixedMind<FAIL_INIT> {
     type Update = usize;
     type Config = ();
 
+    fn configure(&mut self, _: &(), metrics_enabled: bool) -> Result<()> {
+        self.configurations += 1;
+        self.metrics_enabled = metrics_enabled;
+        Ok(())
+    }
+
     fn compute_update(
         &self,
         _: FoodObservation,
-        _: &(),
         cx: &mut GeneticContext,
     ) -> Result<(MoveAction, usize)> {
         if self.genome.fail_mind {
@@ -111,7 +123,7 @@ impl Fixture {
 
     fn tick(&mut self) -> TickReport {
         self.number += 1;
-        self.world.advance(self.number, &Config::default()).unwrap()
+        self.world.advance(self.number).unwrap()
     }
 
     fn action(&mut self, action: MoveAction) {
@@ -246,7 +258,7 @@ fn parent_senses_ripe_food_and_newborn_waits_to_process_it() {
     expected_genome
         .mutate(&WeightMutation::default(), &mut expected_context)
         .unwrap();
-    let first = world.advance(1, &Config::default()).unwrap();
+    let first = world.advance(1).unwrap();
     assert_eq!(
         world.animals[&id(1)].mind.brain.genome,
         before.animals[&id(1)].mind.brain.genome
@@ -261,7 +273,7 @@ fn parent_senses_ripe_food_and_newborn_waits_to_process_it() {
     assert_eq!(world.animals[&id(2)].body.energy, 213.0);
     assert_ne!(world.animals[&id(1)].mind.brain.memory, [0.0; 4]);
     assert_eq!(world.animals[&id(2)].mind.brain.memory, [0.0; 4]);
-    let second = world.advance(2, &Config::default()).unwrap();
+    let second = world.advance(2).unwrap();
     assert_eq!(
         second
             .decisions
@@ -377,7 +389,7 @@ fn failures_in_processing_mutation_or_construction_leave_the_published_universe_
         }
         let mut universe = Universe::from_world(fixture.world).unwrap();
         let original = universe.clone();
-        assert!(universe.advance(&Config::default()).is_err());
+        assert!(universe.advance().is_err());
         assert_eq!(universe, original);
     }
 }
@@ -387,7 +399,7 @@ fn initial_and_later_arrivals_use_the_same_admission_and_rng_sequence() {
     let mut initial = Ecosystem::<AnimalMind>::empty(0, 0, 42, 17, None, WeightMutation::default());
     let arrivals = initial.admit(1, Admission::default()).unwrap();
     let mut later = Ecosystem::<AnimalMind>::empty(0, 1, 42, 17, None, WeightMutation::default());
-    let report = later.advance(1, &Config::default()).unwrap();
+    let report = later.advance(1).unwrap();
     assert_eq!(arrivals, vec![id(1)]);
     assert_eq!(
         initial.animals[&id(1)].body.position,
@@ -477,7 +489,7 @@ fn a_different_genome_and_mutation_type_drive_generic_reproduction() {
     assert_eq!(world.animals[&parent].mind.genome.allele, parent_allele);
     assert_eq!(world.context.rng, expected_rng);
 
-    let report = world.advance(1, &Config::default()).unwrap();
+    let report = world.advance(1).unwrap();
     let child = match report.events.as_slice() {
         [
             Event::Birth {
@@ -515,7 +527,7 @@ fn failed_random_initialization_does_not_publish_consumed_randomness() {
     let original = universe.clone();
     assert!(
         universe
-            .advance(&Config::default())
+            .advance()
             .unwrap_err()
             .to_string()
             .contains("initialization failed")
@@ -541,7 +553,7 @@ fn immigrant_template_applies_to_every_arrival_without_genetic_draws() {
         energy: 100.0,
     };
     let first = world.admit(1, admission).unwrap()[0];
-    world.advance(1, &Config::default()).unwrap();
+    world.advance(1).unwrap();
     assert_ne!(world.animals[&first].mind.brain.memory, [0.0; 4]);
     let later = world.admit(1, admission).unwrap()[0];
     for animal in world.animals.values() {
@@ -563,7 +575,7 @@ fn an_invalid_template_is_rejected_even_without_animals() {
 fn preparing_and_discarding_a_tick_leaves_every_component_unchanged() {
     let fixture = Fixture::debug(14);
     let before = fixture.world.clone();
-    let (first, update) = fixture.world.compute_update(1, &Config::default()).unwrap();
+    let (first, update) = fixture.world.compute_update(1).unwrap();
     assert_eq!(fixture.world, before);
     assert!(
         first
@@ -572,7 +584,7 @@ fn preparing_and_discarding_a_tick_leaves_every_component_unchanged() {
             .any(|event| matches!(event, Event::Birth { .. }))
     );
     drop(update);
-    let (repeated, update) = fixture.world.compute_update(1, &Config::default()).unwrap();
+    let (repeated, update) = fixture.world.compute_update(1).unwrap();
     assert_eq!(repeated, first);
     let mut world = fixture.world;
     world.apply_update(update);
@@ -593,7 +605,7 @@ fn exhausted_allocators_cannot_publish_partial_ticks() {
         }
         let mut universe = Universe::from_world(fixture.world).unwrap();
         let original = universe.clone();
-        assert!(universe.advance(&Config::default()).is_err());
+        assert!(universe.advance().is_err());
         assert_eq!(universe, original);
     }
 }
@@ -653,7 +665,6 @@ fn stepping_requires_no_mind_clone_and_copies_genomes_only_for_arrivals_and_birt
         fn compute_update(
             &self,
             _: FoodObservation,
-            _: &(),
             _: &mut GeneticContext,
         ) -> Result<(MoveAction, usize)> {
             Ok((MoveAction::default(), self.calls + 1))
@@ -682,7 +693,7 @@ fn stepping_requires_no_mind_clone_and_copies_genomes_only_for_arrivals_and_birt
         )
         .unwrap()[0];
     assert_eq!(copies.load(Ordering::Relaxed), 1, "one immigrant genome");
-    let mut run = Run::from_universe(Universe::from_world(world).unwrap(), Config::default());
+    let mut run = Run::from_universe(Universe::from_world(world).unwrap());
     // Initial validation also checks the template by developing a fresh mind.
     let before = copies.load(Ordering::Relaxed);
     for _ in 0..3 {
@@ -715,7 +726,7 @@ fn stepping_requires_no_mind_clone_and_copies_genomes_only_for_arrivals_and_birt
             },
         )
         .unwrap();
-    let mut run = Run::from_universe(Universe::from_world(world).unwrap(), Config::default());
+    let mut run = Run::from_universe(Universe::from_world(world).unwrap());
     let before = copies.load(Ordering::Relaxed);
     let report = run.tick().unwrap();
     assert_eq!(
@@ -768,7 +779,8 @@ fn measured_config<MC: Default>() -> Config<MC> {
 #[test]
 fn metrics_selection_preserves_every_report_and_checkpoint_byte() {
     use crate::metrics::{Metrics, Selection};
-    let config: Config = crate::test_support::ecosystem("debug");
+    let mut config: Config = crate::test_support::ecosystem("debug");
+    config.metrics.enabled = false;
     let mut selected = config.clone();
     selected.metrics = measured_config::<()>().metrics;
     selected.animal.metrics = measured_config::<()>().animal.metrics;
@@ -780,8 +792,8 @@ fn metrics_selection_preserves_every_report_and_checkpoint_byte() {
     let mut measured = Ecosystem::new(selected.clone(), 42).unwrap();
     for tick in 1..=120 {
         assert_eq!(
-            plain.advance(tick, &config).unwrap(),
-            measured.advance(tick, &selected).unwrap()
+            plain.advance(tick).unwrap(),
+            measured.advance(tick).unwrap()
         );
         let encode = |world: &Ecosystem| {
             let mut bytes = Vec::new();
@@ -815,7 +827,8 @@ fn window_reports_use_actual_samples_and_active_animal_exposure() {
     use crate::metrics::Metrics;
     let mut fixture = Fixture::debug(43);
     let config = measured_config();
-    fixture.world.advance(1, &config).unwrap();
+    fixture.world.configure(&config).unwrap();
+    fixture.world.advance(1).unwrap();
     let first = fixture.world.metrics();
     assert_eq!(
         first.window,
@@ -836,7 +849,7 @@ fn window_reports_use_actual_samples_and_active_animal_exposure() {
     assert_eq!(first.animal.body.food_gained.value().sum, Some(40.0));
     assert_eq!(first.animal.body.offspring.value().mean, Some(0.5));
     assert_eq!(first.observed_survival.unwrap().mean, None);
-    fixture.world.advance(2, &config).unwrap();
+    fixture.world.advance(2).unwrap();
     let second = fixture.world.metrics();
     let events = second.events.unwrap();
     assert_eq!(
@@ -845,9 +858,9 @@ fn window_reports_use_actual_samples_and_active_animal_exposure() {
     );
     assert_eq!(events.births_per_tick, 0.5);
     assert_eq!(events.births_per_animal_tick, Some(1.0 / 3.0));
-    fixture.world.advance(3, &config).unwrap();
+    fixture.world.advance(3).unwrap();
     assert!(fixture.world.metrics_window().unwrap().complete);
-    fixture.world.advance(4, &config).unwrap();
+    fixture.world.advance(4).unwrap();
     let reset = fixture.world.metrics();
     assert_eq!(
         reset.window,
@@ -865,33 +878,39 @@ fn window_reports_use_actual_samples_and_active_animal_exposure() {
 #[test]
 fn cbor_resume_starts_fresh_metrics_at_the_restored_tick() {
     use crate::{metrics::Metrics, universe::Universe};
-    let config: Config = crate::test_support::ecosystem("debug");
-    let mut selected = config.clone();
+    let mut selected: Config = crate::test_support::ecosystem("debug");
     selected.metrics = measured_config::<()>().metrics;
     selected.animal.metrics = measured_config::<()>().animal.metrics;
     selected.animal.body.metrics.energy = crate::metrics::Selection::all();
-    let mut original = Universe::new(config, 44).unwrap();
-    original.advance(&selected).unwrap();
-    original.advance(&selected).unwrap();
+    let mut original = Universe::new(selected.clone(), 44).unwrap();
+    original.advance().unwrap();
+    original.advance().unwrap();
     let mut bytes = Vec::new();
     ciborium::into_writer(&original, &mut bytes).unwrap();
-    let mut resumed: Universe = ciborium::from_reader(bytes.as_slice()).unwrap();
-    assert_eq!(original, resumed);
-    assert!(resumed.world().metrics_window().is_none());
-    assert!(!resumed.world().metrics_enabled());
-    assert_eq!(
-        original.advance(&selected).unwrap(),
-        resumed.advance(&selected).unwrap()
-    );
-    assert_eq!(original, resumed);
-    let summary = resumed.world().metrics();
+    let decoded: Universe = ciborium::from_reader(bytes.as_slice()).unwrap();
+    assert_eq!(original, decoded);
+    assert!(decoded.world().metrics_window().is_none());
+    assert!(!decoded.world().metrics_enabled());
+    let mut resumed = decoded.restore(selected).unwrap();
+    {
+        let state = resumed.universe().read();
+        assert!(state.world().metrics_enabled());
+        assert!(state.world().metrics_window().is_none());
+        let initial = state.world().metrics();
+        assert!(initial.events.is_none());
+        assert!(initial.population.is_some());
+    }
+    assert_eq!(original.advance().unwrap(), resumed.tick().unwrap());
+    let state = resumed.universe().read();
+    assert_eq!(original, *state);
+    let summary = state.world().metrics();
     assert_eq!(
         summary.window,
         Some(Window {
             start_tick: 2,
             end_tick: 3,
             samples: 1,
-            complete: false
+            complete: false,
         })
     );
     assert_eq!(summary.events.unwrap().births, 0);
@@ -902,15 +921,14 @@ fn cbor_resume_starts_fresh_metrics_at_the_restored_tick() {
 fn failed_or_discarded_computation_does_not_publish_metrics() {
     let mut fixture = Fixture::debug(45);
     let config = measured_config();
+    fixture.world.configure(&config).unwrap();
     let before = fixture.world.metrics.clone();
-    let (_, discarded) = fixture.world.compute_update(1, &config).unwrap();
+    let body_before = fixture.world.animals[&id(1)].body.metrics;
+    let (_, discarded) = fixture.world.compute_update(1).unwrap();
     drop(discarded);
     assert_eq!(fixture.world.metrics, before);
-    assert_eq!(
-        fixture.world.animals[&id(1)].body.metrics,
-        metrics::BodyCache::default()
-    );
-    fixture.world.advance(1, &config).unwrap();
+    assert_eq!(fixture.world.animals[&id(1)].body.metrics, body_before);
+    fixture.world.advance(1).unwrap();
     let before = fixture.world.metrics.clone();
     let body_metrics = fixture.world.animals[&id(1)].body.metrics;
     fixture
@@ -921,7 +939,7 @@ fn failed_or_discarded_computation_does_not_publish_metrics() {
         .mind
         .genome
         .fail_mind = true;
-    assert!(fixture.world.compute_update(2, &config).is_err());
+    assert!(fixture.world.compute_update(2).is_err());
     assert_eq!(fixture.world.metrics, before);
     assert_eq!(fixture.world.animals[&id(1)].body.metrics, body_metrics);
 }
@@ -933,8 +951,9 @@ fn deaths_report_window_observation_and_empty_exposure_is_unavailable() {
     fixture.world.plants[0].position.x = 100.0;
     fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = 1.0;
     let config = measured_config();
-    fixture.world.advance(1, &config).unwrap();
-    fixture.world.advance(2, &config).unwrap();
+    fixture.world.configure(&config).unwrap();
+    fixture.world.advance(1).unwrap();
+    fixture.world.advance(2).unwrap();
     let summary = fixture.world.metrics();
     assert_eq!(summary.observed_survival.unwrap().mean, Some(1.0));
     let events = summary.events.unwrap();
@@ -942,29 +961,33 @@ fn deaths_report_window_observation_and_empty_exposure_is_unavailable() {
     assert_eq!(events.deaths_per_tick, 0.5);
     assert_eq!(summary.animal.body.energy.value().count, Some(0));
     assert_eq!(summary.animal.body.energy.value().mean, None);
-    fixture.world.advance(3, &config).unwrap();
-    fixture.world.advance(4, &config).unwrap();
+    fixture.world.advance(3).unwrap();
+    fixture.world.advance(4).unwrap();
     let summary = fixture.world.metrics();
     assert_eq!(summary.events.unwrap().food_per_animal_tick, None);
     assert_eq!(summary.observed_survival.unwrap().count, Some(0));
 }
 
 #[test]
-fn config_validation_and_selection_changes_restart_a_clean_window() {
+fn explicit_configuration_validates_and_starts_a_clean_window() {
     use crate::metrics::{Metrics, Selection};
     let mut fixture = Fixture::debug(47);
     let mut config = measured_config();
+    fixture.world.configure(&config).unwrap();
     let mut invalid = config;
     invalid.metrics.window_ticks = 0;
     assert!(invalid.validate().is_err());
-    assert!(fixture.world.compute_update(1, &invalid).is_err());
-    fixture.world.advance(1, &config).unwrap();
+    let before = fixture.world.metrics.clone();
+    assert!(fixture.world.configure(&invalid).is_err());
+    assert_eq!(fixture.world.metrics, before);
+    fixture.world.advance(1).unwrap();
     config.animal.body.metrics.energy = Selection {
         min: true,
         ..Selection::default()
     };
     config.animal.metrics.food_gained = Selection::default();
-    fixture.world.advance(2, &config).unwrap();
+    fixture.world.configure(&config).unwrap();
+    fixture.world.advance(2).unwrap();
     let summary = fixture.world.metrics();
     assert_eq!(summary.window.unwrap().start_tick, 1);
     assert!(!summary.animal.body.food_gained.enabled());
@@ -981,17 +1004,274 @@ fn ecosystem_collection_replaces_one_snapshot_including_when_disabled() {
     use crate::metrics::Metrics;
     let mut fixture = Fixture::debug(48);
     let mut config = measured_config();
-    fixture.world.advance(1, &config).unwrap();
+    fixture.world.configure(&config).unwrap();
+    fixture.world.advance(1).unwrap();
     let mut summary = fixture.world.metrics();
     let first = serde_json::to_value(&summary).unwrap();
     fixture.world.collect_metrics(&mut summary);
     assert_eq!(serde_json::to_value(&summary).unwrap(), first);
     config.metrics.enabled = false;
-    fixture.world.advance(2, &config).unwrap();
+    fixture.world.configure(&config).unwrap();
+    fixture.world.advance(2).unwrap();
     fixture.world.collect_metrics(&mut summary);
     assert!(summary.window.is_none());
     assert!(summary.events.is_none());
     assert!(summary.population.is_none());
     assert!(summary.genome.is_none());
     assert!(!summary.animal.body.energy.enabled());
+}
+
+#[test]
+fn lightweight_defaults_apply_before_the_first_tick_and_allow_field_overrides() {
+    use crate::metrics::Metrics;
+    let config = Config {
+        initial_animals: 1,
+        plants: 1,
+        minimum_population: 0,
+        ..Config::default()
+    };
+    let mut world = Ecosystem::new(config, 49).unwrap();
+    assert!(world.metrics_enabled());
+    assert!(world.metrics_window().is_none());
+    let initial = world.metrics();
+    assert_eq!(
+        initial.population.unwrap(),
+        PopulationSummary {
+            animals: 1,
+            plants: 1
+        }
+    );
+    assert!(initial.events.is_none());
+    assert!(initial.genome.is_none());
+    assert_eq!(initial.animal.body.energy.value().mean, Some(START_ENERGY));
+    assert_eq!(initial.plant.energy.value().min, Some(RIPE_ENERGY));
+    assert!(!initial.animal.body.distance.enabled());
+    assert!(initial.animal.mind.value().activation.is_none());
+    world.advance(1).unwrap();
+    assert!(world.metrics().events.is_some());
+
+    let partial: Config = toml::from_str(
+        r#"
+[animal.body.metrics.energy]
+mean = false
+[plant.metrics.energy]
+mean = false
+"#,
+    )
+    .unwrap();
+    for selection in [
+        partial.animal.body.metrics.energy,
+        partial.plant.metrics.energy,
+    ] {
+        assert!(!selection.mean);
+        assert!(selection.min && selection.max);
+        assert!(!selection.count && !selection.sum && !selection.variance);
+    }
+    let off: Config = toml::from_str(
+        r#"
+[animal.body.metrics.energy]
+mean = false
+min = false
+max = false
+[plant.metrics.energy]
+mean = false
+min = false
+max = false
+"#,
+    )
+    .unwrap();
+    assert!(!off.animal.body.metrics.energy.enabled());
+    assert!(!off.plant.metrics.energy.enabled());
+}
+
+#[test]
+fn setup_occurs_once_for_initial_animals_births_and_immigrants() {
+    use crate::metrics::Metrics;
+    let mut config: Config<()> = measured_config();
+    config.initial_animals = 1;
+    config.initial_animal_energy = 390.0;
+    config.initial_animal_position = Placement::Fixed(DVec2::ZERO);
+    config.initial_plant_position = Placement::Fixed(DVec2::ZERO);
+    config.plants = 1;
+    config.minimum_population = 0;
+    config.metrics.window_ticks = 1;
+    let mut world = Ecosystem::<FixedMind, FixedGenome, FixedMutation>::with_genetics(
+        config,
+        50,
+        None,
+        FixedMutation::default(),
+    )
+    .unwrap();
+    assert_eq!(world.animals[&id(1)].mind.configurations, 1);
+    assert!(world.animals[&id(1)].mind.metrics_enabled);
+    world.advance(1).unwrap();
+    assert_eq!(world.animals.len(), 2);
+    assert_eq!(world.metrics().animal.body.offspring.value().sum, Some(1.0));
+    assert_eq!(world.animals[&id(2)].body.metrics.offspring, 0);
+    world.advance(2).unwrap();
+    assert_eq!(world.metrics().animal.body.offspring.value().sum, Some(0.0));
+    for animal in world.animals.values() {
+        assert_eq!(animal.mind.configurations, 1);
+        assert!(animal.body.metrics.body.energy.enabled());
+        assert!(animal.mind.metrics_enabled);
+    }
+    world.set_minimum_population(3);
+    world.advance(3).unwrap();
+    let immigrant = &world.animals[&id(3)];
+    assert_eq!(immigrant.mind.configurations, 1);
+    assert_eq!(immigrant.mind.calls, 0);
+    assert!(immigrant.mind.metrics_enabled);
+    assert!(immigrant.body.metrics.body.energy.enabled());
+    assert!(
+        world
+            .plants
+            .iter()
+            .all(|plant| plant.metrics.energy.enabled())
+    );
+}
+
+#[test]
+fn master_disable_reaches_every_collector_on_creation_resume_and_new_arrivals() {
+    use crate::{
+        metrics::{Metrics, Selection},
+        universe::Universe,
+    };
+    let mut config: Config = crate::test_support::ecosystem("debug");
+    config.metrics = measured_config::<()>().metrics;
+    config.animal.metrics = measured_config::<()>().animal.metrics;
+    config.animal.body.metrics.energy = Selection::all();
+    config.plant.metrics.energy = Selection::all();
+    config.animal.mind.brain.metrics.activation = Selection::all();
+    config.animal.mind.brain.metrics.saturation = true;
+    let mut measured = Universe::new(config.clone(), 51).unwrap();
+    measured.advance().unwrap();
+    assert!(
+        measured
+            .world()
+            .metrics()
+            .animal
+            .mind
+            .value()
+            .activation
+            .is_some()
+    );
+    let mut bytes = Vec::new();
+    ciborium::into_writer(&measured, &mut bytes).unwrap();
+    config.metrics.enabled = false;
+    config.metrics.window_ticks = 0; // Disabled collectors need no valid window.
+    let decoded: Universe = ciborium::from_reader(bytes.as_slice()).unwrap();
+    let mut resumed = decoded.restore(config.clone()).unwrap();
+    for _ in 0..3 {
+        let state = resumed.universe().read();
+        assert!(!state.world().metrics_enabled());
+        assert!(state.world().metrics_window().is_none());
+        for animal in state.world().animals.values() {
+            assert_eq!(animal.body.metrics, metrics::BodyCache::default());
+            let brain = animal.mind.metrics().value();
+            assert!(brain.activation.is_none());
+            assert!(brain.saturation_fraction.is_none());
+        }
+        assert!(
+            state
+                .world()
+                .plants
+                .iter()
+                .all(|plant| !plant.metrics.energy.enabled())
+        );
+        drop(state);
+        resumed.tick().unwrap();
+    }
+    let mut disabled = Ecosystem::new(config, 51).unwrap();
+    disabled.advance(1).unwrap(); // Feeding creates a newborn under disabled settings.
+    assert_eq!(disabled.animals.len(), 2);
+    disabled.set_minimum_population(3);
+    disabled.advance(2).unwrap(); // Immigration uses the same disabled policy.
+    disabled.advance(3).unwrap(); // All new minds have now acted.
+    for animal in disabled.animals.values() {
+        assert_eq!(animal.body.metrics, metrics::BodyCache::default());
+        assert!(animal.mind.metrics().value().activation.is_none());
+        assert!(animal.mind.metrics().value().saturation_fraction.is_none());
+    }
+    assert!(
+        disabled
+            .plants
+            .iter()
+            .all(|plant| !plant.metrics.energy.enabled())
+    );
+    assert!(disabled.metrics().window.is_none());
+}
+
+#[test]
+fn template_validation_does_not_require_deserialized_runtime_settings() {
+    use crate::universe::Universe;
+
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    struct ConfiguredMind {
+        genome: RnnGenome,
+        #[serde(skip)]
+        configured: bool,
+    }
+    impl From<RnnGenome> for ConfiguredMind {
+        fn from(genome: RnnGenome) -> Self {
+            Self {
+                genome,
+                configured: false,
+            }
+        }
+    }
+    impl AsRef<RnnGenome> for ConfiguredMind {
+        fn as_ref(&self) -> &RnnGenome {
+            &self.genome
+        }
+    }
+    impl Mind<GeneticContext> for ConfiguredMind {
+        type Input = FoodObservation;
+        type Output = MoveAction;
+        type Update = ();
+        type Config = u8;
+        fn configure(&mut self, config: &u8, _: bool) -> Result<()> {
+            ensure!(*config > 0, "the default runtime configuration is invalid");
+            self.configured = true;
+            Ok(())
+        }
+        fn compute_update(
+            &self,
+            _: FoodObservation,
+            _: &mut GeneticContext,
+        ) -> Result<(MoveAction, ())> {
+            ensure!(self.configured, "mind was not configured");
+            Ok((MoveAction::default(), ()))
+        }
+        fn apply_update(&mut self, _: ()) {}
+    }
+    let mut config = Config::<u8> {
+        initial_animals: 0,
+        plants: 0,
+        minimum_population: 1,
+        ..Config::default()
+    };
+    config.animal.mind = 7;
+    let world = Ecosystem::<ConfiguredMind>::with_genetics(
+        config,
+        52,
+        Some(RnnGenome::default()),
+        WeightMutation::default(),
+    )
+    .unwrap();
+    world.validate().unwrap();
+    let original = Universe::from_world(world).unwrap();
+    let mut bytes = Vec::new();
+    ciborium::into_writer(&original, &mut bytes).unwrap();
+    let decoded: Universe<Ecosystem<ConfiguredMind>> =
+        ciborium::from_reader(bytes.as_slice()).unwrap();
+    assert!(decoded.world().mind_config.is_none());
+    decoded.validate().unwrap();
+    let mut resumed = decoded.restore(config).unwrap();
+    resumed.tick().unwrap(); // The immigrant receives the supplied valid settings.
+    resumed.tick().unwrap(); // Its first computation requires those settings.
+    assert!(
+        resumed.universe().read().world().animals[&id(1)]
+            .mind
+            .configured
+    );
 }

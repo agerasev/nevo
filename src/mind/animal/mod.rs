@@ -62,10 +62,13 @@ where
     type Update = M::Update;
     type Config = Config<M::Config>;
 
+    fn configure(&mut self, config: &Self::Config, metrics_enabled: bool) -> Result<()> {
+        self.brain.configure(&config.brain, metrics_enabled)
+    }
+
     fn compute_update(
         &self,
         observation: FoodObservation,
-        config: &Self::Config,
         cx: &mut C,
     ) -> Result<(MoveAction, Self::Update)> {
         let (output, update) = self.brain.compute_update(
@@ -74,7 +77,6 @@ where
                 observation.gradient.y as f32,
                 observation.strength as f32,
             ],
-            &config.brain,
             cx,
         )?;
         Ok((

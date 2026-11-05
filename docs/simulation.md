@@ -60,16 +60,19 @@ counter under a write lock. Other readers can inspect the previous complete stat
 during computation. The runner is the sole writer; `UniverseView` exposes only reads.
 
 `Simulation` and `Mind` remain separate contracts with consistent method names.
-`compute_update(input, &config, context)` returns `(output, update)`; Simulation
+`compute_update(input, context)` returns `(output, update)`; Simulation
 uses the tick as input and owns its execution context internally. `apply_update`
 consumes the update. `Simulation::Report` and `Mind::Output` are observations of the
 computation; their `Update` types contain changes to commit.
 
-Each contract has an associated `Config`. Run owns the experiment configuration;
-Universe and the experiment borrow it during computation. The ecosystem passes
-`config.animal.mind` to each mind, and the food adapter passes its `brain` subtree
-to the brain. Configuration follows component ownership without a per-entity map.
-Direct `Universe::advance(&config)` and `Universe::restore(config)` take it explicitly.
+Each contract has an associated `Config` and a `configure` setup hook. Creation
+and `Universe::restore(config)` configure components before running; step methods
+use stored settings. Mind setup receives its own config and the parent's metrics
+enable flag, which gates diagnostics without changing behavior. New animals use
+the ecosystem's stored mind settings. Configuration follows component ownership
+without a per-entity map. Direct `Universe::advance()` needs no configuration.
+`Run::from_universe` wraps an already configured Universe; cloning a Run preserves
+its current runtime caches rather than treating the clone as a resume.
 
 Computation performs all fallible work, validates the proposed state, and uses
 private RNG copies. Failure or a discarded update leaves published state unchanged.

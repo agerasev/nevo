@@ -216,8 +216,8 @@ fn minimum_population_is_an_experiment_setting() {
     assert_eq!(unsupported.world().plants(), supported_world.plants());
     let mut supported = Universe::from_world(supported_world).unwrap();
 
-    let unsupported_report = unsupported.advance(&Config::default()).unwrap();
-    let supported_report = supported.advance(&Config::default()).unwrap();
+    let unsupported_report = unsupported.advance().unwrap();
+    let supported_report = supported.advance().unwrap();
     assert!(
         !unsupported_report
             .events

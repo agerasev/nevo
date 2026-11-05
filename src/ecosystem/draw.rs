@@ -68,7 +68,7 @@ impl<B: Draw, M> Draw for Animal<B, M> {
     }
 }
 
-impl<M, G, P> Draw for Ecosystem<M, G, P> {
+impl<M, G, P, MC> Draw for Ecosystem<M, G, P, MC> {
     fn draw(&self, drawing: &mut Drawing<'_>) {
         let half = HALF_SIZE.as_vec2();
         drawing.scene.add(

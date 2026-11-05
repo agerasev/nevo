@@ -78,5 +78,5 @@ replacing saved files. See [persistence](persistence.md) for format and recovery
 Metrics configuration follows component ownership: `ecosystem.metrics`,
 `ecosystem.animal.metrics`, `ecosystem.animal.body.metrics`,
 `ecosystem.animal.mind.brain.metrics`, and `ecosystem.plant.metrics`.
-The [metrics preset](../configs/metrics.toml) is an overlay; see
+The [detailed metrics preset](../configs/metrics.toml) is an overlay; see
 [selection syntax and window semantics](metrics.md).

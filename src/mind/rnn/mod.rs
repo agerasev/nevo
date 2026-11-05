@@ -26,6 +26,8 @@ pub struct Rnn {
     pub genome: RnnGenome,
     pub memory: [f32; 4],
     #[serde(skip)]
+    metrics_config: Option<MetricsConfig>,
+    #[serde(skip)]
     metrics: Summary,
 }
 
@@ -47,6 +49,7 @@ impl Rnn {
         Self {
             genome,
             memory: [0.0; 4],
+            metrics_config: None,
             metrics: Summary::default(),
         }
     }
@@ -84,12 +87,15 @@ impl<C: Context + ?Sized> Mind<C> for Rnn {
     type Update = Update;
     type Config = Config;
 
-    fn compute_update(
-        &self,
-        input: Self::Input,
-        config: &Config,
-        _cx: &mut C,
-    ) -> Result<(Self::Output, Update)> {
+    fn configure(&mut self, config: &Config, metrics_enabled: bool) -> Result<()> {
+        self.metrics_config = (metrics_enabled
+            && (config.metrics.activation.enabled() || config.metrics.saturation))
+            .then_some(config.metrics);
+        self.metrics = Summary::default();
+        Ok(())
+    }
+
+    fn compute_update(&self, input: Self::Input, _cx: &mut C) -> Result<(Self::Output, Update)> {
         <Self as Mind<C>>::validate(self)?;
         let weights = &self.genome.weights;
         let sensed: [f32; 4] = matrix_vector(&weights[..12], &input);
@@ -107,7 +113,11 @@ impl<C: Context + ?Sized> Mind<C> for Rnn {
             *value += bias;
         }
 
-        let metrics = Summary::from_memory(&memory, &config.metrics);
+        let metrics = self
+            .metrics_config
+            .as_ref()
+            .map(|config| Summary::from_memory(&memory, config))
+            .unwrap_or_default();
         Ok((output, Update { memory, metrics }))
     }
 

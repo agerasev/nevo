@@ -6,7 +6,7 @@ use nevo::{
     genome::{Mutate, RandomInit},
     mind::{
         Mind,
-        animal::{AnimalMind, Config},
+        animal::AnimalMind,
         rnn::{RnnGenome, WeightMutation},
     },
 };
@@ -23,12 +23,7 @@ fn animal_accepts_another_mind_and_propagates_its_errors() {
         type Update = ();
         type Config = ();
 
-        fn compute_update(
-            &self,
-            input: Self::Input,
-            _: &(),
-            _: &mut C,
-        ) -> Result<(Self::Output, ())> {
+        fn compute_update(&self, input: Self::Input, _: &mut C) -> Result<(Self::Output, ())> {
             anyhow::ensure!(input.iter().all(|v| v.is_finite()), "invalid signal");
             Ok((input, ()))
         }
@@ -46,7 +41,6 @@ fn animal_accepts_another_mind_and_propagates_its_errors() {
                 gradient: DVec2::new(0.25, -0.5),
                 strength: -1.0,
             },
-            &Config::default(),
             &mut cx,
         )
         .unwrap();
@@ -59,7 +53,6 @@ fn animal_accepts_another_mind_and_propagates_its_errors() {
                     strength: f64::NAN,
                     ..FoodObservation::default()
                 },
-                &Config::default(),
                 &mut cx,
             )
             .unwrap_err()
@@ -117,9 +110,7 @@ fn mind_and_genome_accept_an_alternate_unsized_context() {
 
     let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
         &mut context;
-    let action = agent
-        .process(FoodObservation::default(), &Config::default(), cx)
-        .unwrap();
+    let action = agent.process(FoodObservation::default(), cx).unwrap();
     assert_eq!(action.direction, DVec2::X * f64::from(0.5_f32.tanh()));
     assert_eq!(action.speed_fraction, 1.0_f64.tanh());
     assert_ne!(agent.brain.memory, [0.0; 4]);

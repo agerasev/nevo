@@ -68,8 +68,9 @@ including Ctrl-C; their interval and retention count
 are configurable. `--ticks N` always means N additional ticks for that invocation.
 See [persistence options, format, and recovery](docs/persistence.md).
 
-Layer `--config configs/metrics.toml` to collect population, behavior, brain, and
-genetic statistics. Finalized windows append to one `metrics.cborseq` per run;
+Lightweight population, event, and energy statistics are enabled by default.
+Layer `--config configs/metrics.toml` for detailed behavior, brain, and genetic
+statistics. Finalized windows append to one `metrics.cborseq` per run;
 accumulators reset on resume while recorded history remains. The **Metrics** tab
 follows that file alongside **World**, keeping its full plotting history in memory
 and downsampling for display. See [metrics and aggregation](docs/metrics.md).

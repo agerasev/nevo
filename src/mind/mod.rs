@@ -12,14 +12,20 @@ pub trait Mind<C: Context + ?Sized> {
     type Input;
     type Output;
     type Update;
-    type Config: Default;
+    type Config: Default + Clone + std::fmt::Debug;
+
+    /// Apply runtime settings on creation or resume, resetting diagnostic caches
+    /// without changing inherited parameters or recurrent state. The parent gate
+    /// disables every collector even when individual metrics remain selected.
+    fn configure(&mut self, _config: &Self::Config, _metrics_enabled: bool) -> Result<()> {
+        Ok(())
+    }
 
     /// Compute output and an owned, validated state update without changing this
     /// mind. The caller supplies a private context when random draws must roll back.
     fn compute_update(
         &self,
         input: Self::Input,
-        config: &Self::Config,
         cx: &mut C,
     ) -> Result<(Self::Output, Self::Update)>;
 
@@ -27,13 +33,8 @@ pub trait Mind<C: Context + ?Sized> {
     /// draw randomness, or perform further fallible computation.
     fn apply_update(&mut self, update: Self::Update);
 
-    fn process(
-        &mut self,
-        input: Self::Input,
-        config: &Self::Config,
-        cx: &mut C,
-    ) -> Result<Self::Output> {
-        let (output, update) = self.compute_update(input, config, cx)?;
+    fn process(&mut self, input: Self::Input, cx: &mut C) -> Result<Self::Output> {
+        let (output, update) = self.compute_update(input, cx)?;
         self.apply_update(update);
         Ok(output)
     }

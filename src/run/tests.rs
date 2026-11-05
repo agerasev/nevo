@@ -16,12 +16,16 @@ struct Probe {
     interventions: u64,
     fail_phase: u8,
     #[serde(skip)]
+    increment: u64,
+    #[serde(skip)]
+    configurations: u32,
+    #[serde(skip)]
     inspect: Option<Arc<dyn Fn() + Send + Sync>>,
     #[serde(skip)]
     inspect_apply: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
-// Deliberately neither Clone nor serializable: execution configuration is borrowed.
+// Deliberately neither Clone nor serializable: settings are applied once.
 struct ProbeConfig {
     increment: u64,
 }
@@ -45,14 +49,21 @@ impl Simulation for Probe {
     type Update = ProbeUpdate;
     type Report = u64;
 
-    fn compute_update(&self, _: u64, config: &ProbeConfig) -> Result<(u64, ProbeUpdate)> {
+    fn configure(&mut self, config: &ProbeConfig) -> Result<()> {
+        ensure!(config.increment > 0, "increment must be positive");
+        self.increment = config.increment;
+        self.configurations += 1;
+        Ok(())
+    }
+
+    fn compute_update(&self, _: u64) -> Result<(u64, ProbeUpdate)> {
         if let Some(inspect) = &self.inspect {
             inspect();
         }
         let mut rng = self.rng.clone();
         let memory = rng.next_u64();
         ensure!(self.fail_phase != 1, "mind failed");
-        let value = self.value + config.increment;
+        let value = self.value + self.increment;
         let births = self.births + 1;
         ensure!(self.fail_phase != 2, "physical update failed");
         let interventions = self.interventions + 1;
@@ -101,6 +112,8 @@ fn universe() -> TestUniverse {
         births: 0,
         interventions: 0,
         fail_phase: 0,
+        increment: 1,
+        configurations: 0,
         inspect: None,
         inspect_apply: None,
     })
@@ -115,7 +128,7 @@ fn encoded(state: &TestUniverse) -> Vec<u8> {
 
 #[test]
 fn preparation_holds_read_lock_and_callback_runs_after_atomic_publication() {
-    let mut run = TestRun::from_universe(universe(), ProbeConfig::default());
+    let mut run = TestRun::from_universe(universe());
     let observed = Arc::new(AtomicUsize::new(0));
     let view = run.universe.clone();
     let count = observed.clone();
@@ -171,12 +184,12 @@ fn preparation_holds_read_lock_and_callback_runs_after_atomic_publication() {
 fn discarding_an_update_preserves_state_and_randomness() {
     let mut state = universe();
     let before = encoded(&state);
-    let _ = state.compute_update(&ProbeConfig::default()).unwrap();
+    let _ = state.compute_update().unwrap();
     assert_eq!(encoded(&state), before);
 
     let mut expected_rng = state.world.rng.clone();
     let expected_memory = expected_rng.next_u64();
-    assert_eq!(state.advance(&ProbeConfig::default()).unwrap(), 1);
+    assert_eq!(state.advance().unwrap(), 1);
     assert_eq!(state.step(), 1);
     assert_eq!(state.world.memory, expected_memory);
     assert_eq!(state.world.rng, expected_rng);
@@ -188,13 +201,13 @@ fn exhausted_step_counter_fails_before_model_preparation() {
     state.step = u64::MAX - 1;
     state.world.inspect = Some(Arc::new(|| panic!("must check counter before preparation")));
     let before = encoded(&state);
-    assert!(state.advance(&ProbeConfig::default()).is_err());
+    assert!(state.advance().is_err());
     assert_eq!(encoded(&state), before);
 }
 
 #[test]
 fn readers_can_hold_back_publication_while_preparation_runs() {
-    let mut run = TestRun::from_universe(universe(), ProbeConfig::default());
+    let mut run = TestRun::from_universe(universe());
     let view = run.universe.clone();
     let (entered, acting) = mpsc::channel();
     let (release, proceed) = mpsc::channel();
@@ -237,7 +250,7 @@ fn failed_preparation_preserves_all_experiment_state() {
         let mut state = universe();
         state.world.fail_phase = phase;
         let before = encoded(&state);
-        let mut run = TestRun::from_universe(state, ProbeConfig::default());
+        let mut run = TestRun::from_universe(state);
         let (control, commands) = Control::channel(false);
         assert!(
             run.execute(
@@ -261,10 +274,41 @@ fn failed_preparation_preserves_all_experiment_state() {
 }
 
 #[test]
-fn execution_borrows_the_runs_component_configuration() {
-    let mut run = TestRun::from_universe(universe(), ProbeConfig { increment: 7 });
+fn restore_configures_once_and_steps_use_stored_component_settings() {
+    let mut run = universe().restore(ProbeConfig { increment: 7 }).unwrap();
     assert_eq!(run.tick().unwrap(), 7);
     assert_eq!(run.tick().unwrap(), 14);
     assert_eq!(run.universe().read().world().value, 14);
-    assert_eq!(run.config().increment, 7);
+    assert_eq!(run.universe().read().world().increment, 7);
+    assert_eq!(run.universe().read().world().configurations, 1);
+    let bytes = encoded(&run.universe().read());
+    let decoded: TestUniverse = ciborium::from_reader(bytes.as_slice()).unwrap();
+    assert_eq!(decoded.world.increment, 0);
+    let mut resumed = decoded.restore(ProbeConfig { increment: 3 }).unwrap();
+    assert_eq!(resumed.universe().read().world().configurations, 1);
+    assert_eq!(resumed.tick().unwrap(), 17);
+    assert_eq!(resumed.universe().read().world().configurations, 1);
+    assert!(universe().restore(ProbeConfig { increment: 0 }).is_err());
+}
+
+#[test]
+fn cloning_a_run_preserves_its_metrics_window_and_accumulation() {
+    use crate::metrics::Metrics;
+
+    let mut run = Run::new(crate::test_support::ecosystem("debug"), 1).unwrap();
+    for _ in 0..3 {
+        run.tick().unwrap();
+    }
+    let cloned = run.clone();
+    let original = run.universe().read();
+    let copy = cloned.universe().read();
+    assert_eq!(
+        original.world().metrics_window(),
+        copy.world().metrics_window()
+    );
+    assert_eq!(
+        serde_json::to_value(original.metrics()).unwrap(),
+        serde_json::to_value(copy.metrics()).unwrap()
+    );
+    assert_eq!(copy.world().metrics_window().unwrap().samples, 3);
 }

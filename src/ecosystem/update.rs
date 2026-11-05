@@ -56,13 +56,8 @@ where
     pub(super) fn compute_tick(
         &self,
         tick: u64,
-        config: &Config<M::Config>,
     ) -> Result<(TickReport, EcosystemUpdate<M, M::Update>)> {
-        ensure!(
-            !config.metrics.enabled || config.metrics.window_ticks > 0,
-            "metrics window_ticks must be positive"
-        );
-        let (metrics, reset_metrics) = self.metrics.begin(tick, config);
+        let (metrics, reset_metrics) = self.metrics.begin(tick);
         let mut update = EcosystemUpdate {
             rng: self.rng.clone(),
             context: self.context.clone(),
@@ -78,18 +73,18 @@ where
                 continue;
             }
             let observation = self.sense(animal.body.position);
-            let (action, mind) = animal.mind.compute_update(
-                observation,
-                &config.animal.mind,
-                &mut update.context,
-            )?;
+            let (action, mind) = animal
+                .mind
+                .compute_update(observation, &mut update.context)?;
             ensure!(
                 action.direction.is_finite() && action.speed_fraction.is_finite(),
                 "non-finite movement action"
             );
             actions.push((id, observation, action));
             let mut body = animal.body.clone();
-            body.metrics.configure(config, reset_metrics);
+            if reset_metrics {
+                body.metrics.reset();
+            }
             update.animals.insert(
                 id,
                 Animal {
@@ -161,16 +156,23 @@ where
         while update.plants.len() < self.plant_target {
             let position = random_position(&mut update.rng);
             add_plant(&mut update.plants, &mut update.next_plant, position, 0.0)?;
+            update
+                .plants
+                .last_mut()
+                .expect("new plant exists")
+                .metrics
+                .energy = self.metrics.plant_config.energy;
         }
         let count = self.minimum_population.saturating_sub(update.animals.len());
         for _ in 0..count {
-            let Animal { mut body, mind } = Self::immigrant(
+            let Animal { body, mind } = Self::immigrant(
                 self.immigrant_genome.as_ref(),
                 Admission::default(),
                 &mut update.rng,
                 &mut update.context,
+                &self.metrics,
+                self.mind_config.as_ref(),
             )?;
-            body.metrics.configure(config, true);
             let id = allocate_animal(&mut update.next_animal)?;
             update.animals.insert(
                 id,
@@ -210,10 +212,15 @@ where
             };
             let mut genome = inherited.clone();
             genome.mutate(&self.mutation, &mut update.context)?;
-            let mind = Self::develop(genome)?;
+            let mind = Self::develop(
+                genome,
+                self.mind_config.as_ref(),
+                self.metrics.config.enabled,
+            )?;
             let child = allocate_animal(&mut update.next_animal)?;
             let mut body = Body::new(child_position, energy);
-            body.metrics.configure(config, true);
+            body.metrics =
+                metrics::BodyCache::new(self.metrics.body_config, self.metrics.animal_config);
             update.animals.insert(
                 child,
                 Animal {
@@ -235,11 +242,6 @@ where
             validate_body(body)?;
         }
         for plant in &mut update.plants {
-            plant.metrics.energy = if config.metrics.enabled {
-                config.plant.metrics.energy
-            } else {
-                Default::default()
-            };
             plant.energy = (plant.energy + 1.0).min(RIPE_ENERGY);
             plant.position = clamp_position(plant.position, plant.radius());
         }

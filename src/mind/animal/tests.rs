@@ -19,9 +19,7 @@ fn genome_conversion_creates_a_fresh_mind_without_cloning_memory() {
     };
     let mut reference_cx = cx.clone();
     let mut parent = AnimalMind::from(genome.clone());
-    parent
-        .process(FoodObservation::default(), &Config::default(), &mut cx)
-        .unwrap();
+    parent.process(FoodObservation::default(), &mut cx).unwrap();
     assert_eq!(
         cx, reference_cx,
         "construction and inference consume no draws"
@@ -86,4 +84,48 @@ fn non_finite_brain_state_is_rejected() {
     let mut mind = AnimalMind::new(RnnGenome::default());
     mind.brain.memory[0] = f32::INFINITY;
     assert!(<AnimalMind as Mind<Cx>>::validate(&mind).is_err());
+}
+
+#[test]
+fn configuration_propagates_the_parent_gate_without_changing_thought() {
+    use crate::{
+        metrics::{Metrics, Selection},
+        mind::rnn,
+    };
+
+    let config = Config {
+        brain: rnn::Config {
+            metrics: rnn::MetricsConfig {
+                activation: Selection::all(),
+                saturation: true,
+            },
+        },
+    };
+    let mut genome = RnnGenome::default();
+    genome.weights[28] = 3.0;
+    let mut enabled = AnimalMind::new(genome);
+    let mut disabled = enabled.clone();
+    let mut cx = Cx {
+        rng: Xoshiro256PlusPlus::seed_from_u64(7),
+    };
+    let original_cx = cx.clone();
+    <AnimalMind as Mind<Cx>>::configure(&mut enabled, &config, true).unwrap();
+    <AnimalMind as Mind<Cx>>::configure(&mut disabled, &config, false).unwrap();
+    for _ in 0..3 {
+        let observation = FoodObservation::default();
+        assert_eq!(
+            enabled.process(observation, &mut cx).unwrap(),
+            disabled.process(observation, &mut cx).unwrap(),
+        );
+        assert_eq!(enabled, disabled);
+        assert_eq!(enabled.metrics().value().activation.unwrap().count, Some(4));
+        assert_eq!(disabled.metrics(), rnn::Summary::default());
+    }
+    assert_eq!(cx, original_cx);
+    <AnimalMind as Mind<Cx>>::configure(&mut enabled, &config, false).unwrap();
+    assert_eq!(enabled.metrics(), rnn::Summary::default());
+    assert_eq!(
+        enabled, disabled,
+        "turning metrics off does not reset memory"
+    );
 }
