@@ -1,48 +1,51 @@
-//! Finalized window summaries; no accumulators or simulation state live here.
+//! Finalized window records; accumulators remain in their simulation components.
 
-use std::{
-    fs::{self, File, OpenOptions},
-    io::{BufWriter, Write},
-    path::Path,
+use std::path::Path;
+
+use anyhow::Result;
+use nevo::{
+    metrics::{
+        Metrics,
+        log::{FILE_NAME, FORMAT_VERSION, Record, Session, Writer},
+    },
+    run::Run,
 };
 
-use anyhow::{Context, Result};
-use nevo::{metrics::Metrics, run::Run};
+use super::{
+    config::Config,
+    persistence::{AGENT_MODEL, WORLD_MODEL},
+};
 
 pub struct MetricsLog {
-    writer: BufWriter<File>,
+    writer: Writer,
+    session: u64,
     last_end_tick: Option<u64>,
 }
 
 impl MetricsLog {
-    pub fn new(directory: &Path, enabled: bool) -> Result<Option<Self>> {
-        if !enabled {
+    /// The caller holds the run's writer lock for this object's entire lifetime.
+    /// Validate existing records before replacing the saved run configuration.
+    pub fn new(directory: &Path, options: &Config, start_tick: u64) -> Result<Option<Self>> {
+        if !options.ecosystem.metrics.enabled {
             return Ok(None);
         }
-        let directory = directory.join("metrics");
-        fs::create_dir_all(&directory).context("creating metrics directory")?;
-        let name = format!(
-            "{}-{}",
-            jiff::Zoned::now().strftime("%Y-%m-%d_%H-%M-%S"),
-            std::process::id()
-        );
-        let mut attempt = 1_u64;
-        let (path, file) = loop {
-            let filename = if attempt == 1 {
-                format!("{name}.jsonl")
-            } else {
-                format!("{name}-{attempt}.jsonl")
-            };
-            let path = directory.join(filename);
-            match OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(file) => break (path, file),
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => attempt += 1,
-                Err(error) => return Err(error).context("creating metrics log"),
-            }
-        };
+        let path = directory.join(FILE_NAME);
+        let mut writer = Writer::open(&path)?;
+        let session = writer.next_session_id()?;
+        writer.append(&Record::Session(Session {
+            version: FORMAT_VERSION,
+            id: session,
+            started_at: jiff::Timestamp::now().to_string(),
+            start_tick,
+            config: options.to_toml()?,
+            code_version: format!("{} ({})", env!("CARGO_PKG_VERSION"), env!("NEVO_REVISION")),
+            world_model: WORLD_MODEL.into(),
+            mind_model: AGENT_MODEL.into(),
+        }))?;
         eprintln!("metrics={}", path.display());
         Ok(Some(Self {
-            writer: BufWriter::new(file),
+            writer,
+            session,
             last_end_tick: None,
         }))
     }
@@ -62,12 +65,15 @@ impl MetricsLog {
             }
             (window.end_tick, world.metrics())
         };
-        // Serialization and disk I/O must not hold up readers of the universe.
-        let encoded = serde_json::to_vec(&summary).context("encoding metrics summary")?;
-        self.writer.write_all(&encoded)?;
-        self.writer.write_all(b"\n")?;
-        self.writer.flush().context("flushing metrics summary")?;
+        // Encoding and disk I/O occur after releasing the universe read lock.
+        self.writer
+            .append_sample(self.session, end_tick, &summary)?;
         self.last_end_tick = Some(end_tick);
         Ok(())
+    }
+
+    pub fn finish(&mut self, run: &Run) -> Result<()> {
+        self.record(run, true)?;
+        self.writer.sync()
     }
 }

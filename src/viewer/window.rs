@@ -1,6 +1,7 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     ops::ControlFlow,
+    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -13,14 +14,23 @@ use wgame::{
 };
 use wgame_egui::{EguiWindow, egui};
 
-use super::{Draw, Drawing, Label, controls::Controls};
+use super::{Draw, Drawing, Label, controls::Controls, metrics};
 use crate::run::{Command, Control, UniverseView};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tab {
+    #[default]
+    World,
+    Metrics,
+}
 
 /// Window-owned information; model-dependent labels come from `Draw`.
 pub struct Options {
     pub title: String,
     pub labels: Vec<Label>,
     pub interactive: bool,
+    pub metrics_path: Option<PathBuf>,
+    pub initial_tab: Tab,
     pub exit_requested: Arc<AtomicBool>,
 }
 
@@ -30,6 +40,8 @@ impl Default for Options {
             title: "NEvo".into(),
             labels: Vec::new(),
             interactive: true,
+            metrics_path: None,
+            initial_tab: Tab::World,
             exit_requested: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -60,8 +72,10 @@ pub async fn show<U: Draw>(
     control: Control,
     options: Options,
 ) -> wgame::Result<()> {
-    show_with(window, control, options, |drawing| {
-        state.read().draw(drawing);
+    show_inner(window, control, options, |drawing, tab| {
+        if tab == Tab::World {
+            state.read().draw(drawing);
+        }
         Ok(ControlFlow::Continue(()))
     })
     .await
@@ -78,6 +92,17 @@ pub async fn show_with(
     options: Options,
     mut capture: impl FnMut(&mut Drawing<'_>) -> wgame::Result<ControlFlow<()>>,
 ) -> wgame::Result<u64> {
+    show_inner(window, control, options, |drawing, _| capture(drawing)).await
+}
+
+async fn show_inner(
+    window: Window<'_>,
+    control: Control,
+    options: Options,
+    mut capture: impl FnMut(&mut Drawing<'_>, Tab) -> wgame::Result<ControlFlow<()>>,
+) -> wgame::Result<u64> {
+    let active_tab = Cell::new(options.initial_tab);
+    let metrics = RefCell::new(metrics::Panel::new(options.metrics_path.clone()));
     let initial = control.status();
     let controls = RefCell::new(Controls::new(initial.interval));
     let status = RefCell::new(Status {
@@ -122,16 +147,33 @@ pub async fn show_with(
             });
             ui.horizontal_wrapped(|ui| {
                 if status.stopped {
-                    ui.label("Stopped");
+                    ui.label("Simulation stopped");
                 }
                 for item in &status.labels {
                     label(ui, item);
                 }
             });
+            let mut tab = active_tab.get();
+            tab_bar(ui, &mut tab);
+            active_tab.set(tab);
         });
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show(ui, |ui| canvas.show(ui))
+            .show(ui, |ui| match active_tab.get() {
+                Tab::World => canvas.show(ui),
+                Tab::Metrics => {
+                    egui::Frame::new().inner_margin(12.0).show(ui, |ui| {
+                        metrics.borrow_mut().show(ui);
+                    });
+                    // The host still receives its stable canvas response, but
+                    // zero geometry makes it invisible and relinquishes focus.
+                    let mut hidden = ui.new_child(egui::UiBuilder::new().max_rect(
+                        egui::Rect::from_min_size(ui.max_rect().min, egui::Vec2::ZERO),
+                    ));
+                    hidden.set_clip_rect(egui::Rect::NOTHING);
+                    canvas.show(&mut hidden)
+                }
+            })
             .inner
     });
     let library = Library::new(host.graphics());
@@ -144,8 +186,9 @@ pub async fn show_with(
             // A completed simulation remains visible until the window closes.
             let _ = control.send(command);
         }
+        metrics.borrow_mut().poll();
         let mut drawing = Drawing::new(&library);
-        let finish = capture(&mut drawing)?;
+        let finish = capture(&mut drawing, active_tab.get())?;
         let loop_status = control.status();
         controls.borrow_mut().begin_frame(loop_status.interval);
         *status.borrow_mut() = Status {
@@ -158,7 +201,7 @@ pub async fn show_with(
         let Some(mut frame) = host.next_frame().await? else {
             return Ok(presented);
         };
-        if options.interactive && loop_status.stop.is_none() {
+        if options.interactive && loop_status.stop.is_none() && active_tab.get() == Tab::World {
             for event in &frame.input().events {
                 if let Event::Key {
                     key,
@@ -182,5 +225,57 @@ pub async fn show_with(
         if finish.is_break() {
             return Ok(presented);
         }
+    }
+}
+
+// The application owns tab selection; neither model drawing nor metrics loading
+// interprets UI input or needs to know about the other view.
+fn tab_bar(ui: &mut egui::Ui, tab: &mut Tab) -> [egui::Response; 2] {
+    ui.horizontal(|ui| {
+        [
+            ui.selectable_value(tab, Tab::World, "World"),
+            ui.selectable_value(tab, Tab::Metrics, "Metrics"),
+        ]
+    })
+    .inner
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clicking_tabs_changes_the_selected_view() {
+        let context = egui::Context::default();
+        let mut tab = Tab::World;
+        let mut metrics_rect = egui::Rect::NOTHING;
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+            metrics_rect = tab_bar(ui, &mut tab)[1].rect;
+        });
+        output.textures_delta.clear();
+        let point = metrics_rect.center();
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::PointerMoved(point),
+                egui::Event::PointerButton {
+                    pos: point,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos: point,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = context.run_ui(input, |ui| {
+            tab_bar(ui, &mut tab);
+        });
+        output.textures_delta.clear();
+        assert_eq!(tab, Tab::Metrics);
     }
 }

@@ -17,11 +17,20 @@ use serde::{Deserialize, Serialize};
 
 use seed::{deserialize_seed, serialize_seed};
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerTab {
+    #[default]
+    World,
+    Metrics,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ViewerConfig {
     pub enable: bool,
     pub vsync: bool,
+    pub tab: ViewerTab,
 }
 
 impl Default for ViewerConfig {
@@ -29,6 +38,7 @@ impl Default for ViewerConfig {
         Self {
             enable: false,
             vsync: true,
+            tab: ViewerTab::World,
         }
     }
 }

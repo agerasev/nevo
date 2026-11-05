@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use super::config::Config;
 
 const FORMAT_VERSION: u32 = 7;
-const WORLD_MODEL: &str = "foraging-sense-first-v1";
-const AGENT_MODEL: &str = "animal-rnn-3-4-3-v1";
+pub(super) const WORLD_MODEL: &str = "foraging-sense-first-v1";
+pub(super) const AGENT_MODEL: &str = "animal-rnn-3-4-3-v1";
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -178,7 +178,13 @@ impl RunDirectory {
             let entry = entry?;
             if !matches!(
                 entry.file_name().to_str(),
-                Some(".lock" | "checkpoints" | "config.toml" | ".config.toml.tmp" | "metrics")
+                Some(
+                    ".lock"
+                        | "checkpoints"
+                        | "config.toml"
+                        | ".config.toml.tmp"
+                        | nevo::metrics::log::FILE_NAME
+                )
             ) {
                 bail!(
                     "run directory contains an unrecognized file: {}",

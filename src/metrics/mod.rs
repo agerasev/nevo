@@ -1,5 +1,7 @@
 //! Typed, composable metrics. Accumulators remain local to their owners.
 
+pub mod log;
+
 mod aggregate;
 mod selection;
 

@@ -55,7 +55,7 @@ The worker also saves when its budget ends, the viewer closes, or a stop signal
 arrives (Ctrl-C; also SIGTERM/SIGHUP on Unix). Saving the same tick replaces that
 checkpoint. A zero-tick invocation still saves. There is no automatic initial
 checkpoint; if interrupted before its first save, a directory with only a config
-and optional metrics logs reinitializes from that saved seed. Existing logs remain.
+and an optional metrics log reinitializes from that saved seed. Recorded history remains.
 
 ## Layout and consistency
 
@@ -63,7 +63,7 @@ and optional metrics logs reinitializes from that saved seed. Existing logs rema
 runs/baseline/
   config.toml
   .lock
-  metrics/                 # when enabled; a new JSONL file per invocation
+  metrics.cborseq          # when enabled; all invocations append to this file
   checkpoints/
     00000000000000000100.cbor
     00000000000000000200.cbor
@@ -83,7 +83,7 @@ no safetensors payload is used.
 Locks, channels, pacing clocks, and viewer/device resources live outside Universe.
 Metric caches are omitted from serialization and start fresh after loading;
 recurrent memory and RNG positions are required state. Finalized statistics remain
-in separate [JSONL logs](metrics.md), which are never replayed into checkpoints.
+in the single [CBOR metrics log](metrics.md), which is never replayed into checkpoints.
 Core simulation and genetics contracts have no persistence bounds.
 
 The current format is checkpoint version 7, with `foraging-sense-first-v1` and

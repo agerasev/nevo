@@ -43,9 +43,11 @@ Viewer configuration is a table (equivalently, dotted TOML keys):
 [viewer]
 enable = true
 vsync = true
+tab = "world" # or "metrics"
 ```
 
-`enable` defaults to false and `vsync` to true. `tick_hz` defaults to zero, meaning
+`enable` defaults to false, `vsync` to true, and `tab` to `"world"`.
+The [Metrics tab](metrics.md#viewing) follows the run's recorded statistics. `tick_hz` defaults to zero, meaning
 unlimited simulation throughput. A positive value limits simulation ticks per second;
 it does not change the simulated timestep or frame rate. Only `viewer.enable` has a
 CLI shortcut; use config files for VSync and all ecosystem details.

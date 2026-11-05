@@ -2,10 +2,11 @@
 
 mod controls;
 mod drawing;
+mod metrics;
 mod window;
 
 pub use drawing::{Bounds, Drawing, Label};
-pub use window::{Options, show, show_with};
+pub use window::{Options, Tab, show, show_with};
 
 /// Collect an object's default presentation without borrowing its state afterward.
 /// Drawing must not mutate simulation state, consume randomness, or present frames.

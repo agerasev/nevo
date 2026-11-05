@@ -69,8 +69,9 @@ are configurable. `--ticks N` always means N additional ticks for that invocatio
 See [persistence options, format, and recovery](docs/persistence.md).
 
 Layer `--config configs/metrics.toml` to collect population, behavior, brain, and
-genetic statistics. Finalized windows go to `metrics/*.jsonl` inside the run directory;
-accumulators reset on resume. See [metrics and aggregation](docs/metrics.md).
+genetic statistics. Finalized windows append to one `metrics.cborseq` per run;
+accumulators reset on resume while recorded history remains. The **Metrics** tab
+follows that file alongside **World**. See [metrics and aggregation](docs/metrics.md).
 
 Build with `--no-default-features` when graphics are unnecessary; the executable
 and runner stay the same. Add `--config configs/smoke.toml` to verify twelve

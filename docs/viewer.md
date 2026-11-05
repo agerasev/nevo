@@ -21,6 +21,12 @@ Circle borders are slightly larger filled circles beneath every entity fill.
 Overlapping entities therefore have no border crossing their interiors; animal
 fills remain above plant fills. Individual bounds include the border.
 
+The window has **World** and **Metrics** tabs. The [Metrics panel](metrics.md#viewing)
+reads the run's CBOR log independently, including records appended after EOF.
+Its searchable scalar plot supports pan/zoom, hover values, and resume boundaries.
+The normal viewer skips world scene collection while Metrics is selected.
+`viewer.tab` selects the initial tab; tabs do not change simulation execution.
+
 The [window loop](../src/viewer/window.rs) knows no ecosystem types.
 It collects the scene while holding a shared state read lock, releases the lock,
 then lays out controls and renders. Neither `Clone` nor `Simulation` is required
@@ -46,7 +52,9 @@ setting. No simulation timestep, randomness, or rendering rate is changed.
 attempted frame, outside UI layout, and can finish after presenting its final scene.
 The returned count includes only presented frames. The application's smoke checker
 uses this path to issue commands before locking and verify complete captured state;
-ordinary viewing needs no complete-state copy or verification bounds.
+ordinary viewing needs no complete-state copy or verification bounds. The custom
+capture still runs on every frame in either tab, allowing the same smoke checks
+with `viewer.tab = "metrics"`.
 
 Checks:
 

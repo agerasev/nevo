@@ -80,7 +80,8 @@ fn attach_viewer(
     world: nevo::run::UniverseView<nevo::universe::Universe>,
     control: Control,
     seed: u64,
-    vsync: bool,
+    display: config::ViewerConfig,
+    metrics_path: std::path::PathBuf,
     smoke: Option<smoke::SmokeCheck>,
     exit_requested: Arc<AtomicBool>,
 ) -> Result<(), String> {
@@ -93,13 +94,18 @@ fn attach_viewer(
             .title("NEvo")
             .logical_size((1200.0, 900.0))
             .resizable(true)
-            .vsync(vsync);
+            .vsync(display.vsync);
         let viewed = wgame::app_with_single_window(
             async move |window| {
                 let options = viewer::Options {
                     labels: vec![Label::new(format!("Seed {seed}"))],
                     exit_requested: exit_requested.clone(),
                     interactive: smoke.is_none(),
+                    metrics_path: Some(metrics_path.clone()),
+                    initial_tab: match display.tab {
+                        config::ViewerTab::World => viewer::Tab::World,
+                        config::ViewerTab::Metrics => viewer::Tab::Metrics,
+                    },
                     ..Default::default()
                 };
                 if let Some(mut check) = smoke.clone() {
@@ -185,8 +191,11 @@ fn execute(mut cli: Cli) -> Result<()> {
         .seed
         .expect("new and restored runs have a resolved seed");
     // No configuration is overwritten until the checkpoint is decoded and validated.
+    let start_tick = run.universe().read().step();
+    let mut metrics = MetricsLog::new(directory.path(), &options, start_tick)?;
     directory.save_config(&options)?;
-    let mut metrics = MetricsLog::new(directory.path(), options.ecosystem.metrics.enabled)?;
+    #[cfg(feature = "viewer")]
+    let metrics_path = directory.path().join(nevo::metrics::log::FILE_NAME);
     eprintln!("run={}", directory.path().display());
     println!(
         "seed={} ticks={:?} interval={:?}",
@@ -247,7 +256,7 @@ fn execute(mut cli: Cli) -> Result<()> {
         let logged = match metrics_error {
             Some(error) => Err(error),
             None => match &mut metrics {
-                Some(metrics) => metrics.record(&run, true),
+                Some(metrics) => metrics.finish(&run),
                 None => Ok(()),
             },
         };
@@ -268,7 +277,8 @@ fn execute(mut cli: Cli) -> Result<()> {
             world,
             control.clone(),
             seed,
-            options.viewer.vsync,
+            options.viewer,
+            metrics_path,
             smoke,
             exit_requested,
         );
