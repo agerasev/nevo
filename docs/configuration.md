@@ -64,7 +64,7 @@ includes these defaults, so it also serves as a complete editable configuration.
 | `immigration.energy` | `100` | Energy for every admitted animal. |
 | `immigration.position` | `"random"` | Placement for every admitted animal. |
 | `animal.body.upkeep` | `2` | Energy spent per animal per tick. |
-| `animal.body.movement_cost_per_distance` | `0` | Energy per unit of controlled distance after boundary clamping. |
+| `animal.body.movement_cost_per_energy_distance` | `0` | Fraction of pre-movement energy spent per unit of controlled distance after boundary clamping. |
 | `animal.body.max_speed`, `animal.body.movement_time_step` | `100`, `0.1` | Movement scale; maximum displacement is their product. |
 | `animal.body.movement_dead_zone` | `0.01` | Direction magnitudes at or below this do not move. |
 | `animal.body.radius_scale` | `0.5` | Radius coefficient in `scale × sqrt(max(energy, 0))`. |
@@ -91,12 +91,14 @@ positions must be finite and inside the configured arena; bodies remain clamped
 to its bounds. Startup admits animals before seeding plants, preserving draw order.
 
 The [movement-cost preset](../configs/movement-cost.toml) sets upkeep to `0.2`
-and movement cost to `0.18` per distance unit. At the default maximum displacement
-of 10, an acting animal spends between 0.2 and 2 energy per tick. Blocked movement
-costs no movement energy; birth offsets and growth clamping are excluded. Movement
-fees are deducted after feeding and before reproduction; all present animals pay
-upkeep at the end of the tick. This is an experimental setting, with reduced jitter
-still an untested hypothesis.
+and the movement coefficient to `0.0009`: total cost is
+`0.2 + 0.0009 × energy_before_movement × distance`. Energy serves as mass; the fee
+uses sensing-time energy, before movement and feeding. At the default maximum
+displacement of 10, total cost is 1.1, 2.0, or 3.8 for energies 100, 200, or 400.
+Resting costs 0.2. Blocked movement costs no movement energy; birth offsets and
+growth clamping are excluded. Fees are deducted after feeding and before
+reproduction; all present animals pay upkeep at the end of the tick. This is the
+sole movement-cost preset; reduced jitter remains an untested hypothesis.
 
 ```sh
 cargo run --locked -- --config configs/baseline.toml --config configs/movement-cost.toml --config configs/metrics.toml --config configs/viewer.toml

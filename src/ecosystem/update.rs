@@ -196,11 +196,14 @@ where
         }
 
         // Pay for controlled travel before checking reproduction or splitting energy.
-        // Arrivals have not acted; birth offsets and growth clamping are not travel.
-        if self.parameters.body.movement_cost_per_distance > 0.0 {
+        // Sensing-time energy is also pre-movement/pre-feeding energy, so a meal
+        // does not retroactively increase the fee. Arrivals have not acted;
+        // birth offsets and growth clamping are not travel.
+        if self.parameters.body.movement_cost_per_energy_distance > 0.0 {
             for decision in &decisions {
                 let distance = decision.position_before.distance(decision.position_after);
-                let cost = distance * self.parameters.body.movement_cost_per_distance;
+                let cost = decision.energy
+                    * (distance * self.parameters.body.movement_cost_per_energy_distance);
                 ensure!(cost.is_finite(), "non-finite movement energy cost");
                 update
                     .animals

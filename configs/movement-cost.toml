@@ -1,5 +1,5 @@
-# Low maintenance plus energy per unit of actual controlled travel.
-# At default max_speed/time_step: rest costs 0.2, full speed costs 2 per tick.
+# Low maintenance plus movement cost proportional to pre-movement energy (mass).
+# At energy 200 and default max_speed/time_step: full speed costs 2 per tick.
 [ecosystem.animal.body]
 upkeep = 0.2
-movement_cost_per_distance = 0.18
+movement_cost_per_energy_distance = 0.0009

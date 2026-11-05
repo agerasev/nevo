@@ -165,7 +165,7 @@ impl Checkpoint {
 
 fn read_checkpoint(path: &Path) -> Checkpoint {
     let checkpoint: Checkpoint = ciborium::from_reader(fs::File::open(path).unwrap()).unwrap();
-    assert_eq!(checkpoint.format_version, 9);
+    assert_eq!(checkpoint.format_version, 10);
     checkpoint
 }
 
@@ -211,7 +211,7 @@ energy = 70.0
 position = [4.0, 5.0]
 [ecosystem.animal.body]
 upkeep = 1.5
-movement_cost_per_distance = 0.18
+movement_cost_per_energy_distance = 0.0009
 max_speed = 30.0
 movement_time_step = 0.2
 movement_dead_zone = 0.05
@@ -303,7 +303,7 @@ max_delta = 0.04
         "[ecosystem.world]\nwidth = 81.0\n",
         "[ecosystem.immigration]\nenergy = 71.0\n",
         "[ecosystem.animal.body]\nupkeep = 1.6\n",
-        "[ecosystem.animal.body]\nmovement_cost_per_distance = 0.19\n",
+        "[ecosystem.animal.body]\nmovement_cost_per_energy_distance = 0.001\n",
         "[ecosystem.animal.reproduction]\nchild_energy_fraction = 0.4\n",
         "[ecosystem.animal.feeding]\nefficiency = 0.3\n",
         "[ecosystem.plant]\ngrowth = 0.5\n",
