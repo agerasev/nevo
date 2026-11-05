@@ -51,17 +51,21 @@ cargo run --locked -- --config configs/baseline.toml --config configs/metrics.to
 Use the search field and metric selector, drag or scroll to pan, Ctrl-scroll or
 pinch to zoom, and hover for values and window bounds. **Follow data** fits new
 records automatically; panning or zooming turns it off. **Fit all** resets the view.
-Diamonds mark partial windows. Missing values break curves; separate invocation curves preserve resume
-boundaries and overlapping ticks after restoring an older checkpoint.
+Diamonds mark partial windows. Missing values break curves; separate invocation
+curves preserve resume boundaries and overlapping ticks after restoring an older
+checkpoint.
 
 The viewer loads the full plotting history into memory once and adds new windows
 as they arrive. Panning, zooming, and selecting metrics use these retained values
-without rereading the file. A background worker loads records and downsamples
-plots, keeping that work outside the UI and Universe locks. Zoomed-out curves
-retain the first, last, minimum, and maximum recorded values in horizontal display
+without rereading the file. The viewer loop loads one bounded batch per frame
+while catching up, and polls every 200 ms when caught up. Plot data is recomputed
+only when history, metric selection, viewport, or plot width changes. This work
+runs before UI layout and outside Universe locks, with no separate metrics thread.
+Zoomed-out curves retain the first, last, minimum, and maximum recorded values in horizontal display
 bins; zooming in reveals the original points. There is no history cap, offset
 index, or additional file. Memory use grows with the number of windows and metrics;
-this is the current simplicity tradeoff.
+this is the current simplicity tradeoff. Very large histories can also make plot
+updates take longer on the viewer thread.
 
 The reader follows appends even while World is selected and after catching up;
 there is no historical/live mode distinction. Browsing an older range keeps that

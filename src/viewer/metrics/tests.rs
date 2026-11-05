@@ -3,7 +3,6 @@ use std::{
     io::{Seek, SeekFrom, Write},
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
-    thread,
     time::{Duration, Instant},
 };
 
@@ -68,16 +67,23 @@ fn append(path: &PathBuf, record: &Record) {
     file.flush().unwrap();
 }
 
-fn wait_for(panel: &mut Panel, ready: impl Fn(&Panel) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+fn poll(panel: &mut Panel) {
+    panel.next_poll = Instant::now();
+    panel.poll();
+}
+
+fn catch_up(panel: &mut Panel) {
     loop {
-        panel.poll();
-        if ready(panel) {
+        poll(panel);
+        assert!(panel.error.is_none(), "{:?}", panel.error);
+        if !panel.loading {
             return;
         }
-        assert!(Instant::now() < deadline, "metrics worker did not finish");
-        thread::sleep(Duration::from_millis(5));
     }
+}
+
+fn windows(panel: &Panel) -> u64 {
+    panel.history.as_ref().unwrap().total_windows()
 }
 
 fn frame(panel: &mut Panel, context: &egui::Context, events: Vec<egui::Event>) {
@@ -99,11 +105,11 @@ fn panel_follows_creation_eof_partial_records_and_resumed_sessions() {
     let temporary = Temporary::new();
     let path = temporary.path();
     let mut panel = Panel::new(Some(path.clone()));
-    wait_for(&mut panel, |panel| panel.snapshot.revision > 0);
-    assert_eq!(panel.snapshot.total_windows, 0);
+    poll(&mut panel);
+    assert_eq!(windows(&panel), 0);
     append(&path, &session(1, 0));
     append(&path, &sample(1, 1, Some(10.0), true));
-    wait_for(&mut panel, |panel| !panel.snapshot.segments.is_empty());
+    catch_up(&mut panel);
     assert_eq!(panel.selected, "population.animals");
     let record = sample(1, 2, Some(20.0), false);
     let mut encoded = Vec::new();
@@ -111,20 +117,23 @@ fn panel_follows_creation_eof_partial_records_and_resumed_sessions() {
     let split = encoded.len() / 2;
     let mut file = OpenOptions::new().append(true).open(&path).unwrap();
     file.write_all(&encoded[..split]).unwrap();
-    wait_for(&mut panel, |panel| panel.snapshot.pending);
-    assert_eq!(panel.snapshot.total_windows, 1);
+    poll(&mut panel);
+    assert!(panel.history.as_ref().unwrap().has_pending_record());
+    assert_eq!(windows(&panel), 1);
     file.write_all(&encoded[split..]).unwrap();
-    wait_for(&mut panel, |panel| panel.snapshot.total_windows == 2);
+    poll(&mut panel);
+    assert_eq!(windows(&panel), 2);
     append(&path, &session(2, 0));
     append(&path, &sample(2, 1, Some(30.0), true));
-    wait_for(&mut panel, |panel| panel.snapshot.total_windows == 3);
-    assert_eq!(panel.snapshot.segments.len(), 2);
-    assert!(panel.snapshot.error.is_none());
+    poll(&mut panel);
+    assert_eq!(windows(&panel), 3);
+    assert_eq!(panel.segments.len(), 2);
+    assert!(panel.error.is_none());
     frame(&mut panel, &egui::Context::default(), Vec::new());
 }
 
 #[test]
-fn viewport_zoom_requests_detail_and_stays_fixed_while_data_arrives() {
+fn viewport_zoom_updates_detail_and_stays_fixed_while_data_arrives() {
     let temporary = Temporary::new();
     let path = temporary.path();
     append(&path, &session(1, 0));
@@ -132,9 +141,8 @@ fn viewport_zoom_requests_detail_and_stays_fixed_while_data_arrives() {
         append(&path, &sample(1, tick, Some((tick % 17) as f64), true));
     }
     let mut panel = Panel::new(Some(path.clone()));
-    wait_for(&mut panel, |panel| {
-        panel.snapshot.total_windows == 500 && !panel.snapshot.segments.is_empty()
-    });
+    catch_up(&mut panel);
+    assert_eq!(windows(&panel), 500);
     let context = egui::Context::default();
     frame(&mut panel, &context, Vec::new());
     let center = panel.plot_rect.unwrap().center();
@@ -146,11 +154,9 @@ fn viewport_zoom_requests_detail_and_stays_fixed_while_data_arrives() {
     assert!(!panel.follow, "plot navigation must disable follow");
     let zoomed = panel.range.unwrap();
     assert!(zoomed[1] - zoomed[0] < 100.0);
-    wait_for(&mut panel, |panel| {
-        panel.snapshot.request.range == Some(zoomed)
-    });
+    panel.poll();
+    assert_eq!(panel.plotted.as_ref().unwrap().range, Some(zoomed));
     let points: Vec<_> = panel
-        .snapshot
         .segments
         .iter()
         .flat_map(|segment| &segment.points)
@@ -161,7 +167,8 @@ fn viewport_zoom_requests_detail_and_stays_fixed_while_data_arrives() {
     assert_eq!(panel.range, Some(zoomed), "detail must not refit the plot");
 
     append(&path, &sample(1, 501, Some(1000.0), true));
-    wait_for(&mut panel, |panel| panel.snapshot.total_windows == 501);
+    poll(&mut panel);
+    assert_eq!(windows(&panel), 501);
     frame(&mut panel, &context, Vec::new());
     assert_eq!(
         panel.range,
@@ -170,7 +177,8 @@ fn viewport_zoom_requests_detail_and_stays_fixed_while_data_arrives() {
     );
 
     panel.fit();
-    wait_for(&mut panel, |panel| panel.snapshot.request.range.is_none());
+    panel.poll();
+    assert!(panel.plotted.as_ref().unwrap().range.is_none());
     frame(&mut panel, &context, Vec::new());
     let fitted = panel.range.unwrap();
     assert!(fitted[0] <= 1.0 && fitted[1] >= 501.0);
@@ -187,12 +195,13 @@ fn reader_errors_are_visible_without_discarding_existing_history() {
     append(&path, &session(1, 0));
     append(&path, &sample(1, 1, Some(10.0), true));
     let mut panel = Panel::new(Some(path.clone()));
-    wait_for(&mut panel, |panel| !panel.snapshot.segments.is_empty());
+    catch_up(&mut panel);
     let mut file = OpenOptions::new().append(true).open(&path).unwrap();
     file.write_all(&[0xff]).unwrap();
-    wait_for(&mut panel, |panel| panel.snapshot.error.is_some());
-    assert_eq!(panel.snapshot.total_windows, 1);
-    assert_eq!(panel.snapshot.segments.len(), 1);
+    poll(&mut panel);
+    assert!(panel.error.is_some());
+    assert_eq!(windows(&panel), 1);
+    assert_eq!(panel.segments.len(), 1);
     frame(&mut panel, &egui::Context::default(), Vec::new());
 }
 
@@ -204,7 +213,7 @@ fn following_keeps_full_extent_for_a_metric_absent_from_newer_windows() {
     append(&path, &sample(1, 1, Some(10.0), true));
     append(&path, &sample(1, 500, None, true));
     let mut panel = Panel::new(Some(path));
-    wait_for(&mut panel, |panel| !panel.snapshot.segments.is_empty());
+    catch_up(&mut panel);
     let context = egui::Context::default();
     for _ in 0..3 {
         frame(&mut panel, &context, Vec::new());
@@ -223,9 +232,8 @@ fn historical_zoom_uses_loaded_values_without_rereading_old_records() {
         append(&path, &sample(1, tick, Some(tick as f64), true));
     }
     let mut panel = Panel::new(Some(path.clone()));
-    wait_for(&mut panel, |panel| {
-        panel.snapshot.total_windows == 2400 && !panel.snapshot.segments.is_empty()
-    });
+    catch_up(&mut panel);
+    assert_eq!(windows(&panel), 2400);
     // Alter already loaded bytes without appending. Browsing should use the
     // retained values; the follower only reads newly appended records.
     let mut file = OpenOptions::new().write(true).open(&path).unwrap();
@@ -233,13 +241,101 @@ fn historical_zoom_uses_loaded_values_without_rereading_old_records() {
     file.write_all(&[0xff]).unwrap();
     panel.follow = false;
     panel.range = Some([1.0, 10.0]);
-    panel.request();
-    wait_for(&mut panel, |panel| {
-        panel.snapshot.request.range == Some([1.0, 10.0])
-    });
-    assert!(panel.snapshot.error.is_none());
-    let points = &panel.snapshot.segments[0].points;
+    panel.poll();
+    assert_eq!(panel.plotted.as_ref().unwrap().range, Some([1.0, 10.0]));
+    assert!(panel.error.is_none());
+    let points = &panel.segments[0].points;
     assert_eq!(points[0].tick, 1);
     assert_eq!(points[0].value, 1.0);
     assert_eq!(points.len(), 11); // Includes the next point for a crossing line.
+}
+
+#[test]
+fn loading_is_batched_and_layout_does_not_read_or_recompute_history() {
+    let temporary = Temporary::new();
+    let path = temporary.path();
+    append(&path, &session(1, 0));
+    for tick in 1..=300 {
+        append(&path, &sample(1, tick, Some(tick as f64), true));
+    }
+    let mut panel = Panel::new(Some(path.clone()));
+    panel.poll();
+    let first_batch = windows(&panel);
+    assert!(first_batch > 0 && first_batch <= 128);
+    assert!(panel.loading);
+    let updates = panel.plot_updates;
+    let context = egui::Context::default();
+    for _ in 0..3 {
+        frame(&mut panel, &context, Vec::new());
+    }
+    assert_eq!(windows(&panel), first_batch);
+    assert_eq!(panel.plot_updates, updates);
+
+    panel.poll(); // Catch-up continues next frame without waiting for the idle timer.
+    assert!(windows(&panel) > first_batch);
+    assert!(windows(&panel) <= first_batch + 128);
+    catch_up(&mut panel);
+    frame(&mut panel, &context, Vec::new());
+    panel.poll(); // Cache the final plot width.
+    let updates = panel.plot_updates;
+    panel.next_poll = Instant::now() + Duration::from_secs(60);
+    append(&path, &sample(1, 301, Some(99.0), true));
+    for _ in 0..3 {
+        frame(&mut panel, &context, Vec::new());
+        panel.poll();
+    }
+    assert_eq!(
+        windows(&panel),
+        300,
+        "idle polls should wait for their deadline"
+    );
+    assert_eq!(
+        panel.plot_updates, updates,
+        "unchanged frames reuse plot data"
+    );
+    poll(&mut panel);
+    assert_eq!(windows(&panel), 301);
+    assert_eq!(panel.plot_updates, updates + 1);
+}
+
+#[test]
+fn plot_changes_do_not_wait_for_the_file_poll_timer() {
+    let temporary = Temporary::new();
+    let path = temporary.path();
+    append(&path, &session(1, 0));
+    for tick in 1..=20 {
+        append(
+            &path,
+            &Record::Sample(Sample {
+                session: 1,
+                tick,
+                values: Value::serialized(&serde_json::json!({
+                    "left": tick as f64, "right": -(tick as f64),
+                }))
+                .unwrap(),
+            }),
+        );
+    }
+    let mut panel = Panel::new(Some(path));
+    catch_up(&mut panel);
+    let updates = panel.plot_updates;
+    panel.next_poll = Instant::now() + Duration::from_secs(60);
+    panel.selected = "right".into();
+    panel.follow = false;
+    panel.range = Some([5.0, 10.0]);
+    panel.poll();
+    assert_eq!(panel.plot_updates, updates + 1);
+    assert_eq!(panel.plotted.as_ref().unwrap().metric, "right");
+    assert_eq!(panel.plotted.as_ref().unwrap().range, Some([5.0, 10.0]));
+    assert!(
+        panel.segments[0]
+            .points
+            .iter()
+            .all(|point| point.value < 0.0)
+    );
+    panel.poll();
+    assert_eq!(panel.plot_updates, updates + 1);
+    panel.pixels += 1;
+    panel.poll();
+    assert_eq!(panel.plot_updates, updates + 2);
 }

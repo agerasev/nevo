@@ -1,19 +1,32 @@
 //! Read-only metrics browsing, independent of the simulated world.
 
 mod history;
-mod worker;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use egui_plot::{HoverPosition, Legend, Line, MarkerShape, Plot, Points};
 use wgame_egui::egui;
 
-use worker::{Request, Snapshot, Worker};
+use history::{History, Segment};
+
+#[derive(Debug, PartialEq)]
+struct PlotQuery {
+    metric: String,
+    range: Option<[f64; 2]>,
+    pixels: usize,
+}
 
 pub(super) struct Panel {
     path: Option<PathBuf>,
-    worker: Option<Worker>,
-    snapshot: Arc<Snapshot>,
+    history: Option<History>,
+    segments: Vec<Segment>,
+    plotted: Option<PlotQuery>,
+    next_poll: Instant,
+    loading: bool,
+    error: Option<String>,
     filter: String,
     selected: String,
     follow: bool,
@@ -21,6 +34,8 @@ pub(super) struct Panel {
     pixels: usize,
     fit_when_ready: bool,
     reset_plot: bool,
+    #[cfg(test)]
+    plot_updates: usize,
     #[cfg(test)]
     plot_rect: Option<egui::Rect>,
     #[cfg(test)]
@@ -30,9 +45,13 @@ pub(super) struct Panel {
 impl Panel {
     pub fn new(path: Option<PathBuf>) -> Self {
         Self {
-            worker: path.clone().map(Worker::new),
+            history: path.clone().map(History::new),
             path,
-            snapshot: Arc::new(Snapshot::default()),
+            segments: Vec::new(),
+            plotted: None,
+            next_poll: Instant::now(),
+            loading: false,
+            error: None,
             filter: String::new(),
             selected: String::new(),
             follow: true,
@@ -41,58 +60,78 @@ impl Panel {
             fit_when_ready: true,
             reset_plot: false,
             #[cfg(test)]
+            plot_updates: 0,
+            #[cfg(test)]
             plot_rect: None,
             #[cfg(test)]
             plot_bounds: None,
         }
     }
 
-    /// Takes a completed read result; all file access stays on the worker.
+    /// Runs once per viewer loop, outside repeatable UI layout and world locks.
+    /// Catch up one bounded batch per frame; at EOF, check for appends periodically.
     pub fn poll(&mut self) {
-        let Some(worker) = &self.worker else {
+        let Some(history) = &mut self.history else {
             return;
         };
-        let snapshot = worker.snapshot();
-        if snapshot.revision == self.snapshot.revision {
-            return;
+        let mut changed = false;
+        let now = Instant::now();
+        if now >= self.next_poll {
+            self.next_poll = now + Duration::from_millis(200);
+            let windows = history.total_windows();
+            match history.poll() {
+                Ok(received) => {
+                    self.error = None;
+                    self.loading = received;
+                    changed = history.total_windows() != windows;
+                    if received {
+                        self.next_poll = now;
+                    }
+                }
+                Err(error) => {
+                    self.error = Some(format!("{error:#}"));
+                    self.loading = false;
+                }
+            }
         }
         if self.selected.is_empty() {
-            self.selected = snapshot.names.first().cloned().unwrap_or_default();
+            self.selected = history.names().next().unwrap_or_default().to_owned();
         }
-        if snapshot.request.metric == self.selected
-            && snapshot.request.range.is_none()
-            && (self.follow || self.fit_when_ready)
-        {
-            self.reset_plot = true;
-            self.fit_when_ready = false;
-        }
-        self.snapshot = snapshot;
-        self.request();
-    }
-
-    fn request(&self) {
-        if let Some(worker) = &self.worker {
-            worker.request(Request {
-                metric: self.selected.clone(),
-                range: self.range,
-                pixels: self.pixels,
-            });
+        let query = PlotQuery {
+            metric: self.selected.clone(),
+            range: self.range,
+            pixels: self.pixels,
+        };
+        if changed || self.plotted.as_ref() != Some(&query) {
+            self.segments = history.query(&query.metric, query.range, query.pixels);
+            #[cfg(test)]
+            {
+                self.plot_updates += 1;
+            }
+            if query.range.is_none() && (self.follow || self.fit_when_ready) {
+                self.reset_plot = true;
+                self.fit_when_ready = false;
+            }
+            self.plotted = Some(query);
         }
     }
 
     fn fit(&mut self) {
         self.range = None;
         self.fit_when_ready = true;
-        self.request();
-        // A fit can be satisfied by the already loaded full-history result.
-        if self.snapshot.request.metric == self.selected && self.snapshot.request.range.is_none() {
+        // Fitting the already computed full view needs no further work.
+        if self
+            .plotted
+            .as_ref()
+            .is_some_and(|query| query.metric == self.selected && query.range.is_none())
+        {
             self.reset_plot = true;
             self.fit_when_ready = false;
         }
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
-        let Some(path) = &self.path else {
+        let (Some(path), Some(history)) = (&self.path, &self.history) else {
             ui.label("No metrics file is attached to this viewer.");
             return;
         };
@@ -100,22 +139,22 @@ impl Panel {
             ui.heading("Metrics");
             ui.weak(path.display().to_string());
         });
-        if let Some(error) = &self.snapshot.error {
+        if let Some(error) = &self.error {
             ui.colored_label(egui::Color32::LIGHT_RED, error);
         }
         ui.horizontal_wrapped(|ui| {
-            ui.label(format!("{} loaded windows", self.snapshot.total_windows));
-            if let Some(tick) = self.snapshot.last_tick {
+            ui.label(format!("{} loaded windows", history.total_windows()));
+            if let Some(tick) = history.last_tick() {
                 ui.label(format!("Latest recorded tick {tick}"));
             }
-            if self.snapshot.loading {
+            if self.loading {
                 ui.spinner();
                 ui.weak("Loading history…");
-            } else if self.snapshot.pending {
+            } else if history.has_pending_record() {
                 ui.weak("Waiting for the remainder of a record…");
             }
         });
-        if self.snapshot.total_windows == 0 {
+        if history.total_windows() == 0 {
             ui.add_space(12.0);
             ui.label("Waiting for recorded metric windows…");
             ui.weak(
@@ -141,14 +180,12 @@ impl Panel {
                 &self.selected
             })
             .show_ui(ui, |ui| {
-                for name in self
-                    .snapshot
-                    .names
-                    .iter()
+                for name in history
+                    .names()
                     .filter(|name| name.to_lowercase().contains(&filter))
                 {
                     if ui
-                        .selectable_value(&mut self.selected, name.clone(), name)
+                        .selectable_value(&mut self.selected, name.to_owned(), name)
                         .changed()
                     {
                         fit = true;
@@ -165,9 +202,10 @@ impl Panel {
         ui.weak(
             "Drag/scroll to pan · Ctrl+scroll or pinch to zoom · double-click to fit all · diamonds mark partial windows",
         );
-        let snapshot = Arc::clone(&self.snapshot);
-        let loading = snapshot.request.metric != self.selected
-            || snapshot.request.range != self.range
+        let loading = self
+            .plotted
+            .as_ref()
+            .is_none_or(|query| query.metric != self.selected || query.range != self.range)
             || self.fit_when_ready;
         if loading {
             ui.weak("Updating plot…");
@@ -176,8 +214,12 @@ impl Panel {
         }
         // A previous range may remain visible while its replacement is computed, but
         // values from a different metric must never appear under the new name.
-        let segments = if snapshot.request.metric == self.selected {
-            snapshot.segments.as_slice()
+        let segments = if self
+            .plotted
+            .as_ref()
+            .is_some_and(|query| query.metric == self.selected)
+        {
+            self.segments.as_slice()
         } else {
             &[]
         };
@@ -224,7 +266,7 @@ impl Panel {
         // Fitting/following uses the full log extent, even if this metric
         // disappeared from newer windows after a configuration change.
         if (reset || self.follow)
-            && let Some([min, max]) = snapshot.extent
+            && let Some([min, max]) = self.history.as_ref().and_then(History::extent)
         {
             plot = plot.include_x(min as f64).include_x(max as f64);
         }
@@ -282,7 +324,6 @@ impl Panel {
             let bounds = response.transform.bounds();
             self.range = Some([bounds.min()[0], bounds.max()[0]]);
         }
-        self.request();
     }
 }
 

@@ -24,8 +24,9 @@ fills remain above plant fills. Individual bounds include the border.
 The window has **World** and **Metrics** tabs. The [Metrics panel](metrics.md#viewing)
 reads the run's CBOR log independently, including records appended after EOF.
 Its searchable scalar plot supports full-history pan/zoom, hover values, and resume
-boundaries. A background reader retains the full plotting history in memory and
-downsamples wider ranges for display.
+boundaries. The viewer loop loads bounded batches into memory and downsamples
+changed plots before UI layout, outside Universe locks. There is no separate
+metrics worker.
 The normal viewer skips world scene collection while Metrics is selected.
 `viewer.tab` selects the initial tab; tabs do not change simulation execution.
 
