@@ -48,17 +48,29 @@ Attach the viewer and select **Metrics** to browse the recorded scalar series:
 cargo run --locked -- --config configs/baseline.toml --config configs/metrics.toml --viewer
 ```
 
-Use the search field and metric selector, drag to pan, scroll to zoom, and hover
+Use the search field and metric selector, drag or scroll to pan, Ctrl-scroll or
+pinch to zoom, and hover
 for values and window bounds. **Follow data** fits new records automatically;
-panning or zooming turns it off. **Fit** resets the view. Diamonds mark partial
+panning or zooming turns it off. **Fit all** resets the view. Diamonds mark partial
 windows. Missing values break curves; separate invocation curves preserve resume
 boundaries and overlapping ticks after restoring an older checkpoint.
 
-The panel keeps the latest 8,192 recorded windows in memory; the file retains all
-history. Older windows outside that display cache are not currently browseable.
-It polls even while World is selected and after catching up; no historical/live
-mode distinction exists. Loading and plotting use the log, without reading or
-advancing the Universe. Collection continues independently of the selected tab.
+The whole recorded history is browseable. A background reader incrementally builds
+an in-memory index of file locations and per-block summaries. Zoomed-out curves
+retain first, last, minimum, and maximum values in horizontal display bins;
+zooming in reads the original windows for that range. These are recorded values,
+not averages of averages. Only a bounded cache of raw blocks is retained; the
+smaller index grows with history and is rebuilt by scanning the file when the
+viewer opens. There is no second data or index file. Initial indexing shows
+progress as records arrive. Bins which cut across summary blocks require raw
+reads; intermediate zoom levels can still reread most of the visible history.
+Persistent indexing and stored summaries at multiple resolutions are the proposed
+next step; choosing their storage format remains open.
+
+The reader follows appends even while World is selected and after catching up;
+there is no historical/live mode distinction. Browsing an older range keeps that
+viewport when new windows arrive. Loading and plotting use the log, without reading
+or advancing the Universe. Collection continues independently of the selected tab.
 Switching to Metrics skips world scene collection and drawing in the normal viewer.
 `viewer.tab = "metrics"` selects it initially (`"world"` is the default).
 

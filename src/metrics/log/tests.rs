@@ -260,3 +260,84 @@ fn oversized_records_fail_before_writing_and_cannot_be_misread_as_pending() {
     assert!(reader.poll().is_err());
     assert!(Writer::open(&path).is_err());
 }
+
+#[test]
+fn located_records_support_independent_exact_range_reads() {
+    let directory = Directory::new();
+    let path = directory.file();
+    let records = [
+        session(1, 0),
+        sample(1, 10),
+        sample(1, 20),
+        session(2, 5),
+        sample(2, 10),
+    ];
+    let bytes: Vec<_> = records.iter().flat_map(encoded).collect();
+    fs::write(&path, &bytes).unwrap();
+    let mut reader = Reader::new(&path);
+    let located = reader.poll_located().unwrap();
+    assert_eq!(located.len(), records.len());
+    let mut offset = 0;
+    for (actual, expected) in located.iter().zip(&records) {
+        assert_eq!(actual.record, *expected);
+        assert_eq!(actual.offset, offset);
+        offset += encoded(expected).len() as u64;
+        assert_eq!(actual.end_offset, offset);
+        assert_eq!(
+            read_range(&path, actual.offset..actual.end_offset).unwrap(),
+            std::slice::from_ref(expected)
+        );
+    }
+    // A range starts directly at a sample: it relies on the index's prior
+    // sequence validation, not a new synthetic session or the follower cursor.
+    assert_eq!(
+        read_range(&path, located[1].offset..located[2].end_offset).unwrap(),
+        records[1..3]
+    );
+    assert_eq!(reader.offset(), bytes.len() as u64);
+    assert!(reader.poll().unwrap().is_empty());
+    append_raw(&path, &encoded(&sample(2, 11)));
+    let appended = reader.poll_located().unwrap();
+    assert_eq!(appended.len(), 1);
+    assert_eq!(appended[0].offset, offset);
+    assert_eq!(appended[0].record, sample(2, 11));
+    assert_eq!(
+        read_range(&path, located[1].offset..located[2].end_offset).unwrap(),
+        records[1..3],
+        "appends must not change a previously indexed range"
+    );
+}
+
+#[test]
+fn range_reads_reject_cut_records_and_do_not_consume_a_pending_tail() {
+    let directory = Directory::new();
+    let path = directory.file();
+    let first = encoded(&session(1, 0));
+    let next = encoded(&sample(1, 10));
+    fs::write(&path, &first).unwrap();
+    append_raw(&path, &next[..next.len() - 1]);
+    let mut reader = Reader::new(&path);
+    let located = reader.poll_located().unwrap();
+    assert_eq!(located.len(), 1);
+    assert_eq!(located[0].end_offset, first.len() as u64);
+    assert!(reader.has_pending_record());
+    let committed = reader.offset();
+    assert!(read_range(&path, 0..committed - 1).is_err());
+    assert!(read_range(&path, 1..committed).is_err());
+    assert!(read_range(&path, committed..committed + next.len() as u64).is_err());
+    assert!(read_range(&path, 0..u64::MAX).is_err());
+    assert!(read_range(&path, committed..committed).unwrap().is_empty());
+    assert_eq!(reader.offset(), committed);
+    assert!(reader.has_pending_record());
+    append_raw(&path, &next[next.len() - 1..]);
+    let completed = reader.poll_located().unwrap();
+    assert_eq!(completed.len(), 1);
+    assert_eq!(completed[0].offset, committed);
+    assert_eq!(completed[0].end_offset, committed + next.len() as u64);
+    assert_eq!(completed[0].record, sample(1, 10));
+    assert!(!reader.has_pending_record());
+    assert_eq!(
+        read_range(&path, committed..completed[0].end_offset).unwrap(),
+        [sample(1, 10)]
+    );
+}

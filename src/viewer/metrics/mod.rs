@@ -1,70 +1,93 @@
 //! Read-only metrics browsing, independent of the simulated world.
 
 mod history;
+mod worker;
 
-use std::{
-    path::PathBuf,
-    time::{Duration, Instant},
-};
+use std::{path::PathBuf, sync::Arc};
 
 use egui_plot::{HoverPosition, Legend, Line, MarkerShape, Plot, Points};
 use wgame_egui::egui;
 
-use crate::metrics::log::Reader;
-use history::{History, WINDOW_LIMIT};
+use worker::{Request, Snapshot, Worker};
 
 pub(super) struct Panel {
     path: Option<PathBuf>,
-    reader: Option<Reader>,
-    history: History,
-    next_poll: Instant,
-    error: Option<String>,
+    worker: Option<Worker>,
+    snapshot: Arc<Snapshot>,
     filter: String,
     selected: String,
     follow: bool,
+    range: Option<[f64; 2]>,
+    pixels: usize,
+    fit_when_ready: bool,
     reset_plot: bool,
+    #[cfg(test)]
+    plot_rect: Option<egui::Rect>,
+    #[cfg(test)]
+    plot_bounds: Option<[f64; 2]>,
 }
 
 impl Panel {
     pub fn new(path: Option<PathBuf>) -> Self {
         Self {
-            reader: path.as_ref().map(Reader::new),
+            worker: path.clone().map(Worker::new),
             path,
-            history: History::default(),
-            next_poll: Instant::now(),
-            error: None,
+            snapshot: Arc::new(Snapshot::default()),
             filter: String::new(),
             selected: String::new(),
             follow: true,
+            range: None,
+            pixels: 1024,
+            fit_when_ready: true,
             reset_plot: false,
+            #[cfg(test)]
+            plot_rect: None,
+            #[cfg(test)]
+            plot_bounds: None,
         }
     }
 
-    /// File access happens once outside egui's repeatable layout and world locks.
+    /// Takes a completed read result; all file access stays on the worker.
     pub fn poll(&mut self) {
-        if Instant::now() < self.next_poll {
-            return;
-        }
-        self.next_poll = Instant::now() + Duration::from_millis(200);
-        let Some(reader) = &mut self.reader else {
+        let Some(worker) = &self.worker else {
             return;
         };
-        match reader.poll() {
-            Ok(records) => {
-                self.error = None;
-                if !records.is_empty() {
-                    // Catch up a bounded batch each frame; wait only when caught up.
-                    self.next_poll = Instant::now();
-                    self.reset_plot |= self.follow;
-                }
-                for record in records {
-                    self.history.ingest(record);
-                }
-                if self.selected.is_empty() {
-                    self.selected = self.history.names().next().unwrap_or_default().to_owned();
-                }
-            }
-            Err(error) => self.error = Some(format!("{error:#}")),
+        let snapshot = worker.snapshot();
+        if snapshot.revision == self.snapshot.revision {
+            return;
+        }
+        if self.selected.is_empty() {
+            self.selected = snapshot.names.first().cloned().unwrap_or_default();
+        }
+        if snapshot.request.metric == self.selected
+            && snapshot.request.range.is_none()
+            && (self.follow || self.fit_when_ready)
+        {
+            self.reset_plot = true;
+            self.fit_when_ready = false;
+        }
+        self.snapshot = snapshot;
+        self.request();
+    }
+
+    fn request(&self) {
+        if let Some(worker) = &self.worker {
+            worker.request(Request {
+                metric: self.selected.clone(),
+                range: self.range,
+                pixels: self.pixels,
+            });
+        }
+    }
+
+    fn fit(&mut self) {
+        self.range = None;
+        self.fit_when_ready = true;
+        self.request();
+        // A fit can be satisfied by the already loaded full-history result.
+        if self.snapshot.request.metric == self.selected && self.snapshot.request.range.is_none() {
+            self.reset_plot = true;
+            self.fit_when_ready = false;
         }
     }
 
@@ -77,24 +100,22 @@ impl Panel {
             ui.heading("Metrics");
             ui.weak(path.display().to_string());
         });
-        if let Some(error) = &self.error {
+        if let Some(error) = &self.snapshot.error {
             ui.colored_label(egui::Color32::LIGHT_RED, error);
         }
         ui.horizontal_wrapped(|ui| {
-            ui.label(format!("{} loaded windows", self.history.total_windows));
-            if let Some(tick) = self.history.last_tick() {
+            ui.label(format!("{} indexed windows", self.snapshot.total_windows));
+            if let Some(tick) = self.snapshot.last_tick {
                 ui.label(format!("Latest recorded tick {tick}"));
             }
-            if self.reader.as_ref().is_some_and(Reader::has_pending_record) {
+            if self.snapshot.indexing {
+                ui.spinner();
+                ui.weak("Indexing history…");
+            } else if self.snapshot.pending {
                 ui.weak("Waiting for the remainder of a record…");
             }
-            if self.history.total_windows > self.history.len() as u64 {
-                ui.weak(format!(
-                    "Showing the latest {WINDOW_LIMIT} windows; the file retains all history."
-                ));
-            }
         });
-        if self.history.len() == 0 {
+        if self.snapshot.total_windows == 0 {
             ui.add_space(12.0);
             ui.label("Waiting for recorded metric windows…");
             ui.weak(
@@ -102,15 +123,14 @@ impl Panel {
             );
             return;
         }
+        let mut fit = false;
         ui.horizontal(|ui| {
             ui.label("Find metric");
             ui.text_edit_singleline(&mut self.filter);
-            if ui.checkbox(&mut self.follow, "Follow data").changed() {
-                self.reset_plot = true;
+            if ui.checkbox(&mut self.follow, "Follow data").changed() && self.follow {
+                fit = true;
             }
-            if ui.button("Fit").clicked() {
-                self.reset_plot = true;
-            }
+            fit |= ui.button("Fit all").clicked();
         });
         let filter = self.filter.to_lowercase();
         egui::ComboBox::from_id_salt("metric-name")
@@ -122,32 +142,51 @@ impl Panel {
             })
             .show_ui(ui, |ui| {
                 for name in self
-                    .history
-                    .names()
+                    .snapshot
+                    .names
+                    .iter()
                     .filter(|name| name.to_lowercase().contains(&filter))
                 {
                     if ui
-                        .selectable_value(&mut self.selected, name.to_owned(), name)
+                        .selectable_value(&mut self.selected, name.clone(), name)
                         .changed()
                     {
-                        self.reset_plot = true;
+                        fit = true;
                     }
                 }
             });
+        if fit {
+            self.fit();
+        }
         if self.selected.is_empty() {
             ui.label("No scalar metrics are present in the recorded summaries.");
             return;
         }
         ui.weak(
-            "Drag to pan · scroll to zoom · double-click to fit · diamonds mark partial windows",
+            "Drag/scroll to pan · Ctrl+scroll or pinch to zoom · double-click to fit all · diamonds mark partial windows",
         );
-        let segments = self.history.segments(&self.selected);
-        if segments.is_empty() {
-            ui.label("This metric has no values in the retained windows.");
-            return;
+        let snapshot = Arc::clone(&self.snapshot);
+        let loading = snapshot.request.metric != self.selected
+            || snapshot.request.range != self.range
+            || self.fit_when_ready;
+        if loading {
+            ui.weak("Loading view…");
+        } else {
+            ui.weak(
+                "Zooming in loads detail; zoomed-out curves preserve minimum and maximum values.",
+            );
         }
+        // A previous range may remain visible while its replacement loads, but
+        // values from a different metric must never appear under the new name.
+        let segments = if snapshot.request.metric == self.selected {
+            snapshot.segments.as_slice()
+        } else {
+            &[]
+        };
+        let reset = std::mem::take(&mut self.reset_plot);
         let mut plot = Plot::new(("metrics-plot", &self.selected))
             .legend(Legend::default())
+            .allow_double_click_reset(false)
             .x_axis_label("Tick")
             .y_axis_label(&self.selected)
             .height(ui.available_height().max(120.0))
@@ -181,11 +220,21 @@ impl Panel {
                     Some(format!("Tick {:.0}\nValue {:.6}", position.x, position.y))
                 }
             });
-        if std::mem::take(&mut self.reset_plot) {
+        if reset {
             plot = plot.reset();
         }
+        // Fitting/following uses the full log extent, even if this metric
+        // disappeared from newer windows after a configuration change.
+        if (reset || self.follow)
+            && let Some([min, max]) = snapshot.extent
+        {
+            plot = plot.include_x(min as f64).include_x(max as f64);
+        }
         let response = plot.show(ui, |plot_ui| {
-            for segment in &segments {
+            // Once browsing, replacement data cannot alter the user's bounds.
+            // Interaction is applied by egui_plot after this setting.
+            plot_ui.set_auto_bounds(reset || (self.follow && !self.fit_when_ready));
+            for segment in segments {
                 let color = session_color(segment.session);
                 let points: Vec<_> = segment
                     .points
@@ -213,15 +262,29 @@ impl Panel {
                 }
             }
         });
-        // A deliberate viewport change should persist while new windows arrive.
-        if response.response.dragged()
+        #[cfg(test)]
+        {
+            self.plot_rect = Some(*response.transform.frame());
+            let bounds = response.transform.bounds();
+            self.plot_bounds = Some([bounds.min()[0], bounds.max()[0]]);
+        }
+        let interacted = response.response.dragged()
             || (response.response.hovered()
                 && ui.input(|input| {
                     input.smooth_scroll_delta != egui::Vec2::ZERO || input.zoom_delta() != 1.0
-                }))
-        {
+                }));
+        if interacted {
             self.follow = false;
+            self.fit_when_ready = false;
         }
+        self.pixels = response.transform.frame().width().ceil().max(1.0) as usize;
+        if response.response.double_clicked() {
+            self.fit();
+        } else if !self.follow && !self.fit_when_ready {
+            let bounds = response.transform.bounds();
+            self.range = Some([bounds.min()[0], bounds.max()[0]]);
+        }
+        self.request();
     }
 }
 
