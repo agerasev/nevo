@@ -71,8 +71,8 @@ See [persistence options, format, and recovery](docs/persistence.md).
 Layer `--config configs/metrics.toml` to collect population, behavior, brain, and
 genetic statistics. Finalized windows append to one `metrics.cborseq` per run;
 accumulators reset on resume while recorded history remains. The **Metrics** tab
-follows that file alongside **World**, with full-history browsing, loading on zoom,
-and downsampling that preserves extrema. See [metrics and aggregation](docs/metrics.md).
+follows that file alongside **World**, keeping its full plotting history in memory
+and downsampling for display. See [metrics and aggregation](docs/metrics.md).
 
 Build with `--no-default-features` when graphics are unnecessary; the executable
 and runner stay the same. Add `--config configs/smoke.toml` to verify twelve

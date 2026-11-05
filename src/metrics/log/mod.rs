@@ -11,7 +11,7 @@ use anyhow::{Result, ensure};
 use ciborium::Value;
 use serde::{Deserialize, Serialize};
 
-pub use reader::{LocatedRecord, Reader, read_range};
+pub use reader::Reader;
 pub use writer::Writer;
 
 pub const FILE_NAME: &str = "metrics.cborseq";

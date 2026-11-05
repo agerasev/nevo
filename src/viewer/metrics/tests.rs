@@ -214,7 +214,7 @@ fn following_keeps_full_extent_for_a_metric_absent_from_newer_windows() {
 }
 
 #[test]
-fn failed_detail_reads_remain_visible_and_retry_until_repaired() {
+fn historical_zoom_uses_loaded_values_without_rereading_old_records() {
     let temporary = Temporary::new();
     let path = temporary.path();
     append(&path, &session(1, 0));
@@ -226,26 +226,20 @@ fn failed_detail_reads_remain_visible_and_retry_until_repaired() {
     wait_for(&mut panel, |panel| {
         panel.snapshot.total_windows == 2400 && !panel.snapshot.segments.is_empty()
     });
-    // The sequential follower is already beyond this block. Corrupt an older,
-    // uncached record to exercise the random-access query error separately.
+    // Alter already loaded bytes without appending. Browsing should use the
+    // retained values; the follower only reads newly appended records.
     let mut file = OpenOptions::new().write(true).open(&path).unwrap();
     file.seek(SeekFrom::Start(first_offset)).unwrap();
     file.write_all(&[0xff]).unwrap();
     panel.follow = false;
     panel.range = Some([1.0, 10.0]);
     panel.request();
-    wait_for(&mut panel, |panel| panel.snapshot.error.is_some());
-    let failed_revision = panel.snapshot.revision;
     wait_for(&mut panel, |panel| {
-        panel.snapshot.revision > failed_revision
+        panel.snapshot.request.range == Some([1.0, 10.0])
     });
-    assert!(panel.snapshot.error.is_some());
-    assert!(panel.snapshot.segments.is_empty());
-    let mut encoded = Vec::new();
-    ciborium::into_writer(&sample(1, 1, Some(1.0), true), &mut encoded).unwrap();
-    file.seek(SeekFrom::Start(first_offset)).unwrap();
-    file.write_all(&encoded[..1]).unwrap();
-    wait_for(&mut panel, |panel| {
-        panel.snapshot.error.is_none() && !panel.snapshot.segments.is_empty()
-    });
+    assert!(panel.snapshot.error.is_none());
+    let points = &panel.snapshot.segments[0].points;
+    assert_eq!(points[0].tick, 1);
+    assert_eq!(points[0].value, 1.0);
+    assert_eq!(points.len(), 11); // Includes the next point for a crossing line.
 }

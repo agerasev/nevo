@@ -13,7 +13,7 @@ impl Temporary {
     fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
-            "nevo-history-lod-{}-{}",
+            "nevo-history-memory-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
@@ -74,7 +74,7 @@ fn catch_up(history: &mut History) {
 }
 
 #[test]
-fn all_history_remains_browsable_with_bounded_detail_cache() {
+fn all_history_remains_in_memory_without_rereading_the_file() {
     let temp = Temporary::new();
     let old = Record::Sample(Sample {
         session: 1,
@@ -92,17 +92,15 @@ fn all_history_remains_browsable_with_bounded_detail_cache() {
     assert_eq!(history.total_windows(), 20_000);
     assert_eq!(history.extent(), Some([1, 20_000]));
     assert_eq!(history.names().collect::<Vec<_>>(), ["old", "value"]);
-    assert!(
-        history.cache.is_empty(),
-        "indexing must not retain raw blocks"
-    );
-    let old = history.query("old", Some([0.0, 5.0]), 800).unwrap();
+
+    // Every metric and every original window remains available even when the
+    // source file is gone; plotting must never reread an already loaded record.
+    fs::remove_file(&temp.0).unwrap();
+    let old = history.query("old", Some([0.0, 5.0]), 800);
     assert_eq!(old[0].points[0].tick, 1);
     assert_eq!(old[0].points[0].value, 42.0);
     for start in (100..20_000).step_by(300) {
-        let plotted = history
-            .query("value", Some([start as f64, start as f64 + 5.0]), 800)
-            .unwrap();
+        let plotted = history.query("value", Some([start as f64, start as f64 + 5.0]), 800);
         let exact: Vec<_> = plotted
             .iter()
             .flat_map(|segment| &segment.points)
@@ -110,21 +108,11 @@ fn all_history_remains_browsable_with_bounded_detail_cache() {
             .map(|point| point.tick)
             .collect();
         assert_eq!(exact, (start..=start + 5).collect::<Vec<_>>());
-        assert!(history.cache.len() <= CACHE_BLOCKS);
-        assert!(history.cache_bytes <= CACHE_BYTES);
     }
-    let before = history.disk_reads;
-    history.query("value", Some([100.0, 105.0]), 800).unwrap();
-    assert!(
-        history.disk_reads > before,
-        "evicted old detail must reload from disk"
-    );
-    let before = history.disk_reads;
-    history.query("value", Some([100.0, 105.0]), 800).unwrap();
-    assert_eq!(
-        history.disk_reads, before,
-        "repeat viewport should reuse detail cache"
-    );
+    let full = history.query("value", None, 1000);
+    assert_eq!(full[0].points.first().unwrap().tick, 2);
+    assert_eq!(full[0].points.last().unwrap().tick, 20_000);
+    assert!(full[0].points.len() <= 4 * 1001);
 }
 
 #[test]
@@ -146,14 +134,10 @@ fn coarse_plot_preserves_exact_bin_extrema_and_refines_on_zoom() {
     );
     let mut history = History::new(temp.0.clone());
     catch_up(&mut history);
-    let segments = history.query("value", None, 37).unwrap();
+    let segments = history.query("value", None, 37);
     assert_eq!(segments.len(), 1);
     let points = &segments[0].points;
     assert!(points.len() <= 4 * 38);
-    assert!(
-        history.disk_reads < history.blocks.len() / 2,
-        "coarse interiors should use summaries"
-    );
     assert!(points.windows(2).all(|pair| pair[0].tick < pair[1].tick));
     let width = 19_999.0 / 37.0;
     for bin in 0..=37 {
@@ -177,7 +161,7 @@ fn coarse_plot_preserves_exact_bin_extrema_and_refines_on_zoom() {
             );
         }
     }
-    let zoom = history.query("value", Some([20.0, 35.0]), 800).unwrap();
+    let zoom = history.query("value", Some([20.0, 35.0]), 800);
     assert_eq!(
         zoom[0]
             .points
@@ -211,7 +195,7 @@ fn missing_windows_and_overlapping_sessions_never_join() {
     );
     let mut history = History::new(temp.0.clone());
     catch_up(&mut history);
-    let plotted = history.query("value", None, 1).unwrap();
+    let plotted = history.query("value", None, 1);
     assert_eq!(
         plotted
             .iter()
@@ -223,18 +207,8 @@ fn missing_windows_and_overlapping_sessions_never_join() {
     assert_eq!(plotted[1].points.first().unwrap().tick, 130);
     assert_eq!(plotted[1].points.last().unwrap().tick, 256);
     assert_eq!(plotted[2].points.first().unwrap().tick, 258);
-    assert!(
-        history
-            .query("value", Some([128.0, 129.0]), 800)
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        history
-            .query("value", Some([-10.0, -1.0]), 800)
-            .unwrap()
-            .is_empty()
-    );
+    assert!(history.query("value", Some([128.0, 129.0]), 800).is_empty());
+    assert!(history.query("value", Some([-10.0, -1.0]), 800).is_empty());
 }
 
 #[test]
@@ -250,7 +224,7 @@ fn crossing_lines_include_neighbours_and_selected_partial_window_metadata() {
     );
     let mut history = History::new(temp.0.clone());
     catch_up(&mut history);
-    let plotted = history.query("value", Some([40.0, 60.0]), 800).unwrap();
+    let plotted = history.query("value", Some([40.0, 60.0]), 800);
     assert_eq!(
         plotted[0]
             .points
@@ -263,31 +237,25 @@ fn crossing_lines_include_neighbours_and_selected_partial_window_metadata() {
 }
 
 #[test]
-fn following_invalidates_active_block_detail_without_changing_old_view() {
+fn following_appends_to_memory_without_changing_older_values() {
     let temp = Temporary::new();
     let mut history = History::new(temp.0.clone());
     assert!(!history.poll().unwrap());
     append(&temp.0, &session(1, 0));
     append(&temp.0, &sample(1, 1, Some(10.0)));
     catch_up(&mut history);
-    assert_eq!(
-        history.query("value", None, 800).unwrap()[0].points.len(),
-        1
-    );
+    assert_eq!(history.query("value", None, 800)[0].points.len(), 1);
     append(&temp.0, &sample(1, 2, Some(20.0)));
     catch_up(&mut history);
+    assert_eq!(history.query("value", None, 800)[0].points.len(), 2);
     assert_eq!(
-        history.query("value", None, 800).unwrap()[0].points.len(),
-        2
-    );
-    assert_eq!(
-        history.query("value", Some([1.0, 1.0]), 800).unwrap()[0].points[0].value,
+        history.query("value", Some([1.0, 1.0]), 800)[0].points[0].value,
         10.0
     );
     append(&temp.0, &session(2, 0));
     append(&temp.0, &sample(2, 1, Some(30.0)));
     catch_up(&mut history);
-    let plotted = history.query("value", None, 800).unwrap();
+    let plotted = history.query("value", None, 800);
     assert_eq!(plotted.len(), 2);
     assert_eq!(history.last_tick(), Some(1));
     assert_eq!(history.extent(), Some([1, 2]));

@@ -1,5 +1,5 @@
 //! The UI exchanges only its latest request and a completed snapshot with this
-//! worker. Indexing and random-access reads never hold an egui or world lock.
+//! worker. Loading and downsampling never hold an egui or world lock.
 
 use std::{
     path::PathBuf,
@@ -13,7 +13,7 @@ use super::history::{History, Segment};
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Request {
     pub metric: String,
-    /// None requests the entire indexed history (fit/follow).
+    /// None requests the entire loaded history (fit/follow).
     pub range: Option<[f64; 2]>,
     pub pixels: usize,
 }
@@ -37,7 +37,7 @@ pub(super) struct Snapshot {
     pub last_tick: Option<u64>,
     pub extent: Option<[u64; 2]>,
     pub pending: bool,
-    pub indexing: bool,
+    pub loading: bool,
     pub error: Option<String>,
     pub segments: Vec<Segment>,
 }
@@ -86,7 +86,7 @@ impl Drop for Worker {
         lock.lock().unwrap().stop = true;
         wake.notify_one();
         // Do not block window shutdown on a disk read. The worker exits after
-        // its current bounded batch/query and owns no simulation state.
+        // its current batch/query and owns no simulation state.
     }
 }
 
@@ -98,7 +98,7 @@ fn run(path: PathBuf, shared: Arc<(Mutex<Exchange>, Condvar)>) {
     let mut last_publish = Instant::now();
     let mut previous_error = None;
     let mut previous_pending = false;
-    let mut previous_indexing = true;
+    let mut previous_loading = true;
     let mut last_segments = Vec::new();
     loop {
         let (lock, wake) = &*shared;
@@ -109,7 +109,7 @@ fn run(path: PathBuf, shared: Arc<(Mutex<Exchange>, Condvar)>) {
             }
             exchange.request.clone()
         };
-        let (indexing, mut error) = match history.poll() {
+        let (loading, error) = match history.poll() {
             Ok(changed) => {
                 dirty |= changed;
                 (changed, None)
@@ -119,25 +119,15 @@ fn run(path: PathBuf, shared: Arc<(Mutex<Exchange>, Condvar)>) {
         let pending = history.has_pending_record();
         let new_request = last_request.as_ref() != Some(&request);
         let status_changed =
-            error != previous_error || pending != previous_pending || indexing != previous_indexing;
+            error != previous_error || pending != previous_pending || loading != previous_loading;
         // During the initial scan, publish periodically rather than querying
-        // the growing index again after every small reader batch.
+        // the growing history again after every small reader batch.
         let publish = new_request
             || status_changed
-            || (dirty && (!indexing || last_publish.elapsed() >= Duration::from_millis(100)));
+            || (dirty && (!loading || last_publish.elapsed() >= Duration::from_millis(100)));
         if publish {
-            let mut query_failed = false;
             if (dirty || new_request) && !request.metric.is_empty() {
-                match history.query(&request.metric, request.range, request.pixels) {
-                    Ok(segments) => last_segments = segments,
-                    Err(query_error) => {
-                        query_failed = true;
-                        error = Some(format!("{query_error:#}"));
-                        if new_request {
-                            last_segments.clear();
-                        }
-                    }
-                }
+                last_segments = history.query(&request.metric, request.range, request.pixels);
             } else if request.metric.is_empty() {
                 last_segments.clear();
             }
@@ -150,7 +140,7 @@ fn run(path: PathBuf, shared: Arc<(Mutex<Exchange>, Condvar)>) {
                 last_tick: history.last_tick(),
                 extent: history.extent(),
                 pending,
-                indexing,
+                loading,
                 error: error.clone(),
                 segments: last_segments.clone(),
             });
@@ -158,7 +148,7 @@ fn run(path: PathBuf, shared: Arc<(Mutex<Exchange>, Condvar)>) {
             if exchange.stop {
                 return;
             }
-            // A new request may arrive during a disk query. Never replace the
+            // A new request may arrive during downsampling. Never replace the
             // displayed result with a result for that superseded request.
             if exchange.request == request {
                 exchange.snapshot = snapshot;
@@ -166,11 +156,11 @@ fn run(path: PathBuf, shared: Arc<(Mutex<Exchange>, Condvar)>) {
             last_request = Some(request.clone());
             previous_error = error;
             previous_pending = pending;
-            previous_indexing = indexing;
+            previous_loading = loading;
             last_publish = Instant::now();
-            dirty = query_failed;
+            dirty = false;
         }
-        if !indexing {
+        if !loading {
             let exchange = lock.lock().unwrap();
             if exchange.stop {
                 return;

@@ -104,13 +104,13 @@ impl Panel {
             ui.colored_label(egui::Color32::LIGHT_RED, error);
         }
         ui.horizontal_wrapped(|ui| {
-            ui.label(format!("{} indexed windows", self.snapshot.total_windows));
+            ui.label(format!("{} loaded windows", self.snapshot.total_windows));
             if let Some(tick) = self.snapshot.last_tick {
                 ui.label(format!("Latest recorded tick {tick}"));
             }
-            if self.snapshot.indexing {
+            if self.snapshot.loading {
                 ui.spinner();
-                ui.weak("Indexing history…");
+                ui.weak("Loading history…");
             } else if self.snapshot.pending {
                 ui.weak("Waiting for the remainder of a record…");
             }
@@ -170,13 +170,11 @@ impl Panel {
             || snapshot.request.range != self.range
             || self.fit_when_ready;
         if loading {
-            ui.weak("Loading view…");
+            ui.weak("Updating plot…");
         } else {
-            ui.weak(
-                "Zooming in loads detail; zoomed-out curves preserve minimum and maximum values.",
-            );
+            ui.weak("Zoomed-out curves preserve minimum and maximum values.");
         }
-        // A previous range may remain visible while its replacement loads, but
+        // A previous range may remain visible while its replacement is computed, but
         // values from a different metric must never appear under the new name.
         let segments = if snapshot.request.metric == self.selected {
             snapshot.segments.as_slice()
