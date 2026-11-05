@@ -17,3 +17,6 @@ checks are available through Git history.
 - [Evolved RNNs versus a gradient follower, November 2026](2026-11-05-gradient-comparison.md):
   similar food collection and population across 32 matched worlds without
   immigration; RNNs showed lower turnover.
+- [Controllers after 8.85 million ticks with costly movement](2026-11-05-costly-movement-models.md):
+  slower, food-dependent gradient following; rare reproduction and occasional
+  immigration persisted.
