@@ -8,3 +8,6 @@ checks are available through Git history.
   food-seeking behavior and the limits of evidence from population survival.
 - [Runnable Rust baseline, November 2026](2026-11-04-rust-baseline.md): a repeatable
   ecosystem, with adaptation still unmeasured.
+- [First million-tick run, November 2026](2026-11-05-long-run.md): near
+  self-sufficiency and food-production saturation in one seed; controlled
+  evolutionary comparisons remain open.
