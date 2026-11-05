@@ -2,6 +2,6 @@
 initial_animals = 20
 plants = 500
 minimum_population = 20
-immigration.energy = 100.0
+immigration.energy = 0.25
 immigration.position = "random"
 plant.initial_position = "random"

@@ -87,7 +87,7 @@ recurrent memory and RNG positions are required state. Finalized statistics rema
 in the single [CBOR metrics log](metrics.md), which is never replayed into checkpoints.
 Core simulation and genetics contracts have no persistence bounds.
 
-The current format is checkpoint version 10, with `foraging-sense-first-v4` and
+The current format is checkpoint version 11, with `foraging-sense-first-v5` and
 `animal-rnn-3-n-3-v2` model identifiers. Only this format is accepted;
 compatibility and migrations are intentionally unsupported. Rust module/type names
 are not part of the format.

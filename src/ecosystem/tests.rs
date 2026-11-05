@@ -1,11 +1,11 @@
 use super::*;
 use crate::genome::{Genome, Mutate, RandomInit};
 
-// Fixed reference values keep the historical default behavior checks explicit.
+// Reference defaults in normalized energy units; spatial units are unchanged.
 const HALF_SIZE: DVec2 = DVec2::new(630.0, 350.0);
-const START_ENERGY: f64 = 100.0;
-const RIPE_ENERGY: f64 = 400.0;
-const UPKEEP: f64 = 2.0;
+const START_ENERGY: f64 = 0.25;
+const RIPE_ENERGY: f64 = 1.0;
+const UPKEEP: f64 = 0.005;
 
 #[derive(Clone, Copy)]
 struct Admission {
@@ -165,7 +165,7 @@ impl Fixture {
                 1,
                 Admission {
                     position: Some(DVec2::ZERO),
-                    energy: 390.0,
+                    energy: 0.975,
                 },
             )
             .unwrap();
@@ -211,12 +211,12 @@ fn first_claimant_gets_the_only_meal_and_replacement_starts_small() {
         [Event::Meal {
             id: first,
             plant: 1,
-            gain: 40.0
+            gain: 0.1
         }]
     );
-    assert_eq!(fixture.world.animals[&first].body.energy, 138.0);
-    assert_eq!(fixture.world.animals[&second].body.energy, 98.0);
-    assert_eq!(fixture.world.plants[0].energy, 1.0);
+    assert_eq!(fixture.world.animals[&first].body.energy, 0.345);
+    assert_eq!(fixture.world.animals[&second].body.energy, 0.245);
+    assert_eq!(fixture.world.plants[0].energy, 0.0025);
     assert_ne!(fixture.world.plants[0].id, 1);
 }
 
@@ -225,12 +225,12 @@ fn upkeep_defers_death_and_replacement_first_acts_on_the_following_tick() {
     let mut fixture = Fixture::debug(2);
     fixture.world.set_minimum_population(1);
     fixture.world.plants[0].position = DVec2::new(100.0, 0.0);
-    fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = 1.0;
+    fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = 0.0025;
 
     let starving = fixture.tick();
     assert!(starving.events.is_empty());
-    assert_eq!(starving.decisions[0].energy, 1.0);
-    assert_eq!(fixture.world.animals[&id(1)].body.energy, -1.0);
+    assert_eq!(starving.decisions[0].energy, 0.0025);
+    assert_eq!(fixture.world.animals[&id(1)].body.energy, -0.0025);
     assert!(starving.decisions[0].position_after.is_finite());
 
     fixture.world.plants[0].position = starving.decisions[0].position_after;
@@ -247,7 +247,7 @@ fn upkeep_defers_death_and_replacement_first_acts_on_the_following_tick() {
     assert_eq!(next.decisions.len(), 1);
     assert_eq!(
         (next.decisions[0].id, next.decisions[0].energy),
-        (id(2), 98.0)
+        (id(2), 0.245)
     );
     assert_eq!(fixture.world.animals[&id(2)].mind.calls, 1);
 }
@@ -314,10 +314,10 @@ fn parent_senses_ripe_food_and_newborn_waits_to_process_it() {
     assert_eq!(world.context, expected_context);
     assert_eq!(first.decisions.len(), 1);
     assert_eq!(first.decisions[0].id, id(1));
-    assert_eq!(first.decisions[0].energy, 390.0);
+    assert_eq!(first.decisions[0].energy, 0.975);
     assert_eq!(first.decisions[0].observation, sensed);
-    assert_eq!(world.animals[&id(1)].body.energy, 213.0);
-    assert_eq!(world.animals[&id(2)].body.energy, 213.0);
+    assert_eq!(world.animals[&id(1)].body.energy, 0.5325);
+    assert_eq!(world.animals[&id(2)].body.energy, 0.5325);
     assert_ne!(world.animals[&id(1)].mind.brain.memory, [0.0; 4]);
     assert_eq!(world.animals[&id(2)].mind.brain.memory, [0.0; 4]);
     let second = world.advance(2).unwrap();
@@ -355,7 +355,7 @@ fn movement_enters_contact_before_feeding_and_birth() {
             Event::Meal {
                 id: id(1),
                 plant: 1,
-                gain: 40.0
+                gain: 0.1
             },
             Event::Birth {
                 parent: id(1),
@@ -379,7 +379,7 @@ fn feeding_growth_cannot_leave_a_body_outside_the_arena() {
     fixture.world.plants[0].position = body.position;
     let report = fixture.tick();
     let body = &fixture.world.animals[&id(1)].body;
-    assert_eq!(body.energy, 138.0);
+    assert_eq!(body.energy, 0.345);
     assert_eq!(body.position, DVec2::new(HALF_SIZE.x - body.radius(), 0.0));
     assert!(body.position.x < report.decisions[0].position_after.x);
 }
@@ -393,7 +393,7 @@ fn replacements_follow_culling_and_precede_births() {
             1,
             Admission {
                 position: Some(DVec2::ZERO),
-                energy: -1.0,
+                energy: -0.0025,
             },
         )
         .unwrap();
@@ -468,7 +468,7 @@ fn initial_and_later_arrivals_use_the_same_admission_and_rng_sequence() {
 fn recursive_births_create_complete_animals_without_running_new_minds() {
     let mut fixture = Fixture::debug(12);
     fixture.world.plants[0].position = DVec2::new(100.0, 0.0);
-    fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = 1700.0;
+    fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = 4.25;
     let report = fixture.tick();
     assert_eq!(
         report.events,
@@ -529,7 +529,7 @@ fn a_different_genome_and_mutation_type_drive_generic_reproduction() {
             1,
             Admission {
                 position: Some(DVec2::ZERO),
-                energy: 500.0,
+                energy: 1.25,
             },
         )
         .unwrap()[0];
@@ -560,8 +560,8 @@ fn a_different_genome_and_mutation_type_drive_generic_reproduction() {
         world.context.rng, expected_rng,
         "this mutation is deterministic"
     );
-    assert_eq!(world.animals[&parent].body.energy, 248.0);
-    assert_eq!(world.animals[&child].body.energy, 248.0);
+    assert_eq!(world.animals[&parent].body.energy, 0.62);
+    assert_eq!(world.animals[&child].body.energy, 0.62);
 }
 
 #[test]
@@ -597,7 +597,7 @@ fn immigrant_template_applies_to_every_arrival_without_genetic_draws() {
     let original_context = world.context.clone();
     let admission = Admission {
         position: Some(DVec2::ZERO),
-        energy: 100.0,
+        energy: 0.25,
     };
     let first = world.admit_with(1, admission).unwrap()[0];
     world.advance(1).unwrap();
@@ -737,7 +737,7 @@ fn stepping_requires_no_mind_clone_and_copies_genomes_only_for_arrivals_and_birt
             1,
             Admission {
                 position: Some(DVec2::ZERO),
-                energy: 100.0,
+                energy: 0.25,
             },
         )
         .unwrap()[0];
@@ -771,7 +771,7 @@ fn stepping_requires_no_mind_clone_and_copies_genomes_only_for_arrivals_and_birt
             1,
             Admission {
                 position: Some(DVec2::ZERO),
-                energy: 1700.0,
+                energy: 4.25,
             },
         )
         .unwrap();
@@ -897,8 +897,8 @@ fn window_reports_use_actual_samples_and_active_animal_exposure() {
         (1, 1, 1)
     );
     assert_eq!(events.births_per_tick, 1.0);
-    assert_eq!(events.food_per_animal_tick, Some(40.0));
-    assert_eq!(first.animal.body.food_gained.value().sum, Some(40.0));
+    assert_eq!(events.food_per_animal_tick, Some(0.1));
+    assert_eq!(first.animal.body.food_gained.value().sum, Some(0.1));
     assert_eq!(first.animal.body.offspring.value().mean, Some(0.5));
     assert_eq!(first.observed_survival.unwrap().mean, None);
     fixture.world.advance(2).unwrap();
@@ -1001,7 +1001,7 @@ fn deaths_report_window_observation_and_empty_exposure_is_unavailable() {
     use crate::metrics::Metrics;
     let mut fixture = Fixture::debug(46);
     fixture.world.plants[0].position.x = 100.0;
-    fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = 1.0;
+    fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = 0.0025;
     let config = measured_config();
     fixture.world.configure(&config).unwrap();
     fixture.world.advance(1).unwrap();
@@ -1141,7 +1141,7 @@ fn setup_occurs_once_for_initial_animals_births_and_immigrants() {
     use crate::metrics::Metrics;
     let mut config: Config<(), (), FixedMutation> = measured_config();
     config.initial_animals = 1;
-    config.immigration.energy = 390.0;
+    config.immigration.energy = 0.975;
     config.immigration.position = Placement::Fixed(DVec2::ZERO);
     config.plant.initial_position = Placement::Fixed(DVec2::ZERO);
     config.plants = 1;
@@ -1326,13 +1326,13 @@ fn configured_immigration_is_identical_for_initial_and_later_arrivals() {
         minimum_population: 0,
         plants: 0,
         immigration: ImmigrationConfig {
-            energy: 250.0,
+            energy: 0.625,
             position: Placement::Fixed(DVec2::new(7.0, -9.0)),
         },
         ..Config::default()
     };
-    config.animal.body.upkeep = 3.0;
-    config.animal.body.radius_scale = 0.2;
+    config.animal.body.upkeep = 0.0075;
+    config.animal.body.radius_scale = 4.0;
     config.genetics.initialization.hidden_units = 7;
     config.genetics.initialization.weight_min = -0.1;
     config.genetics.initialization.weight_max = 0.3;
@@ -1346,7 +1346,7 @@ fn configured_immigration_is_identical_for_initial_and_later_arrivals() {
     let first = &initial.animals[&id(1)];
     let next = &later.animals[&id(1)];
     assert_eq!(first.body.position, next.body.position);
-    assert_eq!(first.body.energy - 3.0, next.body.energy);
+    assert_eq!(first.body.energy - 0.0075, next.body.energy);
     assert_eq!(first.body.radius_scale, next.body.radius_scale);
     assert_eq!(first.mind, next.mind);
     assert_eq!(next.mind.brain.memory.len(), 7);
@@ -1365,15 +1365,15 @@ fn configured_physics_controls_feeding_births_growth_and_body_size() {
             height: 40.0,
         },
         immigration: ImmigrationConfig {
-            energy: 30.0,
+            energy: 0.075,
             position: Placement::Fixed(DVec2::ZERO),
         },
         ..Config::default()
     };
-    config.animal.body.upkeep = 1.5;
-    config.animal.body.radius_scale = 1.0;
+    config.animal.body.upkeep = 0.00375;
+    config.animal.body.radius_scale = 20.0;
     config.animal.reproduction = ReproductionConfig {
-        threshold: 35.0,
+        threshold: 0.0875,
         child_energy_fraction: 0.25,
         separation_scale: 0.0,
     };
@@ -1383,11 +1383,11 @@ fn configured_physics_controls_feeding_births_growth_and_body_size() {
     };
     config.plant.initial_position = Placement::Fixed(DVec2::ZERO);
     config.plant.replacement_position = Placement::Fixed(DVec2::new(30.0, 0.0));
-    config.plant.initial_energy = 20.0;
-    config.plant.replacement_energy = 5.0;
-    config.plant.max_energy = 50.0;
-    config.plant.growth = 3.5;
-    config.plant.radius_scale = 2.0;
+    config.plant.initial_energy = 0.05;
+    config.plant.replacement_energy = 0.0125;
+    config.plant.max_energy = 0.125;
+    config.plant.growth = 0.00875;
+    config.plant.radius_scale = 40.0;
     let mut world =
         Ecosystem::<FixedMind, FixedGenome, FixedMutation>::with_genetics(config, 72, None)
             .unwrap();
@@ -1398,7 +1398,7 @@ fn configured_physics_controls_feeding_births_growth_and_body_size() {
             Event::Meal {
                 id: id(1),
                 plant: 1,
-                gain: 10.0
+                gain: 0.025
             },
             Event::Birth {
                 parent: id(1),
@@ -1406,19 +1406,19 @@ fn configured_physics_controls_feeding_births_growth_and_body_size() {
             },
         ]
     );
-    assert_eq!(world.animals[&id(1)].body.energy, 28.5);
-    assert_eq!(world.animals[&id(2)].body.energy, 8.5);
+    assert!((world.animals[&id(1)].body.energy - 0.07125).abs() < 1e-12);
+    assert!((world.animals[&id(2)].body.energy - 0.02125).abs() < 1e-12);
     for animal in world.animals.values() {
         assert_eq!(animal.body.position, DVec2::ZERO);
-        assert_eq!(animal.body.radius(), animal.body.energy.sqrt());
+        assert_eq!(animal.body.radius(), 20.0 * animal.body.energy.sqrt());
     }
-    assert_eq!(world.plants[0].energy, 8.5);
+    assert!((world.plants[0].energy - 0.02125).abs() < 1e-12);
     assert_eq!(world.plants[0].position, DVec2::new(30.0, 0.0));
-    assert_eq!(world.plants[0].radius(), 2.0 * 8.5_f64.sqrt());
+    assert!((world.plants[0].radius() - 2.0 * 8.5_f64.sqrt()).abs() < 1e-12);
     for tick in 2..=30 {
         world.advance(tick).unwrap();
     }
-    assert_eq!(world.plants[0].energy, 50.0);
+    assert_eq!(world.plants[0].energy, 0.125);
     assert_eq!(world.world_config().half_size(), DVec2::new(40.0, 20.0));
     assert!(world.plants[0].position.x + world.plants[0].radius() <= 40.0);
 }
@@ -1434,7 +1434,7 @@ fn configured_movement_and_sensing_use_instance_world_rules() {
             height: 40.0,
         },
         immigration: ImmigrationConfig {
-            energy: 100.0,
+            energy: 0.25,
             position: Placement::Fixed(DVec2::ZERO),
         },
         ..Config::default()
@@ -1442,11 +1442,11 @@ fn configured_movement_and_sensing_use_instance_world_rules() {
     config.animal.body.upkeep = 0.0;
     config.animal.body.max_speed = 12.0;
     config.animal.body.movement_time_step = 0.25;
-    config.animal.body.radius_scale = 0.1;
+    config.animal.body.radius_scale = 2.0;
     config.animal.feeding.contact_scale = 0.0;
     config.plant.initial_position = Placement::Fixed(DVec2::new(8.0, 0.0));
-    config.plant.initial_energy = 20.0;
-    config.plant.max_energy = 50.0;
+    config.plant.initial_energy = 0.05;
+    config.plant.max_energy = 0.125;
     config.sensing = SensingConfig {
         distance_scale: 0.25,
         softening: 0.2,
@@ -1495,7 +1495,7 @@ fn movement_cost_scales_with_energy_and_controlled_distance_after_wall_clamping(
         (628.0, DVec2::X, 1.0, 2.0),
         (630.0, DVec2::X, 1.0, 0.0),
     ] {
-        for (energy, metrics_enabled) in [0.0, 100.0, 200.0, 400.0]
+        for (energy, metrics_enabled) in [0.0, 0.25, 0.5, 1.0]
             .into_iter()
             .flat_map(|energy| [false, true].map(|enabled| (energy, enabled)))
         {
@@ -1507,8 +1507,9 @@ fn movement_cost_scales_with_energy_and_controlled_distance_after_wall_clamping(
             };
             config.immigration.position = Placement::Fixed(DVec2::new(start_x, 0.0));
             config.immigration.energy = energy;
-            config.animal.body.upkeep = 0.2;
-            config.animal.body.movement_cost_per_energy_distance = 0.0009;
+            config.animal.body.upkeep = 0.0005;
+            config.animal.body.movement_cost = 0.0009;
+            config.animal.body.movement_energy_power = 1.0;
             config.animal.body.radius_scale = 0.0;
             config.metrics.enabled = metrics_enabled;
             config.animal.metrics.distance = crate::metrics::Selection::all();
@@ -1531,7 +1532,7 @@ fn movement_cost_scales_with_energy_and_controlled_distance_after_wall_clamping(
                 report.decisions[0].position_after - report.decisions[0].position_before,
                 DVec2::new(distance, 0.0),
             );
-            let expected = energy - 0.2 - 0.0009 * energy * distance;
+            let expected = energy - 0.0005 - 0.0009 * energy * distance;
             assert!((world.animals[&id(1)].body.energy - expected).abs() < 1e-12);
         }
     }
@@ -1539,27 +1540,24 @@ fn movement_cost_scales_with_energy_and_controlled_distance_after_wall_clamping(
 
 #[test]
 fn movement_cost_is_paid_before_birth_and_excludes_birth_offsets() {
-    for energy in [401.0, 405.0] {
+    for energy in [1.0025, 1.0125] {
         let mut fixture = Fixture::debug(76);
         fixture.world.plants[0].position = DVec2::new(100.0, 100.0);
         fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = energy;
-        fixture.world.parameters.body.upkeep = 0.2;
-        fixture
-            .world
-            .parameters
-            .body
-            .movement_cost_per_energy_distance = 0.0009;
+        fixture.world.parameters.body.upkeep = 0.0005;
+        fixture.world.parameters.body.movement_energy_power = 1.0;
+        fixture.world.parameters.body.movement_cost = 0.0009;
         fixture.action(MoveAction {
             direction: DVec2::X,
             speed_fraction: 1.0,
         });
         let report = fixture.tick();
-        if energy == 401.0 {
+        if energy == 1.0025 {
             assert!(
                 report.events.is_empty(),
                 "travel must be affordable before reproducing"
             );
-            assert!((fixture.world.animals[&id(1)].body.energy - 397.191).abs() < 1e-12);
+            assert!((fixture.world.animals[&id(1)].body.energy - 0.9929775).abs() < 1e-12);
         } else {
             assert_eq!(
                 report.events,
@@ -1570,7 +1568,7 @@ fn movement_cost_is_paid_before_birth_and_excludes_birth_offsets() {
             );
             assert_eq!(report.decisions.len(), 1);
             for animal in fixture.world.animals.values() {
-                assert!((animal.body.energy - 200.4775).abs() < 1e-12);
+                assert!((animal.body.energy - 0.50119375).abs() < 1e-12);
                 assert_ne!(animal.body.position, report.decisions[0].position_after);
             }
         }
@@ -1580,18 +1578,15 @@ fn movement_cost_is_paid_before_birth_and_excludes_birth_offsets() {
 #[test]
 fn a_meal_does_not_retroactively_increase_the_movement_fee() {
     let mut fixture = Fixture::debug(79);
-    fixture.world.parameters.body.upkeep = 0.2;
-    fixture
-        .world
-        .parameters
-        .body
-        .movement_cost_per_energy_distance = 0.0009;
+    fixture.world.parameters.body.upkeep = 0.0005;
+    fixture.world.parameters.body.movement_energy_power = 1.0;
+    fixture.world.parameters.body.movement_cost = 0.0009;
     fixture.action(MoveAction {
         direction: DVec2::X,
         speed_fraction: 1.0,
     });
     let report = fixture.tick();
-    assert_eq!(report.decisions[0].energy, 390.0);
+    assert_eq!(report.decisions[0].energy, 0.975);
     assert_eq!(report.decisions[0].position_after, DVec2::new(10.0, 0.0));
     assert_eq!(
         report.events,
@@ -1599,7 +1594,7 @@ fn a_meal_does_not_retroactively_increase_the_movement_fee() {
             Event::Meal {
                 id: id(1),
                 plant: 1,
-                gain: 40.0
+                gain: 0.1
             },
             Event::Birth {
                 parent: id(1),
@@ -1607,9 +1602,9 @@ fn a_meal_does_not_retroactively_increase_the_movement_fee() {
             },
         ]
     );
-    // 390 + 40 food - 3.51 travel = 426.49, split equally before 0.2 upkeep each.
+    // 0.975 + 0.1 food - 0.008775 travel, split equally before 0.0005 upkeep each.
     for animal in fixture.world.animals.values() {
-        assert!((animal.body.energy - 213.045).abs() < 1e-12);
+        assert!((animal.body.energy - 0.5326125).abs() < 1e-12);
     }
 }
 
@@ -1617,34 +1612,32 @@ fn a_meal_does_not_retroactively_increase_the_movement_fee() {
 fn immigrants_pay_no_movement_cost_until_they_act() {
     let mut fixture = Fixture::debug(77);
     fixture.world.plants[0].position = DVec2::new(100.0, 100.0);
-    fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = 0.1;
+    fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = 0.00025;
     fixture.world.set_minimum_population(1);
-    fixture.world.parameters.body.upkeep = 0.2;
-    fixture
-        .world
-        .parameters
-        .body
-        .movement_cost_per_energy_distance = 0.0009;
+    fixture.world.parameters.body.upkeep = 0.0005;
+    fixture.world.parameters.body.movement_energy_power = 1.0;
+    fixture.world.parameters.body.movement_cost = 0.0009;
     fixture.action(MoveAction {
         direction: DVec2::X,
         speed_fraction: 1.0,
     });
     fixture.tick();
-    assert!((fixture.world.animals[&id(1)].body.energy + 0.1009).abs() < 1e-12);
+    assert!((fixture.world.animals[&id(1)].body.energy + 0.00025225).abs() < 1e-12);
     let report = fixture.tick();
     assert!(report.decisions.is_empty());
     assert_eq!(
         report.events,
         [Event::Death { id: id(1) }, Event::Immigrant { id: id(2) }]
     );
-    assert_eq!(fixture.world.animals[&id(2)].body.energy, 99.8);
+    assert_eq!(fixture.world.animals[&id(2)].body.energy, 0.2495);
 }
 
 #[test]
 fn movement_cost_trajectories_are_independent_of_metric_selection() {
     let mut config: Config = crate::test_support::ecosystem("baseline");
-    config.animal.body.upkeep = 0.2;
-    config.animal.body.movement_cost_per_energy_distance = 0.0009;
+    config.animal.body.upkeep = 0.0005;
+    config.animal.body.movement_cost = 0.0009;
+    config.animal.body.movement_energy_power = 1.0;
     config.animal.metrics.distance = crate::metrics::Selection::all();
     let mut measured = Ecosystem::new(config.clone(), 78).unwrap();
     config.metrics.enabled = false;
@@ -1659,6 +1652,124 @@ fn movement_cost_trajectories_are_independent_of_metric_selection() {
 }
 
 #[test]
+fn movement_energy_power_supports_flat_fractional_and_nonlinear_costs() {
+    for (energy, power, movement_cost, expected_fee) in [
+        (0.0, 0.0, 0.00045, 0.0045),
+        (0.0, 1.0, 0.0009, 0.0),
+        (0.25, 0.0, 0.00045, 0.0045),
+        (0.25, 0.5, 0.0009, 0.0045),
+        (0.25, 1.0, 0.0009, 0.00225),
+        (0.25, 2.0, 0.0009, 0.0005625),
+    ] {
+        let mut fixture = Fixture::debug(80);
+        fixture.world.plants[0].position = DVec2::new(100.0, 100.0);
+        fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = energy;
+        fixture.world.parameters.body.upkeep = 0.0005;
+        fixture.world.parameters.body.movement_cost = movement_cost;
+        fixture.world.parameters.body.movement_energy_power = power;
+        fixture.action(MoveAction {
+            direction: DVec2::X,
+            speed_fraction: 1.0,
+        });
+        fixture.tick();
+        assert!(
+            (fixture.world.animals[&id(1)].body.energy - (energy - expected_fee - 0.0005)).abs()
+                < 1e-12
+        );
+    }
+}
+
+#[test]
+fn changing_energy_units_preserves_geometry_and_tick_energy_budgets() {
+    for (upkeep, cost, power) in [
+        (0.005, 0.0, 0.0_f64),
+        (0.0005, 0.00045, 0.0),
+        (0.0005, 0.0009, 1.0),
+        (0.0005, 0.0009, 0.5),
+    ] {
+        let mut config = Config::<(), (), FixedMutation> {
+            initial_animals: 1,
+            plants: 1,
+            minimum_population: 0,
+            ..Config::default()
+        };
+        config.immigration.energy = 0.975;
+        config.immigration.position = Placement::Fixed(DVec2::ZERO);
+        config.plant.initial_position = Placement::Fixed(DVec2::ZERO);
+        config.animal.body.upkeep = upkeep;
+        config.animal.body.movement_cost = cost;
+        config.animal.body.movement_energy_power = power;
+        let mut scaled = config.clone();
+        scaled.immigration.energy *= 400.0;
+        scaled.animal.reproduction.threshold *= 400.0;
+        scaled.animal.body.upkeep *= 400.0;
+        scaled.animal.body.movement_cost *= 400.0_f64.powf(1.0 - power);
+        scaled.animal.body.radius_scale /= 20.0;
+        scaled.plant.initial_energy *= 400.0;
+        scaled.plant.replacement_energy *= 400.0;
+        scaled.plant.max_energy *= 400.0;
+        scaled.plant.growth *= 400.0;
+        scaled.plant.radius_scale /= 20.0;
+        let genome = FixedGenome {
+            action: MoveAction {
+                direction: DVec2::X,
+                speed_fraction: 0.4,
+            },
+            ..FixedGenome::default()
+        };
+        let mut normalized = Ecosystem::<FixedMind, FixedGenome, FixedMutation>::with_genetics(
+            config,
+            81,
+            Some(genome.clone()),
+        )
+        .unwrap();
+        let mut other = Ecosystem::<FixedMind, FixedGenome, FixedMutation>::with_genetics(
+            scaled,
+            81,
+            Some(genome),
+        )
+        .unwrap();
+        for tick in 1..=32 {
+            let report = normalized.advance(tick).unwrap();
+            let scaled_report = other.advance(tick).unwrap();
+            assert_eq!(report.events.len(), scaled_report.events.len());
+            for (event, scaled_event) in report.events.iter().zip(&scaled_report.events) {
+                match (event, scaled_event) {
+                    (
+                        Event::Meal { id, plant, gain },
+                        Event::Meal {
+                            id: other_id,
+                            plant: other_plant,
+                            gain: other_gain,
+                        },
+                    ) => {
+                        assert_eq!((id, plant), (other_id, other_plant));
+                        assert!((gain - other_gain / 400.0).abs() < 1e-12);
+                    }
+                    _ => assert_eq!(event, scaled_event),
+                }
+            }
+            assert_eq!(normalized.animals.len(), other.animals.len());
+            for (id, animal) in &normalized.animals {
+                let scaled = &other.animals[id];
+                assert!((animal.body.energy - scaled.body.energy / 400.0).abs() < 1e-12);
+                assert!((animal.body.radius() - scaled.body.radius()).abs() < 1e-11);
+                assert!(animal.body.position.distance(scaled.body.position) < 1e-11);
+                assert_eq!(animal.mind.genome, scaled.mind.genome);
+            }
+            for (plant, scaled) in normalized.plants.iter().zip(&other.plants) {
+                assert_eq!(plant.id, scaled.id);
+                assert!((plant.energy - scaled.energy / 400.0).abs() < 1e-12);
+                assert!((plant.radius() - scaled.radius()).abs() < 1e-11);
+                assert!(plant.position.distance(scaled.position) < 1e-11);
+            }
+            assert_eq!(normalized.rng, other.rng);
+            assert_eq!(normalized.context, other.context);
+        }
+    }
+}
+
+#[test]
 fn invalid_physics_and_conflicting_restore_parameters_are_rejected() {
     use crate::universe::Universe;
     let config = Config {
@@ -1670,18 +1781,21 @@ fn invalid_physics_and_conflicting_restore_parameters_are_rejected() {
     let invalid_changes: &[fn(&mut Config)] = &[
         |c| c.world.width = 0.0,
         |c| c.world.height = f64::INFINITY,
-        |c| c.immigration.energy = -1.0,
+        |c| c.immigration.energy = -0.0025,
         |c| c.immigration.position = Placement::Fixed(DVec2::splat(10000.0)),
         |c| c.animal.reproduction.threshold = 0.0,
         |c| c.animal.reproduction.child_energy_fraction = 1.0,
         |c| c.animal.reproduction.child_energy_fraction = 0.0,
-        |c| c.animal.body.upkeep = -1.0,
-        |c| c.animal.body.movement_cost_per_energy_distance = -0.1,
-        |c| c.animal.body.movement_cost_per_energy_distance = f64::NAN,
-        |c| c.animal.body.movement_cost_per_energy_distance = f64::MAX,
+        |c| c.animal.body.upkeep = -0.0025,
+        |c| c.animal.body.movement_cost = -0.1,
+        |c| c.animal.body.movement_cost = f64::NAN,
+        |c| c.animal.body.movement_cost = f64::MAX,
+        |c| c.animal.body.movement_energy_power = -1.0,
+        |c| c.animal.body.movement_energy_power = f64::NAN,
+        |c| c.animal.body.movement_energy_power = f64::INFINITY,
         |c| c.animal.body.max_speed = f64::INFINITY,
         |c| c.plant.max_energy = 0.0,
-        |c| c.plant.initial_energy = 401.0,
+        |c| c.plant.initial_energy = 1.0025,
         |c| c.sensing.softening = 0.0,
         |c| c.genetics.initialization.hidden_units = 0,
         |c| c.genetics.mutation.max_delta = f32::NAN,
@@ -1694,10 +1808,11 @@ fn invalid_physics_and_conflicting_restore_parameters_are_rejected() {
     let universe = Universe::new(config.clone(), 74).unwrap();
     for change in [
         (|c: &mut Config| c.world.width = 1000.0) as fn(&mut Config),
-        |c| c.immigration.energy = 200.0,
+        |c| c.immigration.energy = 0.5,
         |c| c.plants = 1,
         |c| c.minimum_population = 1,
-        |c| c.animal.body.movement_cost_per_energy_distance = 0.0009,
+        |c| c.animal.body.movement_cost = 0.0009,
+        |c| c.animal.body.movement_energy_power = 1.0,
         |c| c.genetics.initialization.hidden_units = 7,
         |c| c.genetics.mutation.max_delta = 0.1,
     ] {

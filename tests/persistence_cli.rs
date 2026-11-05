@@ -165,7 +165,7 @@ impl Checkpoint {
 
 fn read_checkpoint(path: &Path) -> Checkpoint {
     let checkpoint: Checkpoint = ciborium::from_reader(fs::File::open(path).unwrap()).unwrap();
-    assert_eq!(checkpoint.format_version, 10);
+    assert_eq!(checkpoint.format_version, 11);
     checkpoint
 }
 
@@ -207,28 +207,29 @@ minimum_population = 3
 width = 80.0
 height = 60.0
 [ecosystem.immigration]
-energy = 70.0
+energy = 0.175
 position = [4.0, 5.0]
 [ecosystem.animal.body]
-upkeep = 1.5
-movement_cost_per_energy_distance = 0.0009
+upkeep = 0.00375
+movement_cost = 0.0009
+movement_energy_power = 1.0
 max_speed = 30.0
 movement_time_step = 0.2
 movement_dead_zone = 0.05
-radius_scale = 0.25
+radius_scale = 5.0
 [ecosystem.animal.reproduction]
-threshold = 60.0
+threshold = 0.15
 child_energy_fraction = 0.3
 separation_scale = 0.4
 [ecosystem.animal.feeding]
 efficiency = 0.2
 contact_scale = 0.9
 [ecosystem.plant]
-initial_energy = 80.0
-replacement_energy = 5.0
-growth = 0.75
-max_energy = 100.0
-radius_scale = 0.3
+initial_energy = 0.2
+replacement_energy = 0.0125
+growth = 0.001875
+max_energy = 0.25
+radius_scale = 6.0
 initial_position = [-2.0, -3.0]
 replacement_position = "random"
 [ecosystem.sensing]
@@ -249,7 +250,7 @@ max_delta = 0.04
     let initial = directory.latest("full");
     for animal in initial.state.world().animals().values() {
         assert_eq!(animal.body.position, glam::DVec2::new(4.0, 5.0));
-        assert_eq!(animal.body.energy, 70.0);
+        assert_eq!(animal.body.energy, 0.175);
         assert_eq!(animal.body.radius(), 0.25 * 70.0_f64.sqrt());
         assert_eq!(animal.mind.brain.genome.hidden_units, 6);
         assert_eq!(animal.mind.brain.genome.weights.len(), 81);
@@ -266,7 +267,7 @@ max_delta = 0.04
     }
     for plant in initial.state.world().plants() {
         assert_eq!(plant.position, glam::DVec2::new(-2.0, -3.0));
-        assert_eq!(plant.energy, 80.0);
+        assert_eq!(plant.energy, 0.2);
         assert_eq!(plant.radius(), 0.3 * 80.0_f64.sqrt());
     }
     directory.success(&["full", "--ticks", "64"]);
@@ -303,7 +304,8 @@ max_delta = 0.04
         "[ecosystem.world]\nwidth = 81.0\n",
         "[ecosystem.immigration]\nenergy = 71.0\n",
         "[ecosystem.animal.body]\nupkeep = 1.6\n",
-        "[ecosystem.animal.body]\nmovement_cost_per_energy_distance = 0.001\n",
+        "[ecosystem.animal.body]\nmovement_cost = 0.001\n",
+        "[ecosystem.animal.body]\nmovement_energy_power = 0.0\n",
         "[ecosystem.animal.reproduction]\nchild_energy_fraction = 0.4\n",
         "[ecosystem.animal.feeding]\nefficiency = 0.3\n",
         "[ecosystem.plant]\ngrowth = 0.5\n",

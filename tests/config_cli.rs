@@ -76,7 +76,7 @@ fn success(args: &[&str]) -> String {
 
 #[test]
 fn run_shortcuts_and_files_use_the_same_config() {
-    let model = "trace_ticks = 3\n[ecosystem]\ninitial_animals = 2\nplants = 7\nminimum_population = 1\nimmigration.energy = 90.0\nimmigration.position = [10.0, 20.0]\nplant.initial_position = [-20.0, 12.0]\n";
+    let model = "trace_ticks = 3\n[ecosystem]\ninitial_animals = 2\nplants = 7\nminimum_population = 1\nimmigration.energy = 0.225\nimmigration.position = [10.0, 20.0]\nplant.initial_position = [-20.0, 12.0]\n";
     let complete = ConfigFile::new(&format!("seed = 7\nticks = 3\n{model}"));
     let partial = ConfigFile::new(model);
     let from_file = success(&["--config", complete.path()]);

@@ -109,6 +109,40 @@ fn checkpoint_recovers_missing_config_but_existing_file_takes_precedence() {
 }
 
 #[test]
+fn each_cost_preset_replaces_the_complete_energy_budget() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("configs");
+    let presets = [
+        ("upkeep-only.toml", 0.005, 0.0, 0.0),
+        ("movement-flat.toml", 0.0005, 0.00045, 0.0),
+        ("movement-cost.toml", 0.0005, 0.0009, 1.0),
+    ];
+    for (first, ..) in presets {
+        for (last, upkeep, cost, power) in presets {
+            let first = root.join(first);
+            let last = root.join(last);
+            let config = load(
+                &[
+                    "--config",
+                    first.to_str().unwrap(),
+                    "--config",
+                    last.to_str().unwrap(),
+                ],
+                None,
+            )
+            .unwrap();
+            let body = config.ecosystem.animal.body;
+            assert_eq!(
+                (body.upkeep, body.movement_cost, body.movement_energy_power),
+                (upkeep, cost, power)
+            );
+            assert_eq!(config.ecosystem.animal.reproduction.threshold, 1.0);
+            assert_eq!(config.ecosystem.immigration.energy, 0.25);
+            assert_eq!(config.ecosystem.plant.max_energy, 1.0);
+        }
+    }
+}
+
+#[test]
 fn viewer_preset_and_shortcut_never_enable_simulation_pacing() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("configs/viewer.toml");
     let preset = load(&["--config", path.to_str().unwrap()], None).unwrap();

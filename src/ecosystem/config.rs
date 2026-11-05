@@ -196,7 +196,7 @@ pub struct ImmigrationConfig {
 impl Default for ImmigrationConfig {
     fn default() -> Self {
         Self {
-            energy: 100.0,
+            energy: 0.25,
             position: Placement::Random,
         }
     }
@@ -237,7 +237,7 @@ pub struct ReproductionConfig {
 impl Default for ReproductionConfig {
     fn default() -> Self {
         Self {
-            threshold: 400.0,
+            threshold: 1.0,
             child_energy_fraction: 0.5,
             separation_scale: 0.5,
         }
@@ -303,9 +303,10 @@ impl Parameters {
             "sensing gradient_dead_zone",
         )?;
         nonnegative(self.body.upkeep, "animal upkeep")?;
+        nonnegative(self.body.movement_cost, "animal movement_cost")?;
         nonnegative(
-            self.body.movement_cost_per_energy_distance,
-            "animal movement_cost_per_energy_distance",
+            self.body.movement_energy_power,
+            "animal movement_energy_power",
         )?;
         nonnegative(self.body.max_speed, "animal max_speed")?;
         nonnegative(self.body.movement_time_step, "animal movement_time_step")?;
@@ -314,9 +315,8 @@ impl Parameters {
             "maximum movement",
         )?;
         nonnegative(
-            self.body.movement_cost_per_energy_distance
-                * (self.body.max_speed * self.body.movement_time_step),
-            "maximum movement energy fraction",
+            self.body.movement_cost * (self.body.max_speed * self.body.movement_time_step),
+            "maximum movement coefficient",
         )?;
         nonnegative(self.body.movement_dead_zone, "animal movement_dead_zone")?;
         nonnegative(self.body.radius_scale, "animal radius_scale")?;
@@ -407,8 +407,9 @@ pub struct AnimalMetricsConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct BodyConfig {
     pub upkeep: f64,
-    /// Fraction of pre-movement energy spent per unit of controlled distance.
-    pub movement_cost_per_energy_distance: f64,
+    /// Fee = movement_cost × controlled distance × pre-movement energy^power.
+    pub movement_cost: f64,
+    pub movement_energy_power: f64,
     pub max_speed: f64,
     /// Scales movement only; energy rates are per tick.
     pub movement_time_step: f64,
@@ -421,7 +422,8 @@ impl Default for BodyConfig {
         let parameters = BodyParameters::default();
         Self {
             upkeep: parameters.upkeep,
-            movement_cost_per_energy_distance: parameters.movement_cost_per_energy_distance,
+            movement_cost: parameters.movement_cost,
+            movement_energy_power: parameters.movement_energy_power,
             max_speed: parameters.max_speed,
             movement_time_step: parameters.movement_time_step,
             movement_dead_zone: parameters.movement_dead_zone,
@@ -434,7 +436,8 @@ impl BodyConfig {
     pub(super) fn parameters(self) -> BodyParameters {
         BodyParameters {
             upkeep: self.upkeep,
-            movement_cost_per_energy_distance: self.movement_cost_per_energy_distance,
+            movement_cost: self.movement_cost,
+            movement_energy_power: self.movement_energy_power,
             max_speed: self.max_speed,
             movement_time_step: self.movement_time_step,
             movement_dead_zone: self.movement_dead_zone,
@@ -446,7 +449,8 @@ impl BodyConfig {
 #[serde(deny_unknown_fields)]
 pub(super) struct BodyParameters {
     pub upkeep: f64,
-    pub movement_cost_per_energy_distance: f64,
+    pub movement_cost: f64,
+    pub movement_energy_power: f64,
     pub max_speed: f64,
     /// Scales movement only; energy rates are per tick.
     pub movement_time_step: f64,
@@ -456,12 +460,13 @@ pub(super) struct BodyParameters {
 impl Default for BodyParameters {
     fn default() -> Self {
         Self {
-            upkeep: 2.0,
-            movement_cost_per_energy_distance: 0.0,
+            upkeep: 0.005,
+            movement_cost: 0.0,
+            movement_energy_power: 0.0,
             max_speed: 100.0,
             movement_time_step: 0.1,
             movement_dead_zone: 0.01,
-            radius_scale: 0.5,
+            radius_scale: 10.0,
         }
     }
 }
@@ -525,11 +530,11 @@ pub(super) struct PlantParameters {
 impl Default for PlantParameters {
     fn default() -> Self {
         Self {
-            initial_energy: 400.0,
+            initial_energy: 1.0,
             replacement_energy: 0.0,
-            growth: 1.0,
-            max_energy: 400.0,
-            radius_scale: 0.5,
+            growth: 0.0025,
+            max_energy: 1.0,
+            radius_scale: 10.0,
             initial_position: Placement::Random,
             replacement_position: Placement::Random,
         }

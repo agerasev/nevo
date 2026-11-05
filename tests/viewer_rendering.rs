@@ -264,8 +264,8 @@ fn ecosystem_drawing_preserves_complete_state_and_same_tick_labels() {
     let mut resized = support::ecosystem::<nevo::ecosystem::Config>("baseline");
     resized.world.width = 100.0;
     resized.world.height = 80.0;
-    resized.animal.body.radius_scale = 0.2;
-    resized.plant.radius_scale = 0.3;
+    resized.animal.body.radius_scale = 4.0;
+    resized.plant.radius_scale = 6.0;
     for config in [
         support::ecosystem::<nevo::ecosystem::Config>("debug"),
         support::ecosystem::<nevo::ecosystem::Config>("baseline"),

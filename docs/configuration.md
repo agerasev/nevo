@@ -61,21 +61,22 @@ includes these defaults, so it also serves as a complete editable configuration.
 | `plants` | `500` | Maintained plant count. |
 | `minimum_population` | `20` | Immigration floor; zero disables automatic immigration. |
 | `world.width`, `world.height` | `1260`, `700` | Centered arena dimensions. |
-| `immigration.energy` | `100` | Energy for every admitted animal. |
+| `immigration.energy` | `0.25` | Energy for every admitted animal. |
 | `immigration.position` | `"random"` | Placement for every admitted animal. |
-| `animal.body.upkeep` | `2` | Energy spent per animal per tick. |
-| `animal.body.movement_cost_per_energy_distance` | `0` | Fraction of pre-movement energy spent per unit of controlled distance after boundary clamping. |
+| `animal.body.upkeep` | `0.005` | Energy spent per animal per tick. |
+| `animal.body.movement_cost` | `0` | Coefficient in `cost × distance × energy^power`. |
+| `animal.body.movement_energy_power` | `0` | Nonnegative exponent of pre-movement energy. |
 | `animal.body.max_speed`, `animal.body.movement_time_step` | `100`, `0.1` | Movement scale; maximum displacement is their product. |
 | `animal.body.movement_dead_zone` | `0.01` | Direction magnitudes at or below this do not move. |
-| `animal.body.radius_scale` | `0.5` | Radius coefficient in `scale × sqrt(max(energy, 0))`. |
-| `animal.reproduction.threshold` | `400` | Reproduction requires energy strictly above this. |
+| `animal.body.radius_scale` | `10` | Radius coefficient in `scale × sqrt(max(energy, 0))`. |
+| `animal.reproduction.threshold` | `1` | Reproduction requires energy strictly above this. |
 | `animal.reproduction.child_energy_fraction` | `0.5` | Fraction of pre-split energy transferred to the child. |
 | `animal.reproduction.separation_scale` | `0.5` | Parent/child offset relative to the parent's post-split radius. |
 | `animal.feeding.efficiency` | `0.1` | Fraction of eaten plant energy gained by the animal. |
 | `animal.feeding.contact_scale` | `0.8` | Feeding distance relative to combined radii. |
-| `plant.initial_energy`, `plant.replacement_energy` | `400`, `0` | Initial and replacement plant energy. |
-| `plant.growth`, `plant.max_energy` | `1`, `400` | Growth per tick and energy cap. |
-| `plant.radius_scale` | `0.5` | Plant radius coefficient, using the same energy/radius equation. |
+| `plant.initial_energy`, `plant.replacement_energy` | `1`, `0` | Initial and replacement plant energy. |
+| `plant.growth`, `plant.max_energy` | `0.0025`, `1` | Growth per tick and energy cap. |
+| `plant.radius_scale` | `10` | Plant radius coefficient, using the same energy/radius equation. |
 | `plant.initial_position`, `plant.replacement_position` | `"random"`, `"random"` | Initial and replacement placement. |
 | `sensing.distance_scale` | `0.5` | Displacements are multiplied by this divided by arena half-height. |
 | `sensing.softening` | `0.01` | Positive distance offset in the food field. |
@@ -90,15 +91,31 @@ An explicit `"random"` overrides a fixed position from an earlier file. Fixed
 positions must be finite and inside the configured arena; bodies remain clamped
 to its bounds. Startup admits animals before seeding plants, preserving draw order.
 
-The [movement-cost preset](../configs/movement-cost.toml) sets upkeep to `0.2`
-and the movement coefficient to `0.0009`: total cost is
-`0.2 + 0.0009 × energy_before_movement × distance`. Energy serves as mass; the fee
-uses sensing-time energy, before movement and feeding. At the default maximum
-displacement of 10, total cost is 1.1, 2.0, or 3.8 for energies 100, 200, or 400.
-Resting costs 0.2. Blocked movement costs no movement energy; birth offsets and
-growth clamping are excluded. Fees are deducted after feeding and before
-reproduction; all present animals pay upkeep at the end of the tick. This is the
-sole movement-cost preset; reduced jitter remains an untested hypothesis.
+Energy is expressed in units where the default reproduction threshold is `1.0`.
+An immigrant starts at `0.25`; an ordinary newborn receives about `0.5`. This
+convention applies to animal and plant energy, food gains, upkeep, and metrics.
+Changing the reproduction threshold changes the experiment, not its units.
+Spatial units and tick timing are unchanged. Earlier run logs retain their recorded
+units; values are not automatically converted when reading them.
+
+Movement costs `movement_cost × distance × energy_before_movement^movement_energy_power`.
+Power zero gives a multiplier of one even at zero energy; positive powers give
+zero at zero energy. A zero coefficient disables the fee. Costs use actual
+controlled distance after boundary clamping, excluding birth offsets and growth
+clamping. They are deducted after feeding and before reproduction, using the
+energy measured before movement and feeding. All present animals then pay upkeep.
+
+Compose one of these cost presets with the baseline. Each sets all three fields,
+so the last cost preset wins without retaining part of an earlier selection.
+
+| Preset | Upkeep | Movement coefficient | Energy power |
+| --- | ---: | ---: | ---: |
+| [Upkeep only](../configs/upkeep-only.toml), also the default | 0.005 | 0 | 0 |
+| [Flat movement](../configs/movement-flat.toml) | 0.0005 | 0.00045 | 0 |
+| [Energy-proportional movement](../configs/movement-cost.toml) | 0.0005 | 0.0009 | 1 |
+
+At energy `0.5` and maximum displacement `10`, both movement presets cost `0.005`
+per tick, including upkeep. Other nonnegative powers are also configurable.
 
 ```sh
 cargo run --locked -- --config configs/baseline.toml --config configs/movement-cost.toml --config configs/metrics.toml --config configs/viewer.toml

@@ -103,16 +103,16 @@ positions are required state.
 The ecosystem senses animals with nonnegative energy in stable ID order and obtains
 all actions before moving any bodies. Movement and clamping precede feeding and
 culling. Eaten plants are replaced and immigrants restore the configured minimum
-population. Acting animals pay the configured fee proportional to pre-movement
-energy and controlled distance after movement clamping, then eligible animals
+population. Acting animals pay the configured fee for controlled distance after movement clamping, scaled by a configurable
+power of pre-movement energy, then eligible animals
 reproduce. Upkeep, plant growth, and final clamping
 complete the tick. Newborns and immigrants first act on the following tick. Decisions
 record sensing-time energy and movement endpoints before birth offsets/final clamping.
 
 The baseline preset admits 20 animals among 500 ripe plants and maintains a minimum
-of 20. The debug preset admits one animal at energy 390 beside a ripe plant, with no later
+of 20. The debug preset admits one animal at energy 0.975 beside a ripe plant, with no later
 immigration. At seed 1 it senses before eating and then splits; both animals finish
-step one at energy 213. These are [configurations](configuration.md) of the same model,
+step one at energy 0.5325. These are [configurations](configuration.md) of the same model,
 with independent counts, starting energy, and placements. Both use clamped boundaries
 and food-field strength plus its normalized world-coordinate gradient as perception.
 

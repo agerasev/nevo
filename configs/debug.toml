@@ -5,6 +5,6 @@ trace_ticks = 3
 initial_animals = 1
 plants = 1
 minimum_population = 0
-immigration.energy = 390.0
+immigration.energy = 0.975
 immigration.position = [0.0, 0.0]
 plant.initial_position = [0.0, 0.0]

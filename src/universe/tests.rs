@@ -75,7 +75,7 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
         minimum_population: 0,
         ..Config::default()
     };
-    config.immigration.energy = 390.0;
+    config.immigration.energy = 0.975;
     config.immigration.position = Placement::Fixed(glam::DVec2::ZERO);
     config.plant.initial_position = Placement::Fixed(glam::DVec2::ZERO);
     config.genetics.mutation = WeightMutation { max_delta: 0.07 };

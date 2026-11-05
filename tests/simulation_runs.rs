@@ -17,7 +17,7 @@ fn initialization_settings_control_independent_parts_of_the_world() {
         minimum_population: 1,
         ..Config::default()
     };
-    config.immigration.energy = 90.0;
+    config.immigration.energy = 0.225;
     config.immigration.position = Placement::Fixed(glam::DVec2::new(10.0, 20.0));
     config.plant.initial_position = Placement::Fixed(glam::DVec2::new(-20.0, 12.0));
     let universe = Universe::new(config.clone(), 7).unwrap();
@@ -26,7 +26,7 @@ fn initialization_settings_control_independent_parts_of_the_world() {
     assert_eq!(world.plants().len(), 7);
     assert_eq!(world.minimum_population(), 1);
     for animal in world.animals().values() {
-        assert_eq!(animal.body.energy, 90.0);
+        assert_eq!(animal.body.energy, 0.225);
         assert_eq!(animal.body.position, glam::DVec2::new(10.0, 20.0));
     }
     for plant in world.plants() {
@@ -46,19 +46,19 @@ fn initial_and_later_immigrants_share_energy_position_and_shape() {
         minimum_population: 1,
         ..Config::default()
     };
-    config.immigration.energy = 1.0;
+    config.immigration.energy = 0.0025;
     config.immigration.position = Placement::Fixed(glam::DVec2::new(10.0, 20.0));
     config.animal.body.max_speed = 0.0;
-    config.animal.body.upkeep = 2.0;
-    config.animal.body.radius_scale = 0.3;
+    config.animal.body.upkeep = 0.005;
+    config.animal.body.radius_scale = 6.0;
     config.genetics.initialization.hidden_units = 7;
     let mut run = Run::new(config, 31).unwrap();
     {
         let universe = run.universe().read();
         let animal = universe.world().animals().values().next().unwrap();
-        assert_eq!(animal.body.energy, 1.0);
+        assert_eq!(animal.body.energy, 0.0025);
         assert_eq!(animal.body.position, glam::DVec2::new(10.0, 20.0));
-        assert_eq!(animal.body.radius(), 0.3);
+        assert!((animal.body.radius() - 0.3).abs() < 1e-12);
         assert_eq!(animal.mind.brain.memory.len(), 7);
     }
     assert_eq!(run.tick().unwrap().decisions.len(), 1);
@@ -70,8 +70,8 @@ fn initial_and_later_immigrants_share_energy_position_and_shape() {
         }));
         let universe = run.universe().read();
         let animal = universe.world().animals().values().next().unwrap();
-        // Every arrival starts at one energy and pays the same tick's upkeep.
-        assert_eq!(animal.body.energy, 1.0 - 2.0);
+        // Every arrival pays the same tick's upkeep.
+        assert_eq!(animal.body.energy, 0.0025 - 0.005);
         assert_eq!(animal.body.position, glam::DVec2::new(10.0, 20.0));
         assert_eq!(animal.mind.brain.genome.hidden_units, 7);
         assert_eq!(animal.mind.brain.memory, vec![0.0; 7]);
@@ -117,7 +117,7 @@ fn agents_sense_before_feeding_and_newborns_act_next_tick() {
             Event::Meal {
                 id: parent,
                 plant: 1,
-                gain: 40.0
+                gain: 0.1
             },
             Event::Birth { parent, child },
         ]
@@ -125,13 +125,13 @@ fn agents_sense_before_feeding_and_newborns_act_next_tick() {
     assert_eq!(report.decisions.len(), 1);
     assert_eq!(
         (report.decisions[0].id, report.decisions[0].energy),
-        (parent, 390.0)
+        (parent, 0.975)
     );
     assert_eq!(report.decisions[0].observation.strength, 100.0);
     {
         let universe = run.universe().read();
         for id in [parent, child] {
-            assert_eq!(universe.world().animals()[&id].body.energy, 213.0);
+            assert_eq!(universe.world().animals()[&id].body.energy, 0.5325);
         }
         assert_ne!(
             universe.world().animals()[&parent].mind.brain.memory,

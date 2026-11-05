@@ -199,11 +199,20 @@ where
         // Sensing-time energy is also pre-movement/pre-feeding energy, so a meal
         // does not retroactively increase the fee. Arrivals have not acted;
         // birth offsets and growth clamping are not travel.
-        if self.parameters.body.movement_cost_per_energy_distance > 0.0 {
+        if self.parameters.body.movement_cost > 0.0 {
             for decision in &decisions {
                 let distance = decision.position_before.distance(decision.position_after);
-                let cost = decision.energy
-                    * (distance * self.parameters.body.movement_cost_per_energy_distance);
+                // Stationary animals pay no movement fee, even if E^p overflows.
+                if distance == 0.0 {
+                    continue;
+                }
+                let power = self.parameters.body.movement_energy_power;
+                let mass = if power == 0.0 {
+                    1.0 // Includes zero-energy animals: the flat fee is independent of E.
+                } else {
+                    decision.energy.powf(power)
+                };
+                let cost = mass * (distance * self.parameters.body.movement_cost);
                 ensure!(cost.is_finite(), "non-finite movement energy cost");
                 update
                     .animals

@@ -48,7 +48,7 @@ trace_ticks = 3
 initial_animals = 1
 plants = 1
 minimum_population = 0
-immigration.energy = 390.0
+immigration.energy = 0.975
 immigration.position = [0.0, 0.0]
 plant.initial_position = [0.0, 0.0]
 ```
@@ -62,8 +62,9 @@ World dimensions, body and plant dynamics, reproduction, feeding, sensing, and
 genetic initialization/mutation are configurable. Initial and later immigrants
 use the same energy, placement, and genome initialization settings. The initial
 population and immigration floor only decide how many animals to admit.
-Layer [movement-cost.toml](configs/movement-cost.toml) to try lower upkeep plus a
-fee proportional to energy and distance traveled; see the [cost rules](docs/configuration.md).
+Energy uses a default reproduction threshold of `1.0`. Compose the
+[energy-proportional](configs/movement-cost.toml), [flat movement](configs/movement-flat.toml),
+or [upkeep-only](configs/upkeep-only.toml) cost preset; see the [units and cost rules](docs/configuration.md).
 
 The viewer runs independently of simulation speed. Its preset enables VSync without
 slowing simulation; there is no additional rendering timer.

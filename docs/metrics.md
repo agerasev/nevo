@@ -139,6 +139,21 @@ survival is truncated by the window and includes only deaths, so it is not a
 lifespan estimate. Brain activity and genetic variance are diagnostics, not fitness.
 Controlled comparisons across seeds and conditions remain necessary.
 
+For heading changes and energy budgets over all animals, replay a saved checkpoint
+with the same build:
+
+```sh
+cargo run --release --no-default-features --example movement_report -- runs/RUN/checkpoints/TICK.cbor
+```
+
+This writes `analysis/movement.json` beside the checkpoints only after the replay's
+complete final state matches the checkpoint exactly. It records mean turn angle
+and fractions of turns above 90° and 150° between consecutive nonzero controlled
+displacements of the same animal; stops break the sequence and birth offsets are
+excluded. Totals include animals that later die, plus energy expenditure, food,
+and population exposure. The report includes 1,000-tick windows and a final-third
+summary. These are movement diagnostics, not a standalone fitness measure.
+
 ## Contracts and caches
 
 [Metrics](../src/metrics/mod.rs) exposes a typed `Summary` through
