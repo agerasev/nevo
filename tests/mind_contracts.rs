@@ -106,7 +106,7 @@ fn mind_and_genome_accept_an_alternate_unsized_context() {
     parent.weights[32] = 1.0;
     parent.weights[46] = 1.0;
     let original = parent.clone();
-    let mut agent = AnimalMind::new(parent.clone());
+    let mut agent = AnimalMind::new(parent.clone()).unwrap();
 
     let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
         &mut context;
@@ -134,7 +134,10 @@ fn zero_mutation_preserves_genome_and_random_stream() {
         rng: Xoshiro256PlusPlus::seed_from_u64(17),
     };
     let before = context.clone();
-    let mut genome = RnnGenome { weights: [0.5; 47] };
+    let mut genome = RnnGenome {
+        weights: vec![0.5; 47],
+        ..RnnGenome::default()
+    };
     let original = genome.clone();
 
     genome
@@ -150,7 +153,10 @@ fn invalid_mutation_fails_without_changing_genome_or_random_stream() {
         rng: Xoshiro256PlusPlus::seed_from_u64(17),
     };
     let before = context.clone();
-    let mut genome = RnnGenome { weights: [0.5; 47] };
+    let mut genome = RnnGenome {
+        weights: vec![0.5; 47],
+        ..RnnGenome::default()
+    };
     let original = genome.clone();
 
     for max_delta in [-1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::MAX] {
@@ -170,7 +176,9 @@ fn random_initialization_accepts_unsized_context_without_requiring_a_genome() {
     struct RandomLabel(u64);
 
     impl<C: Context + ?Sized> RandomInit<C> for RandomLabel {
-        fn random(cx: &mut C) -> Result<Self> {
+        type Config = ();
+
+        fn random(_: &(), cx: &mut C) -> Result<Self> {
             Ok(Self(cx.rng().next_u64()))
         }
     }
@@ -181,13 +189,13 @@ fn random_initialization_accepts_unsized_context_without_requiring_a_genome() {
     let mut expected = context.clone();
     let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
         &mut context;
-    let label = RandomLabel::random(cx).unwrap();
+    let label = RandomLabel::random(&(), cx).unwrap();
     assert_eq!(label.0, expected.rng.next_u64());
     assert_eq!(context, expected);
 
     let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
         &mut context;
-    let genome = RnnGenome::random(cx).unwrap();
+    let genome = RnnGenome::random(&nevo::mind::rnn::Initialization::default(), cx).unwrap();
     assert!(
         genome
             .weights

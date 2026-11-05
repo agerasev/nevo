@@ -162,11 +162,9 @@ fn execute(mut cli: Cli) -> Result<()> {
         Some(checkpoint) => {
             options = cli.load_config(Some(&checkpoint.config))?;
             ensure!(
-                options
-                    .ecosystem
-                    .same_initialization(&checkpoint.config.ecosystem)
+                options.ecosystem.same_model(&checkpoint.config.ecosystem)
                     && options.seed == checkpoint.config.seed,
-                "cannot change the seed or ecosystem initialization of an existing run"
+                "cannot change the seed or ecosystem model parameters of an existing run"
             );
             let run = checkpoint
                 .state

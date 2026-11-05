@@ -18,7 +18,7 @@ fn genome_conversion_creates_a_fresh_mind_without_cloning_memory() {
         rng: Xoshiro256PlusPlus::seed_from_u64(17),
     };
     let mut reference_cx = cx.clone();
-    let mut parent = AnimalMind::from(genome.clone());
+    let mut parent = AnimalMind::try_from(genome.clone()).unwrap();
     parent.process(FoodObservation::default(), &mut cx).unwrap();
     assert_eq!(
         cx, reference_cx,
@@ -31,17 +31,19 @@ fn genome_conversion_creates_a_fresh_mind_without_cloning_memory() {
     child_genome
         .mutate(&WeightMutation::default(), &mut cx)
         .unwrap();
-    let child = AnimalMind::from(child_genome);
+    let child = AnimalMind::try_from(child_genome).unwrap();
     let expected_weights = genome
         .weights
-        .map(|weight| weight + reference_cx.rng.random_range(-0.02..0.02));
+        .iter()
+        .map(|weight| weight + reference_cx.rng.random_range(-0.02..0.02))
+        .collect::<Vec<_>>();
     assert_eq!(parent, original);
     assert_eq!(child.brain.memory, [0.0; 4]);
     assert_eq!(child.as_ref().weights, expected_weights);
     assert_ne!(child.as_ref(), &genome);
     assert_eq!(cx, reference_cx);
 
-    let rebuilt_brain = Rnn::from(parent.brain.as_ref().clone());
+    let rebuilt_brain = Rnn::try_from(parent.brain.as_ref().clone()).unwrap();
     assert_eq!(rebuilt_brain.as_ref(), &genome);
     assert_eq!(rebuilt_brain.memory, [0.0; 4]);
 }
@@ -54,7 +56,8 @@ fn random_initialization_preserves_the_expected_draw_sequence() {
     let mut reference_cx = cx.clone();
     let mut previous = None;
     for _ in 0..2 {
-        let genome = RnnGenome::random(&mut cx).unwrap();
+        let genome =
+            RnnGenome::random(&crate::mind::rnn::Initialization::default(), &mut cx).unwrap();
         let expected_weights: [f32; 47] =
             std::array::from_fn(|_| reference_cx.rng.random_range(-0.5..0.5));
         assert_eq!(genome.weights, expected_weights);
@@ -63,7 +66,7 @@ fn random_initialization_preserves_the_expected_draw_sequence() {
             assert_ne!(genome, previous);
         }
         previous = Some(genome.clone());
-        let mind = AnimalMind::from(genome);
+        let mind = AnimalMind::try_from(genome).unwrap();
         assert_eq!(mind.brain.memory, [0.0; 4]);
         assert!(
             mind.as_ref()
@@ -78,10 +81,9 @@ fn random_initialization_preserves_the_expected_draw_sequence() {
 fn non_finite_brain_state_is_rejected() {
     let mut genome = RnnGenome::default();
     genome.weights[0] = f32::NAN;
-    let invalid = AnimalMind::new(genome);
-    assert!(<AnimalMind as Mind<Cx>>::validate(&invalid).is_err());
+    assert!(AnimalMind::new(genome).is_err());
 
-    let mut mind = AnimalMind::new(RnnGenome::default());
+    let mut mind = AnimalMind::new(RnnGenome::default()).unwrap();
     mind.brain.memory[0] = f32::INFINITY;
     assert!(<AnimalMind as Mind<Cx>>::validate(&mind).is_err());
 }
@@ -98,12 +100,13 @@ fn configuration_propagates_the_parent_gate_without_changing_thought() {
             metrics: rnn::MetricsConfig {
                 activation: Selection::all(),
                 saturation: true,
+                ..Default::default()
             },
         },
     };
     let mut genome = RnnGenome::default();
     genome.weights[28] = 3.0;
-    let mut enabled = AnimalMind::new(genome);
+    let mut enabled = AnimalMind::new(genome).unwrap();
     let mut disabled = enabled.clone();
     let mut cx = Cx {
         rng: Xoshiro256PlusPlus::seed_from_u64(7),

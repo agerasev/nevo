@@ -39,7 +39,7 @@ fn load(args: &[&str], fallback: Option<&Config>) -> Result<Config> {
 #[test]
 fn saved_configuration_loads_with_only_explicit_cli_overrides() {
     let directory = Directory::new();
-    let original: Config = toml::from_str("seed = '18446744073709551615'\nticks = 32\ncheckpoint_every = 7\nkeep_checkpoints = 2\ntick_hz = 25\npaused = true\n[ecosystem]\ninitial_animals = 1\ninitial_animal_position = [0, 0]\n[viewer]\nenable = true\nvsync = false\ntab = 'metrics'\n").unwrap();
+    let original: Config = toml::from_str("seed = '18446744073709551615'\nticks = 32\ncheckpoint_every = 7\nkeep_checkpoints = 2\ntick_hz = 25\npaused = true\n[ecosystem]\ninitial_animals = 1\nimmigration.position = [0, 0]\n[viewer]\nenable = true\nvsync = false\ntab = 'metrics'\n").unwrap();
     let saved = original.to_toml().unwrap();
     assert!(saved.contains("seed = \"18446744073709551615\""));
     assert!(!saved.contains("directory"));

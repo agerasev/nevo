@@ -135,7 +135,7 @@ fn entities_collect_owned_geometry_without_mind_traits() {
     assert_pixel(&image, 74, 50, [255, 217, 64, 255]);
     assert_pixel(&image, 50, 50, [14, 18, 19, 255]);
     // No genetic or inference bounds leak through the world's drawing interface.
-    let world = Ecosystem::<UnrelatedMind, (), (), ()>::empty(0, 0, 1, 2, None, ());
+    let world = Ecosystem::<UnrelatedMind, (), (), (), ()>::empty(0, 0, 1, 2, None, ());
     world.draw(&mut Drawing::new(&library));
 }
 
@@ -261,9 +261,15 @@ fn a_second_world_can_advance_while_its_previous_drawing_is_rendered() {
 fn ecosystem_drawing_preserves_complete_state_and_same_tick_labels() {
     let graphics = graphics();
     let library = Library::new(&graphics);
+    let mut resized = support::ecosystem::<nevo::ecosystem::Config>("baseline");
+    resized.world.width = 100.0;
+    resized.world.height = 80.0;
+    resized.animal.body.radius_scale = 0.2;
+    resized.plant.radius_scale = 0.3;
     for config in [
         support::ecosystem::<nevo::ecosystem::Config>("debug"),
         support::ecosystem::<nevo::ecosystem::Config>("baseline"),
+        resized,
     ] {
         for seed in [1, 42] {
             let mut universe = Universe::new(config.clone(), seed).unwrap();
@@ -271,6 +277,15 @@ fn ecosystem_drawing_preserves_complete_state_and_same_tick_labels() {
                 let before = universe.clone();
                 let mut drawing = Drawing::new(&library);
                 universe.draw(&mut drawing);
+                let half_size =
+                    Vec2::new(config.world.width as f32, config.world.height as f32) * 0.5;
+                assert_eq!(
+                    drawing.bounds,
+                    Some(Bounds {
+                        min: -half_size,
+                        max: half_size
+                    })
+                );
                 assert_eq!(drawing.labels[0].text, format!("Tick {tick}"));
                 assert_eq!(
                     drawing.labels[1].text,

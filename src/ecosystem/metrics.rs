@@ -106,7 +106,7 @@ impl Default for Cache {
     }
 }
 impl Cache {
-    pub fn new<MC>(config: &Config<MC>) -> Self {
+    pub fn new<MC, IC, P>(config: &Config<MC, IC, P>) -> Self {
         if !config.metrics.enabled {
             return Self::default();
         }
@@ -310,7 +310,7 @@ pub struct Summary<M: Default, G: Default> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub genome: Option<G>,
 }
-impl<M, G, P, MC> Ecosystem<M, G, P, MC> {
+impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
     pub fn metrics_enabled(&self) -> bool {
         self.metrics.config.enabled
     }
@@ -318,7 +318,7 @@ impl<M, G, P, MC> Ecosystem<M, G, P, MC> {
         self.metrics.window
     }
 }
-impl<M: Metrics + AsRef<G>, G: Metrics, P, MC> Metrics for Ecosystem<M, G, P, MC> {
+impl<M: Metrics + AsRef<G>, G: Metrics, P, MC, IC> Metrics for Ecosystem<M, G, P, MC, IC> {
     type Summary = Summary<M::Summary, G::Summary>;
     fn collect_metrics(&self, summary: &mut Self::Summary) {
         *summary = Self::Summary::default();

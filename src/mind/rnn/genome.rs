@@ -1,5 +1,3 @@
-use std::array;
-
 use anyhow::{Result, ensure};
 use rand::RngExt;
 
@@ -8,27 +6,105 @@ use crate::{
     genome::{Genome, Mutate, RandomInit},
 };
 
-use super::weights;
+/// Initialization for a recurrent brain with three inputs and three outputs.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Initialization {
+    pub hidden_units: usize,
+    pub weight_min: f32,
+    pub weight_max: f32,
+}
 
-/// The July 26 controller's row-major input, recurrent and output parameters:
-/// 4×3 input weights, 4×4 recurrent weights, 4 biases, 3×4 output weights, 3 biases.
+impl Default for Initialization {
+    fn default() -> Self {
+        Self {
+            hidden_units: 4,
+            weight_min: -0.5,
+            weight_max: 0.5,
+        }
+    }
+}
+
+impl Initialization {
+    pub fn validate(&self) -> Result<()> {
+        weight_count(self.hidden_units)?;
+        ensure!(
+            self.weight_min.is_finite()
+                && self.weight_max.is_finite()
+                && self.weight_min <= self.weight_max
+                && (self.weight_max - self.weight_min).is_finite(),
+            "initial weight range must be finite and nondecreasing"
+        );
+        Ok(())
+    }
+}
+
+/// Checked shape arithmetic also rejects lengths that a Rust allocation cannot hold.
+pub(super) fn weight_count(hidden_units: usize) -> Result<usize> {
+    ensure!(hidden_units > 0, "hidden_units must be positive");
+    let count = hidden_units
+        .checked_add(7)
+        .and_then(|n| n.checked_mul(hidden_units))
+        .and_then(|n| n.checked_add(3))
+        .filter(|&n| n <= isize::MAX as usize / size_of::<f32>())
+        .ok_or_else(|| anyhow::anyhow!("hidden_units produces an oversized genome"))?;
+    Ok(count)
+}
+
+/// Row-major input weights, recurrent weights, hidden biases, output weights,
+/// and output biases. Width is inherited together with the weight coordinates.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RnnGenome {
-    #[serde(with = "weights")]
-    pub weights: [f32; 47],
+    pub hidden_units: usize,
+    pub weights: Vec<f32>,
 }
 
 impl Default for RnnGenome {
     fn default() -> Self {
-        Self { weights: [0.0; 47] }
+        let hidden_units = Initialization::default().hidden_units;
+        Self {
+            hidden_units,
+            weights: vec![0.0; weight_count(hidden_units).expect("default shape is valid")],
+        }
+    }
+}
+
+impl RnnGenome {
+    pub fn validate(&self) -> Result<()> {
+        let expected = weight_count(self.hidden_units)?;
+        ensure!(
+            self.weights.len() == expected,
+            "expected {expected} weights for {} hidden units, got {}",
+            self.hidden_units,
+            self.weights.len()
+        );
+        ensure!(
+            self.weights.iter().all(|value| value.is_finite()),
+            "non-finite genome weight"
+        );
+        Ok(())
     }
 }
 
 impl<C: Context + ?Sized> RandomInit<C> for RnnGenome {
-    fn random(cx: &mut C) -> Result<Self> {
+    type Config = Initialization;
+
+    fn random(config: &Initialization, cx: &mut C) -> Result<Self> {
+        config.validate()?;
+        let count = weight_count(config.hidden_units)?;
+        let mut weights = Vec::new();
+        weights.try_reserve_exact(count)?;
+        if config.weight_min == config.weight_max {
+            weights.resize(count, config.weight_min);
+        } else {
+            weights.extend(
+                (0..count).map(|_| cx.rng().random_range(config.weight_min..config.weight_max)),
+            );
+        }
         Ok(Self {
-            weights: array::from_fn(|_| cx.rng().random_range(-0.5..0.5)),
+            hidden_units: config.hidden_units,
+            weights,
         })
     }
 }
@@ -37,7 +113,7 @@ impl<C: Context + ?Sized> Genome<C> for RnnGenome {}
 
 /// Independent uniform noise in [-max_delta, max_delta) for each weight and bias.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct WeightMutation {
     pub max_delta: f32,
 }
@@ -48,13 +124,21 @@ impl Default for WeightMutation {
     }
 }
 
+impl WeightMutation {
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.max_delta >= 0.0 && (2.0 * self.max_delta).is_finite(),
+            "mutation max_delta must be nonnegative with a finite sampling range"
+        );
+        Ok(())
+    }
+}
+
 impl<C: Context + ?Sized> Mutate<C, WeightMutation> for RnnGenome {
     fn mutate(&mut self, param: &WeightMutation, cx: &mut C) -> Result<()> {
         let delta = param.max_delta;
-        ensure!(
-            delta >= 0.0 && (2.0 * delta).is_finite(),
-            "mutation max_delta must be nonnegative with a finite sampling range"
-        );
+        param.validate()?;
+        self.validate()?;
         if delta > 0.0 {
             for weight in &mut self.weights {
                 *weight += cx.rng().random_range(-delta..delta);

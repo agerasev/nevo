@@ -26,8 +26,8 @@ pub struct AnimalMind<M = Rnn> {
 }
 
 impl AnimalMind {
-    pub fn new(genome: RnnGenome) -> Self {
-        Self::from_brain(Rnn::new(genome))
+    pub fn new(genome: RnnGenome) -> Result<Self> {
+        Ok(Self::from_brain(Rnn::new(genome)?))
     }
 }
 
@@ -37,8 +37,10 @@ impl<M> AnimalMind<M> {
     }
 }
 
-impl From<RnnGenome> for AnimalMind {
-    fn from(genome: RnnGenome) -> Self {
+impl TryFrom<RnnGenome> for AnimalMind {
+    type Error = anyhow::Error;
+
+    fn try_from(genome: RnnGenome) -> Result<Self> {
         Self::new(genome)
     }
 }

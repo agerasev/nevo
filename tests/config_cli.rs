@@ -76,7 +76,7 @@ fn success(args: &[&str]) -> String {
 
 #[test]
 fn run_shortcuts_and_files_use_the_same_config() {
-    let model = "trace_ticks = 3\n[ecosystem]\ninitial_animals = 2\nplants = 7\nminimum_population = 1\ninitial_animal_energy = 90.0\ninitial_animal_position = [10.0, 20.0]\ninitial_plant_position = [-20.0, 12.0]\n";
+    let model = "trace_ticks = 3\n[ecosystem]\ninitial_animals = 2\nplants = 7\nminimum_population = 1\nimmigration.energy = 90.0\nimmigration.position = [10.0, 20.0]\nplant.initial_position = [-20.0, 12.0]\n";
     let complete = ConfigFile::new(&format!("seed = 7\nticks = 3\n{model}"));
     let partial = ConfigFile::new(model);
     let from_file = success(&["--config", complete.path()]);
@@ -147,10 +147,21 @@ fn invalid_configuration_and_removed_options_are_rejected() {
         "scenario = 'debug'",
         "[ecosystem]\nunknown = 1",
         "[ecosystem]\nplants = -1",
-        "[ecosystem]\ninitial_animal_energy = nan",
-        "[ecosystem]\ninitial_animal_position = [nan, 0.0]",
-        "[ecosystem]\ninitial_plant_position = [631.0, 0.0]",
-        "[ecosystem]\ninitial_plant_position = [0.0]",
+        "[ecosystem]\nimmigration.energy = nan",
+        "[ecosystem]\nimmigration.position = [nan, 0.0]",
+        "[ecosystem]\nplant.initial_position = [631.0, 0.0]",
+        "[ecosystem]\nplant.initial_position = [0.0]",
+        "[ecosystem]\ninitial_animal_energy = 100.0",
+        "[ecosystem]\ninitial_animal_position = 'random'",
+        "[ecosystem]\ninitial_plant_position = 'random'",
+        "[ecosystem.world]\nwidth = 0.0",
+        "[ecosystem.world]\nheight = inf",
+        "[ecosystem.animal.body]\nupkeep = -1.0",
+        "[ecosystem.animal.reproduction]\nchild_energy_fraction = 1.0",
+        "[ecosystem.plant]\ngrowth = -1.0",
+        "[ecosystem.genetics.initialization]\nhidden_units = 0",
+        "[ecosystem.genetics.initialization]\nweight_min = 1.0\nweight_max = 0.0",
+        "[ecosystem.genetics.mutation]\nmax_delta = -0.01",
         "not valid toml",
     ] {
         let bounded = if content.starts_with("ticks =") {
@@ -206,10 +217,10 @@ fn missing_config_fails_but_help_does_not_need_the_file() {
 #[test]
 fn ordered_files_merge_nested_settings_with_cli_precedence() {
     let base = ConfigFile::new(
-        "seed = 1\nticks = 2\ntrace_ticks = 2\n[ecosystem]\ninitial_animals = 1\nplants = 3\nminimum_population = 0\ninitial_animal_position = [10.0, 20.0]\n",
+        "seed = 1\nticks = 2\ntrace_ticks = 2\n[ecosystem]\ninitial_animals = 1\nplants = 3\nminimum_population = 0\nimmigration.position = [10.0, 20.0]\n",
     );
     let overlay = ConfigFile::new(
-        "seed = 7\n[ecosystem]\nplants = 5\ninitial_animal_position = [-30.0, 40.0]\n",
+        "seed = 7\n[ecosystem]\nplants = 5\nimmigration.position = [-30.0, 40.0]\n",
     );
     let layered = success(&[
         "--seed",
@@ -220,7 +231,7 @@ fn ordered_files_merge_nested_settings_with_cli_precedence() {
         overlay.path(),
     ]);
     let complete = ConfigFile::new(
-        "seed = 42\nticks = 2\ntrace_ticks = 2\n[ecosystem]\ninitial_animals = 1\nplants = 5\nminimum_population = 0\ninitial_animal_position = [-30.0, 40.0]\n",
+        "seed = 42\nticks = 2\ntrace_ticks = 2\n[ecosystem]\ninitial_animals = 1\nplants = 5\nminimum_population = 0\nimmigration.position = [-30.0, 40.0]\n",
     );
     assert_eq!(layered, success(&["--config", complete.path()]));
     let reversed = success(&[
@@ -232,7 +243,7 @@ fn ordered_files_merge_nested_settings_with_cli_precedence() {
         "42",
     ]);
     assert!(reversed.contains("tick=0 animals=1 plants=3"));
-    let reset = ConfigFile::new("[ecosystem]\ninitial_animal_position = 'random'\n");
+    let reset = ConfigFile::new("[ecosystem]\nimmigration.position = 'random'\n");
     let random = ConfigFile::new(
         "seed = 1\nticks = 2\ntrace_ticks = 2\n[ecosystem]\ninitial_animals = 1\nplants = 3\nminimum_population = 0\n",
     );

@@ -1,4 +1,4 @@
-//! Initialization and component metrics settings; presets live in `configs/`.
+//! Physical, genetic, admission, and metric settings; presets live in `configs/`.
 
 use std::{fmt, str::FromStr};
 
@@ -6,7 +6,6 @@ use anyhow::{Result, ensure};
 use glam::DVec2;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
-use super::{Admission, HALF_SIZE, START_ENERGY};
 use crate::{
     metrics::Selection,
     mind::{animal, rnn},
@@ -28,11 +27,11 @@ impl Placement {
         }
     }
 
-    fn validate(self) -> Result<()> {
+    fn validate(self, world: WorldConfig) -> Result<()> {
         if let Some(position) = self.position() {
             ensure!(
-                position.is_finite() && position.abs().cmple(HALF_SIZE).all(),
-                "initial position must be finite and inside the arena"
+                position.is_finite() && position.abs().cmple(world.half_size()).all(),
+                "position must be finite and inside the arena"
             );
         }
         Ok(())
@@ -93,41 +92,39 @@ impl<'de> Deserialize<'de> for Placement {
 #[serde(
     default,
     deny_unknown_fields,
-    bound(deserialize = "MC: Deserialize<'de> + Default")
+    bound(
+        deserialize = "MC: Deserialize<'de> + Default, IC: Deserialize<'de> + Default, P: Deserialize<'de> + Default"
+    )
 )]
-pub struct Config<MC = animal::Config<rnn::Config>> {
-    /// Number of animals admitted at initialization.
+pub struct Config<
+    MC = animal::Config<rnn::Config>,
+    IC = rnn::Initialization,
+    P = rnn::WeightMutation,
+> {
+    /// Size of the first batch of immigrants.
     pub initial_animals: usize,
-
-    /// Number of plants, replenished throughout the run.
     pub plants: usize,
-
-    /// Population floor maintained by immigration; zero disables it.
+    /// Population floor maintained by later immigration; zero disables it.
     pub minimum_population: usize,
-
-    /// Starting energy of initial animals; later immigrants use the model default.
-    pub initial_animal_energy: f64,
-
-    /// Initial animal placement: random or a fixed world-space point.
-    pub initial_animal_position: Placement,
-
-    /// Initial plant placement; replacement plants remain random.
-    pub initial_plant_position: Placement,
-
+    pub world: WorldConfig,
+    pub immigration: ImmigrationConfig,
+    pub sensing: SensingConfig,
+    pub genetics: GeneticsConfig<IC, P>,
     pub metrics: MetricsConfig,
     pub animal: AnimalConfig<MC>,
     pub plant: PlantConfig,
 }
 
-impl<MC: Default> Default for Config<MC> {
+impl<MC: Default, IC: Default, P: Default> Default for Config<MC, IC, P> {
     fn default() -> Self {
         Self {
             initial_animals: 20,
             plants: 500,
             minimum_population: 20,
-            initial_animal_energy: START_ENERGY,
-            initial_animal_position: Placement::Random,
-            initial_plant_position: Placement::Random,
+            world: WorldConfig::default(),
+            immigration: ImmigrationConfig::default(),
+            sensing: SensingConfig::default(),
+            genetics: GeneticsConfig::default(),
             metrics: MetricsConfig::default(),
             animal: AnimalConfig::default(),
             plant: PlantConfig::default(),
@@ -135,35 +132,223 @@ impl<MC: Default> Default for Config<MC> {
     }
 }
 
-impl<MC> Config<MC> {
+impl<MC, IC, P> Config<MC, IC, P> {
     pub fn validate(&self) -> Result<()> {
         ensure!(
             !self.metrics.enabled || self.metrics.window_ticks > 0,
             "metrics window_ticks must be positive"
         );
-        ensure!(
-            self.initial_animal_energy.is_finite(),
-            "initial animal energy must be finite"
-        );
-        self.initial_animal_position.validate()?;
-        self.initial_plant_position.validate()
+        self.parameters().validate()
     }
 
-    /// Metrics settings may change when a checkpoint is resumed.
-    pub fn same_initialization<Other>(&self, other: &Config<Other>) -> bool {
+    pub(super) fn parameters(&self) -> Parameters {
+        Parameters {
+            world: self.world,
+            immigration: self.immigration,
+            sensing: self.sensing,
+            body: self.animal.body.parameters(),
+            reproduction: self.animal.reproduction,
+            feeding: self.animal.feeding,
+            plant: self.plant.parameters(),
+        }
+    }
+
+    /// Runtime metrics may change on resume; model parameters must remain equal.
+    pub fn same_model<Other>(&self, other: &Config<Other, IC, P>) -> bool
+    where
+        IC: PartialEq,
+        P: PartialEq,
+    {
         self.initial_animals == other.initial_animals
             && self.plants == other.plants
             && self.minimum_population == other.minimum_population
-            && self.initial_animal_energy == other.initial_animal_energy
-            && self.initial_animal_position == other.initial_animal_position
-            && self.initial_plant_position == other.initial_plant_position
+            && self.parameters() == other.parameters()
+            && self.genetics == other.genetics
     }
+}
 
-    pub(super) fn admission(&self) -> Admission {
-        Admission {
-            position: self.initial_animal_position.position(),
-            energy: self.initial_animal_energy,
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WorldConfig {
+    pub width: f64,
+    pub height: f64,
+}
+impl Default for WorldConfig {
+    fn default() -> Self {
+        Self {
+            width: 1260.0,
+            height: 700.0,
         }
+    }
+}
+impl WorldConfig {
+    pub fn half_size(self) -> DVec2 {
+        DVec2::new(self.width, self.height) * 0.5
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ImmigrationConfig {
+    pub energy: f64,
+    pub position: Placement,
+}
+impl Default for ImmigrationConfig {
+    fn default() -> Self {
+        Self {
+            energy: 100.0,
+            position: Placement::Random,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SensingConfig {
+    /// Multiplier applied before dividing displacement by the world's half-height.
+    pub distance_scale: f64,
+    pub softening: f64,
+    pub gradient_dead_zone: f64,
+}
+impl Default for SensingConfig {
+    fn default() -> Self {
+        Self {
+            distance_scale: 0.5,
+            softening: 0.01,
+            gradient_dead_zone: 0.01,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct GeneticsConfig<IC = rnn::Initialization, P = rnn::WeightMutation> {
+    pub initialization: IC,
+    pub mutation: P,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReproductionConfig {
+    pub threshold: f64,
+    pub child_energy_fraction: f64,
+    pub separation_scale: f64,
+}
+impl Default for ReproductionConfig {
+    fn default() -> Self {
+        Self {
+            threshold: 400.0,
+            child_energy_fraction: 0.5,
+            separation_scale: 0.5,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FeedingConfig {
+    pub efficiency: f64,
+    pub contact_scale: f64,
+}
+impl Default for FeedingConfig {
+    fn default() -> Self {
+        Self {
+            efficiency: 0.1,
+            contact_scale: 0.8,
+        }
+    }
+}
+
+/// Canonical physical rules, independent of omitted runtime metric selectors.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Parameters {
+    pub world: WorldConfig,
+    pub immigration: ImmigrationConfig,
+    pub sensing: SensingConfig,
+    pub body: BodyParameters,
+    pub reproduction: ReproductionConfig,
+    pub feeding: FeedingConfig,
+    pub plant: PlantParameters,
+}
+impl Parameters {
+    pub fn validate(self) -> Result<()> {
+        fn nonnegative(value: f64, name: &str) -> Result<()> {
+            ensure!(
+                value.is_finite() && value >= 0.0,
+                "{name} must be finite and nonnegative"
+            );
+            Ok(())
+        }
+        fn positive(value: f64, name: &str) -> Result<()> {
+            ensure!(
+                value.is_finite() && value > 0.0,
+                "{name} must be finite and positive"
+            );
+            Ok(())
+        }
+        positive(self.world.half_size().x, "world width")?;
+        positive(self.world.half_size().y, "world height")?;
+        nonnegative(self.immigration.energy, "immigration energy")?;
+        self.immigration.position.validate(self.world)?;
+        positive(self.sensing.distance_scale, "sensing distance_scale")?;
+        positive(
+            self.sensing.distance_scale / self.world.half_size().y,
+            "normalized sensing scale",
+        )?;
+        positive(self.sensing.softening, "sensing softening")?;
+        positive(self.sensing.softening.powi(3), "cubed sensing softening")?;
+        nonnegative(
+            self.sensing.gradient_dead_zone,
+            "sensing gradient_dead_zone",
+        )?;
+        nonnegative(self.body.upkeep, "animal upkeep")?;
+        nonnegative(self.body.max_speed, "animal max_speed")?;
+        nonnegative(self.body.movement_time_step, "animal movement_time_step")?;
+        nonnegative(
+            self.body.max_speed * self.body.movement_time_step,
+            "maximum movement",
+        )?;
+        nonnegative(self.body.movement_dead_zone, "animal movement_dead_zone")?;
+        nonnegative(self.body.radius_scale, "animal radius_scale")?;
+        positive(self.reproduction.threshold, "reproduction threshold")?;
+        let fraction = self.reproduction.child_energy_fraction;
+        ensure!(
+            fraction.is_finite() && fraction > 0.0 && fraction < 1.0,
+            "child_energy_fraction must be strictly between zero and one"
+        );
+        nonnegative(
+            self.reproduction.separation_scale,
+            "reproduction separation_scale",
+        )?;
+        ensure!(
+            self.feeding.efficiency.is_finite() && (0.0..=1.0).contains(&self.feeding.efficiency),
+            "feeding efficiency must be between zero and one"
+        );
+        nonnegative(self.feeding.contact_scale, "feeding contact_scale")?;
+        positive(self.plant.max_energy, "plant max_energy")?;
+        for energy in [self.plant.initial_energy, self.plant.replacement_energy] {
+            ensure!(
+                energy.is_finite() && (0.0..=self.plant.max_energy).contains(&energy),
+                "plant admission energy must be between zero and max_energy"
+            );
+        }
+        nonnegative(self.plant.growth, "plant growth")?;
+        nonnegative(
+            self.plant.max_energy + self.plant.growth,
+            "plant energy after growth",
+        )?;
+        nonnegative(self.plant.radius_scale, "plant radius_scale")?;
+        nonnegative(
+            self.plant.radius_scale * self.plant.max_energy.sqrt(),
+            "maximum plant radius",
+        )?;
+        nonnegative(
+            self.body.radius_scale * self.immigration.energy.sqrt(),
+            "immigrant radius",
+        )?;
+        self.plant.initial_position.validate(self.world)?;
+        self.plant.replacement_position.validate(self.world)
     }
 }
 
@@ -194,6 +379,8 @@ impl Default for MetricsConfig {
 pub struct AnimalConfig<MC = animal::Config<rnn::Config>> {
     pub metrics: AnimalMetricsConfig,
     pub body: BodyConfig,
+    pub reproduction: ReproductionConfig,
+    pub feeding: FeedingConfig,
     pub mind: MC,
 }
 
@@ -207,10 +394,61 @@ pub struct AnimalMetricsConfig {
     /// Active ticks observed in this window for animals that died.
     pub observed_survival: Selection,
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BodyConfig {
+    pub upkeep: f64,
+    pub max_speed: f64,
+    /// Scales movement only; energy rates are per tick.
+    pub movement_time_step: f64,
+    pub movement_dead_zone: f64,
+    pub radius_scale: f64,
     pub metrics: BodyMetricsConfig,
+}
+impl Default for BodyConfig {
+    fn default() -> Self {
+        let parameters = BodyParameters::default();
+        Self {
+            upkeep: parameters.upkeep,
+            max_speed: parameters.max_speed,
+            movement_time_step: parameters.movement_time_step,
+            movement_dead_zone: parameters.movement_dead_zone,
+            radius_scale: parameters.radius_scale,
+            metrics: BodyMetricsConfig::default(),
+        }
+    }
+}
+impl BodyConfig {
+    pub(super) fn parameters(self) -> BodyParameters {
+        BodyParameters {
+            upkeep: self.upkeep,
+            max_speed: self.max_speed,
+            movement_time_step: self.movement_time_step,
+            movement_dead_zone: self.movement_dead_zone,
+            radius_scale: self.radius_scale,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct BodyParameters {
+    pub upkeep: f64,
+    pub max_speed: f64,
+    /// Scales movement only; energy rates are per tick.
+    pub movement_time_step: f64,
+    pub movement_dead_zone: f64,
+    pub radius_scale: f64,
+}
+impl Default for BodyParameters {
+    fn default() -> Self {
+        Self {
+            upkeep: 2.0,
+            max_speed: 100.0,
+            movement_time_step: 0.1,
+            movement_dead_zone: 0.01,
+            radius_scale: 0.5,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -218,10 +456,69 @@ pub struct BodyMetricsConfig {
     #[serde(deserialize_with = "deserialize_energy_selection")]
     pub energy: Selection,
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct PlantConfig {
+    pub initial_energy: f64,
+    pub replacement_energy: f64,
+    pub growth: f64,
+    pub max_energy: f64,
+    pub radius_scale: f64,
+    pub initial_position: Placement,
+    pub replacement_position: Placement,
     pub metrics: PlantMetricsConfig,
+}
+impl Default for PlantConfig {
+    fn default() -> Self {
+        let parameters = PlantParameters::default();
+        Self {
+            initial_energy: parameters.initial_energy,
+            replacement_energy: parameters.replacement_energy,
+            growth: parameters.growth,
+            max_energy: parameters.max_energy,
+            radius_scale: parameters.radius_scale,
+            initial_position: parameters.initial_position,
+            replacement_position: parameters.replacement_position,
+            metrics: PlantMetricsConfig::default(),
+        }
+    }
+}
+impl PlantConfig {
+    pub(super) fn parameters(self) -> PlantParameters {
+        PlantParameters {
+            initial_energy: self.initial_energy,
+            replacement_energy: self.replacement_energy,
+            growth: self.growth,
+            max_energy: self.max_energy,
+            radius_scale: self.radius_scale,
+            initial_position: self.initial_position,
+            replacement_position: self.replacement_position,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PlantParameters {
+    pub initial_energy: f64,
+    pub replacement_energy: f64,
+    pub growth: f64,
+    pub max_energy: f64,
+    pub radius_scale: f64,
+    pub initial_position: Placement,
+    pub replacement_position: Placement,
+}
+impl Default for PlantParameters {
+    fn default() -> Self {
+        Self {
+            initial_energy: 400.0,
+            replacement_energy: 0.0,
+            growth: 1.0,
+            max_energy: 400.0,
+            radius_scale: 0.5,
+            initial_position: Placement::Random,
+            replacement_position: Placement::Random,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]

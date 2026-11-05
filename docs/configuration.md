@@ -52,28 +52,56 @@ unlimited simulation throughput. A positive value limits simulation ticks per se
 it does not change the simulated timestep or frame rate. Only `viewer.enable` has a
 CLI shortcut; use config files for VSync and all ecosystem details.
 
-| Ecosystem setting | Meaning |
-| --- | --- |
-| `initial_animals` | Animals admitted at startup. |
-| `plants` | Plant count, maintained by replacement after feeding. |
-| `minimum_population` | Population floor maintained by immigration; zero disables it. |
-| `initial_animal_energy` | Energy of initial animals; later immigrants use the model default. |
-| `initial_animal_position` | Initial animal placement: `"random"` or `[x, y]`. |
-| `initial_plant_position` | Initial plant placement; replacements remain random. |
+All paths below are relative to `[ecosystem]`. Each run's resolved `config.toml`
+includes these defaults, so it also serves as a complete editable configuration.
 
-An explicit `"random"` overrides a
-fixed position from an earlier file. Fixed positions must be finite and inside the
-arena; animals are clamped to keep their bodies inside. Counts, energy, and the two
-placements are independent. Initialization still admits animals before seeding
-plants, preserving the random draw order.
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `initial_animals` | `20` | Number admitted at startup. |
+| `plants` | `500` | Maintained plant count. |
+| `minimum_population` | `20` | Immigration floor; zero disables automatic immigration. |
+| `world.width`, `world.height` | `1260`, `700` | Centered arena dimensions. |
+| `immigration.energy` | `100` | Energy for every admitted animal. |
+| `immigration.position` | `"random"` | Placement for every admitted animal. |
+| `animal.body.upkeep` | `2` | Energy spent per animal per tick. |
+| `animal.body.max_speed`, `animal.body.movement_time_step` | `100`, `0.1` | Movement scale; maximum displacement is their product. |
+| `animal.body.movement_dead_zone` | `0.01` | Direction magnitudes at or below this do not move. |
+| `animal.body.radius_scale` | `0.5` | Radius coefficient in `scale × sqrt(max(energy, 0))`. |
+| `animal.reproduction.threshold` | `400` | Reproduction requires energy strictly above this. |
+| `animal.reproduction.child_energy_fraction` | `0.5` | Fraction of pre-split energy transferred to the child. |
+| `animal.reproduction.separation_scale` | `0.5` | Parent/child offset relative to the parent's post-split radius. |
+| `animal.feeding.efficiency` | `0.1` | Fraction of eaten plant energy gained by the animal. |
+| `animal.feeding.contact_scale` | `0.8` | Feeding distance relative to combined radii. |
+| `plant.initial_energy`, `plant.replacement_energy` | `400`, `0` | Initial and replacement plant energy. |
+| `plant.growth`, `plant.max_energy` | `1`, `400` | Growth per tick and energy cap. |
+| `plant.radius_scale` | `0.5` | Plant radius coefficient, using the same energy/radius equation. |
+| `plant.initial_position`, `plant.replacement_position` | `"random"`, `"random"` | Initial and replacement placement. |
+| `sensing.distance_scale` | `0.5` | Displacements are multiplied by this divided by arena half-height. |
+| `sensing.softening` | `0.01` | Positive distance offset in the food field. |
+| `sensing.gradient_dead_zone` | `0.01` | Smaller/equal gradient magnitudes become zero; others normalize. |
+| `genetics.initialization.hidden_units` | `4` | Recurrent brain width; inputs and outputs remain three-dimensional. |
+| `genetics.initialization.weight_min`, `genetics.initialization.weight_max` | `-0.5`, `0.5` | Uniform interval `[min, max)`; equal bounds produce a constant without random draws. |
+| `genetics.mutation.max_delta` | `0.02` | Uniform mutation noise in `[-max_delta, max_delta)` per parameter. |
+
+Initial and later immigrants use exactly the same admission settings and path;
+only the number requested differs. Placement accepts `"random"` or `[x, y]`.
+An explicit `"random"` overrides a fixed position from an earlier file. Fixed
+positions must be finite and inside the configured arena; bodies remain clamped
+to its bounds. Startup admits animals before seeding plants, preserving draw order.
+
+`movement_time_step` scales movement only: upkeep and plant growth remain per-tick
+quantities. `tick_hz` changes wall-clock pacing only. Boundary clamping, the
+food-field equations, hidden `tanh`, and observation/action meanings remain model
+rules. Hidden width is fixed within a run; evolution changes weights and biases.
 
 `trace_ticks` prints decisions and events through an absolute tick; zero disables
 tracing. Tracing, checkpoint policy, and `smoke` are config-only settings.
 The [smoke preset](../configs/smoke.toml) enables the viewer's twelve-frame check.
 Runtime options such as viewing,
 pacing, tracing, tick budget, checkpoint policy, and metric selections can change
-on resume. Seed and ecosystem initialization settings must match the checkpoint; conflicting overrides fail before
-replacing saved files. See [persistence](persistence.md) for format and recovery.
+on resume. Seed and all physical, genetic, and initialization settings must match
+the checkpoint; conflicting overrides fail before replacing saved files. See
+[persistence](persistence.md) for format and recovery.
 
 Metrics configuration follows component ownership: `ecosystem.metrics`,
 `ecosystem.animal.metrics`, `ecosystem.animal.body.metrics`,

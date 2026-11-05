@@ -122,7 +122,7 @@ physical state, recurrent memory, or randomness.
 | `ecosystem.animal.body.metrics.energy` | Current animal energy distribution. |
 | `ecosystem.plant.metrics.energy` | Current plant energy distribution. |
 | `ecosystem.animal.mind.brain.metrics.activation` | Latest hidden activations across current brains that have acted since initialization or resume. |
-| `ecosystem.animal.mind.brain.metrics.saturation` | Fraction of those hidden units with absolute activation at least 0.95. |
+| `ecosystem.animal.mind.brain.metrics.saturation` | Fraction of those hidden units with absolute activation at least `saturation_threshold` (default 0.95). |
 | `ecosystem.metrics.genetic_diversity` | Mean population variance across corresponding genome coordinates, including newborns. |
 
 An active animal-tick means an animal sensed and acted during that tick; newborns
@@ -147,6 +147,8 @@ Bodies, plants, minds, genomes, and animals merge into typed summaries. The
 ecosystem replaces its complete snapshot on collection: pooling different worlds
 or windows requires an explicit analysis operation. There is no runtime registry.
 Genome diversity is computed on demand over matching weight coordinates; variance among different weights within one genome is not diversity.
+Different hidden widths have incompatible coordinates, so their pooled diversity
+is unavailable. `saturation_threshold` accepts values from zero through one.
 
 [Aggregate](../src/metrics/aggregate.rs) provides `push`, `merge`, and `value`.
 Count, sum, mean, min, max, and Welford moments can combine independently collected

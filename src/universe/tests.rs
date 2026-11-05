@@ -1,7 +1,7 @@
 use ciborium::Value;
 
 use crate::{
-    ecosystem::{Admission, Event},
+    ecosystem::{Event, Placement},
     mind::rnn::{RnnGenome, WeightMutation},
     run::Run,
 };
@@ -69,24 +69,17 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
     genome.weights[0] = -0.0;
     genome.weights[1] = f32::from_bits(1);
     genome.weights[28] = 0.25;
-    let mut world = Ecosystem::empty(
-        1,
-        0,
-        23,
-        17,
-        Some(genome),
-        WeightMutation { max_delta: 0.07 },
-    );
-    world
-        .admit(
-            1,
-            Admission {
-                position: Some(glam::DVec2::ZERO),
-                energy: 390.0,
-            },
-        )
-        .unwrap();
-    world.seed_plants(Some(glam::DVec2::ZERO)).unwrap();
+    let mut config = Config {
+        initial_animals: 1,
+        plants: 1,
+        minimum_population: 0,
+        ..Config::default()
+    };
+    config.immigration.energy = 390.0;
+    config.immigration.position = Placement::Fixed(glam::DVec2::ZERO);
+    config.plant.initial_position = Placement::Fixed(glam::DVec2::ZERO);
+    config.genetics.mutation = WeightMutation { max_delta: 0.07 };
+    let world = Ecosystem::with_genetics(config.clone(), 23, Some(genome)).unwrap();
     let universe = Universe::from_world(world).unwrap();
     let mut value = Value::serialized(&universe).unwrap();
     assert_eq!(
@@ -97,8 +90,8 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
         field(&mut value, &["world", "immigrant_genome"]),
         Value::Null
     ));
-    let mut run = universe.restore(Config::default()).unwrap();
-    assert_eq!(round_trip(&run, Config::default()), run);
+    let mut run = universe.restore(config.clone()).unwrap();
+    assert_eq!(round_trip(&run, config.clone()), run);
     run.tick().unwrap();
     assert!(
         run.universe()
@@ -108,7 +101,7 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
             .values()
             .any(|animal| animal.mind.brain.memory != [0.0; 4])
     );
-    let mut restored = round_trip(&run, Config::default());
+    let mut restored = round_trip(&run, config.clone());
     for _ in 1..108 {
         assert_eq!(run.tick().unwrap(), restored.tick().unwrap());
     }
@@ -120,7 +113,7 @@ fn immigrant_template_memory_and_pending_deaths_survive() {
             .values()
             .any(|animal| animal.body.energy < 0.0)
     );
-    let mut restored = round_trip(&run, Config::default());
+    let mut restored = round_trip(&run, config);
     let report = run.tick().unwrap();
     assert!(
         report
@@ -179,11 +172,8 @@ fn zero_rngs_and_wrong_weight_dimensions_are_rejected() {
         .as_array_mut()
         .unwrap()
         .pop();
-    assert!(
-        value
-            .deserialized::<Universe>()
-            .unwrap_err()
-            .to_string()
-            .contains("expected 47 weights")
-    );
+    match value.deserialized::<Universe>() {
+        Err(_) => {}
+        Ok(invalid) => assert!(invalid.validate().is_err()),
+    }
 }

@@ -6,9 +6,10 @@ and recorded experiments, with no final endpoint for the research program.
 
 ## Current implementation
 
-The ecosystem has replenishing plants and animals with 3–4–3 recurrent
-brains. One configurable loop runs every experiment; an optional desktop
-viewer reads the shared Universe. Sensing precedes movement, feeding, and births.
+The ecosystem has replenishing plants and animals with recurrent brains (3–4–3
+by default, with configurable hidden width). One configurable loop runs every
+experiment; an optional desktop viewer reads the shared Universe. Sensing precedes
+movement, feeding, and births.
 A fresh checkout needs `git submodule update --init` for the Cargo path dependency.
 
 ```sh
@@ -47,15 +48,20 @@ trace_ticks = 3
 initial_animals = 1
 plants = 1
 minimum_population = 0
-initial_animal_energy = 390.0
-initial_animal_position = [0.0, 0.0]
-initial_plant_position = [0.0, 0.0]
+immigration.energy = 390.0
+immigration.position = [0.0, 0.0]
+plant.initial_position = [0.0, 0.0]
 ```
 
 The CLI offers `--seed`, `--ticks`, `--tick-hz`, `--viewer`, and `--paused`.
 `--viewer` maps to `viewer.enable`; explicit `--viewer=false` or `--paused=false`
 overrides a true value. Ecosystem details and `viewer.vsync` are configured in files.
 Unknown keys are rejected in every file. See [configuration and precedence](docs/configuration.md).
+
+World dimensions, body and plant dynamics, reproduction, feeding, sensing, and
+genetic initialization/mutation are configurable. Initial and later immigrants
+use the same energy, placement, and genome initialization settings. The initial
+population and immigration floor only decide how many animals to admit.
 
 The viewer runs independently of simulation speed. Its preset enables VSync without
 slowing simulation; there is no additional rendering timer.

@@ -1,6 +1,57 @@
 use super::*;
 use crate::genome::{Genome, Mutate, RandomInit};
 
+// Fixed reference values keep the historical default behavior checks explicit.
+const HALF_SIZE: DVec2 = DVec2::new(630.0, 350.0);
+const START_ENERGY: f64 = 100.0;
+const RIPE_ENERGY: f64 = 400.0;
+const UPKEEP: f64 = 2.0;
+
+#[derive(Clone, Copy)]
+struct Admission {
+    position: Option<DVec2>,
+    energy: f64,
+}
+impl Default for Admission {
+    fn default() -> Self {
+        Self {
+            position: None,
+            energy: START_ENERGY,
+        }
+    }
+}
+// Fixtures may inject particular bodies without changing the world's ongoing policy.
+impl<M, G, P> Ecosystem<M, G, P>
+where
+    M: Mind<GeneticContext, Input = FoodObservation, Output = MoveAction> + AsRef<G> + TryFrom<G>,
+    M::Error: Into<anyhow::Error>,
+    G: RandomInit<GeneticContext> + Mutate<GeneticContext, P>,
+    G::Config: PartialEq,
+    P: Clone + PartialEq + Default,
+{
+    fn admit_with(&mut self, count: usize, admission: Admission) -> Result<Vec<AnimalId>> {
+        let previous = self.parameters.immigration;
+        self.parameters.immigration = ImmigrationConfig {
+            energy: admission.energy,
+            position: admission
+                .position
+                .map(Placement::Fixed)
+                .unwrap_or(Placement::Random),
+        };
+        let result = self.admit(count);
+        self.parameters.immigration = previous;
+        result
+    }
+    fn seed_plants_at(&mut self, position: Option<DVec2>) -> Result<()> {
+        let previous = self.parameters.plant.initial_position;
+        self.parameters.plant.initial_position =
+            position.map(Placement::Fixed).unwrap_or(Placement::Random);
+        let result = self.seed_plants();
+        self.parameters.plant.initial_position = previous;
+        result
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 struct FixedGenome<const FAIL_INIT: bool = false> {
     action: MoveAction,
@@ -12,7 +63,8 @@ struct FixedGenome<const FAIL_INIT: bool = false> {
 impl<const FAIL_INIT: bool> Genome<GeneticContext> for FixedGenome<FAIL_INIT> {}
 
 impl<const FAIL_INIT: bool> RandomInit<GeneticContext> for FixedGenome<FAIL_INIT> {
-    fn random(cx: &mut GeneticContext) -> Result<Self> {
+    type Config = ();
+    fn random(_: &(), cx: &mut GeneticContext) -> Result<Self> {
         let allele = cx.rng.next_u64();
         ensure!(!FAIL_INIT, "initialization failed");
         Ok(Self {
@@ -109,7 +161,7 @@ impl Fixture {
     fn debug(seed: u64) -> Self {
         let mut world = Ecosystem::empty(1, 0, seed, seed, None, FixedMutation::default());
         world
-            .admit(
+            .admit_with(
                 1,
                 Admission {
                     position: Some(DVec2::ZERO),
@@ -117,7 +169,7 @@ impl Fixture {
                 },
             )
             .unwrap();
-        world.seed_plants(Some(DVec2::ZERO)).unwrap();
+        world.seed_plants_at(Some(DVec2::ZERO)).unwrap();
         Self { world, number: 0 }
     }
 
@@ -144,7 +196,7 @@ fn first_claimant_gets_the_only_meal_and_replacement_starts_small() {
     fixture.world.animals.get_mut(&first).unwrap().body.energy = START_ENERGY;
     let second = fixture
         .world
-        .admit(
+        .admit_with(
             1,
             Admission {
                 position: Some(DVec2::ZERO),
@@ -241,13 +293,8 @@ fn parent_senses_ripe_food_and_newborn_waits_to_process_it() {
 
     let mut genome = RnnGenome::default();
     genome.weights[28] = 0.5;
-    let mut world: Ecosystem = Ecosystem::with_genetics(
-        crate::test_support::ecosystem("debug"),
-        7,
-        Some(genome),
-        WeightMutation::default(),
-    )
-    .unwrap();
+    let mut world: Ecosystem =
+        Ecosystem::with_genetics(crate::test_support::ecosystem("debug"), 7, Some(genome)).unwrap();
     let before = world.clone();
     let sensed = world.sense(world.animals[&id(1)].body.position);
     assert_eq!(world, before, "sensing must not change the world");
@@ -342,7 +389,7 @@ fn replacements_follow_culling_and_precede_births() {
     let mut fixture = Fixture::debug(10);
     fixture
         .world
-        .admit(
+        .admit_with(
             1,
             Admission {
                 position: Some(DVec2::ZERO),
@@ -397,7 +444,7 @@ fn failures_in_processing_mutation_or_construction_leave_the_published_universe_
 #[test]
 fn initial_and_later_arrivals_use_the_same_admission_and_rng_sequence() {
     let mut initial = Ecosystem::<AnimalMind>::empty(0, 0, 42, 17, None, WeightMutation::default());
-    let arrivals = initial.admit(1, Admission::default()).unwrap();
+    let arrivals = initial.admit_with(1, Admission::default()).unwrap();
     let mut later = Ecosystem::<AnimalMind>::empty(0, 1, 42, 17, None, WeightMutation::default());
     let report = later.advance(1).unwrap();
     assert_eq!(arrivals, vec![id(1)]);
@@ -457,7 +504,7 @@ fn identities_serialize_as_integers_and_never_wrap() {
         1
     );
     fixture.world.next_animal = u64::MAX;
-    assert!(fixture.world.admit(1, Admission::default()).is_err());
+    assert!(fixture.world.admit_with(1, Admission::default()).is_err());
     assert_eq!(fixture.world.next_animal, u64::MAX);
     assert_eq!(fixture.world.animals.len(), 1);
 }
@@ -478,7 +525,7 @@ fn a_different_genome_and_mutation_type_drive_generic_reproduction() {
     let mut expected_rng = world.context.rng.clone();
     let parent_allele = expected_rng.next_u64();
     let parent = world
-        .admit(
+        .admit_with(
             1,
             Admission {
                 position: Some(DVec2::ZERO),
@@ -552,10 +599,10 @@ fn immigrant_template_applies_to_every_arrival_without_genetic_draws() {
         position: Some(DVec2::ZERO),
         energy: 100.0,
     };
-    let first = world.admit(1, admission).unwrap()[0];
+    let first = world.admit_with(1, admission).unwrap()[0];
     world.advance(1).unwrap();
     assert_ne!(world.animals[&first].mind.brain.memory, [0.0; 4]);
-    let later = world.admit(1, admission).unwrap()[0];
+    let later = world.admit_with(1, admission).unwrap()[0];
     for animal in world.animals.values() {
         assert_eq!(animal.mind.brain.genome, genome);
     }
@@ -627,10 +674,12 @@ fn stepping_requires_no_mind_clone_and_copies_genomes_only_for_arrivals_and_birt
     }
     impl Genome<GeneticContext> for CountedGenome {}
     impl RandomInit<GeneticContext> for CountedGenome {
-        fn random(_: &mut GeneticContext) -> Result<Self> {
+        type Config = ();
+        fn random(_: &(), _: &mut GeneticContext) -> Result<Self> {
             panic!("this experiment uses an immigrant template")
         }
     }
+    #[derive(Default, PartialEq)]
     struct Mutation;
     impl Clone for Mutation {
         fn clone(&self) -> Self {
@@ -684,7 +733,7 @@ fn stepping_requires_no_mind_clone_and_copies_genomes_only_for_arrivals_and_birt
         Mutation,
     );
     let animal = world
-        .admit(
+        .admit_with(
             1,
             Admission {
                 position: Some(DVec2::ZERO),
@@ -718,7 +767,7 @@ fn stepping_requires_no_mind_clone_and_copies_genomes_only_for_arrivals_and_birt
         Mutation,
     );
     world
-        .admit(
+        .admit_with(
             1,
             Admission {
                 position: Some(DVec2::ZERO),
@@ -753,9 +802,12 @@ impl<const FAIL_INIT: bool> crate::metrics::Metrics for FixedMind<FAIL_INIT> {
     fn collect_metrics(&self, _: &mut ()) {}
 }
 
-fn measured_config<MC: Default>() -> Config<MC> {
+fn measured_config<MC: Default>() -> Config<MC, (), FixedMutation> {
     use crate::metrics::Selection;
     let mut config = Config {
+        initial_animals: 1,
+        plants: 1,
+        minimum_population: 0,
         metrics: MetricsConfig {
             enabled: true,
             window_ticks: 3,
@@ -974,7 +1026,7 @@ fn explicit_configuration_validates_and_starts_a_clean_window() {
     let mut fixture = Fixture::debug(47);
     let mut config = measured_config();
     fixture.world.configure(&config).unwrap();
-    let mut invalid = config;
+    let mut invalid = config.clone();
     invalid.metrics.window_ticks = 0;
     assert!(invalid.validate().is_err());
     let before = fixture.world.metrics.clone();
@@ -994,9 +1046,9 @@ fn explicit_configuration_validates_and_starts_a_clean_window() {
     let energy = summary.animal.body.energy.value();
     assert_eq!(energy.mean, None);
     assert!(energy.min.is_some());
-    assert!(config.same_initialization(&invalid));
+    assert!(config.same_model(&invalid));
     invalid.initial_animals += 1;
-    assert!(!config.same_initialization(&invalid));
+    assert!(!config.same_model(&invalid));
 }
 
 #[test]
@@ -1087,21 +1139,17 @@ max = false
 #[test]
 fn setup_occurs_once_for_initial_animals_births_and_immigrants() {
     use crate::metrics::Metrics;
-    let mut config: Config<()> = measured_config();
+    let mut config: Config<(), (), FixedMutation> = measured_config();
     config.initial_animals = 1;
-    config.initial_animal_energy = 390.0;
-    config.initial_animal_position = Placement::Fixed(DVec2::ZERO);
-    config.initial_plant_position = Placement::Fixed(DVec2::ZERO);
+    config.immigration.energy = 390.0;
+    config.immigration.position = Placement::Fixed(DVec2::ZERO);
+    config.plant.initial_position = Placement::Fixed(DVec2::ZERO);
     config.plants = 1;
     config.minimum_population = 0;
     config.metrics.window_ticks = 1;
-    let mut world = Ecosystem::<FixedMind, FixedGenome, FixedMutation>::with_genetics(
-        config,
-        50,
-        None,
-        FixedMutation::default(),
-    )
-    .unwrap();
+    let mut world =
+        Ecosystem::<FixedMind, FixedGenome, FixedMutation>::with_genetics(config, 50, None)
+            .unwrap();
     assert_eq!(world.animals[&id(1)].mind.configurations, 1);
     assert!(world.animals[&id(1)].mind.metrics_enabled);
     world.advance(1).unwrap();
@@ -1251,13 +1299,8 @@ fn template_validation_does_not_require_deserialized_runtime_settings() {
         ..Config::default()
     };
     config.animal.mind = 7;
-    let world = Ecosystem::<ConfiguredMind>::with_genetics(
-        config,
-        52,
-        Some(RnnGenome::default()),
-        WeightMutation::default(),
-    )
-    .unwrap();
+    let world =
+        Ecosystem::<ConfiguredMind>::with_genetics(config, 52, Some(RnnGenome::default())).unwrap();
     world.validate().unwrap();
     let original = Universe::from_world(world).unwrap();
     let mut bytes = Vec::new();
@@ -1274,4 +1317,218 @@ fn template_validation_does_not_require_deserialized_runtime_settings() {
             .mind
             .configured
     );
+}
+
+#[test]
+fn configured_immigration_is_identical_for_initial_and_later_arrivals() {
+    let mut config: Config = Config {
+        initial_animals: 1,
+        minimum_population: 0,
+        plants: 0,
+        immigration: ImmigrationConfig {
+            energy: 250.0,
+            position: Placement::Fixed(DVec2::new(7.0, -9.0)),
+        },
+        ..Config::default()
+    };
+    config.animal.body.upkeep = 3.0;
+    config.animal.body.radius_scale = 0.2;
+    config.genetics.initialization.hidden_units = 7;
+    config.genetics.initialization.weight_min = -0.1;
+    config.genetics.initialization.weight_max = 0.3;
+    let initial = Ecosystem::new(config.clone(), 71).unwrap();
+    config.initial_animals = 0;
+    config.minimum_population = 1;
+    let mut later = Ecosystem::new(config, 71).unwrap();
+    let report = later.advance(1).unwrap();
+    assert_eq!(report.events, [Event::Immigrant { id: id(1) }]);
+    assert!(report.decisions.is_empty());
+    let first = &initial.animals[&id(1)];
+    let next = &later.animals[&id(1)];
+    assert_eq!(first.body.position, next.body.position);
+    assert_eq!(first.body.energy - 3.0, next.body.energy);
+    assert_eq!(first.body.radius_scale, next.body.radius_scale);
+    assert_eq!(first.mind, next.mind);
+    assert_eq!(next.mind.brain.memory.len(), 7);
+    assert_eq!(initial.rng, later.rng);
+    assert_eq!(initial.context, later.context);
+}
+
+#[test]
+fn configured_physics_controls_feeding_births_growth_and_body_size() {
+    let mut config = Config::<(), (), FixedMutation> {
+        initial_animals: 1,
+        minimum_population: 0,
+        plants: 1,
+        world: WorldConfig {
+            width: 80.0,
+            height: 40.0,
+        },
+        immigration: ImmigrationConfig {
+            energy: 30.0,
+            position: Placement::Fixed(DVec2::ZERO),
+        },
+        ..Config::default()
+    };
+    config.animal.body.upkeep = 1.5;
+    config.animal.body.radius_scale = 1.0;
+    config.animal.reproduction = ReproductionConfig {
+        threshold: 35.0,
+        child_energy_fraction: 0.25,
+        separation_scale: 0.0,
+    };
+    config.animal.feeding = FeedingConfig {
+        efficiency: 0.5,
+        contact_scale: 1.0,
+    };
+    config.plant.initial_position = Placement::Fixed(DVec2::ZERO);
+    config.plant.replacement_position = Placement::Fixed(DVec2::new(30.0, 0.0));
+    config.plant.initial_energy = 20.0;
+    config.plant.replacement_energy = 5.0;
+    config.plant.max_energy = 50.0;
+    config.plant.growth = 3.5;
+    config.plant.radius_scale = 2.0;
+    let mut world =
+        Ecosystem::<FixedMind, FixedGenome, FixedMutation>::with_genetics(config, 72, None)
+            .unwrap();
+    let report = world.advance(1).unwrap();
+    assert_eq!(
+        report.events,
+        [
+            Event::Meal {
+                id: id(1),
+                plant: 1,
+                gain: 10.0
+            },
+            Event::Birth {
+                parent: id(1),
+                child: id(2)
+            },
+        ]
+    );
+    assert_eq!(world.animals[&id(1)].body.energy, 28.5);
+    assert_eq!(world.animals[&id(2)].body.energy, 8.5);
+    for animal in world.animals.values() {
+        assert_eq!(animal.body.position, DVec2::ZERO);
+        assert_eq!(animal.body.radius(), animal.body.energy.sqrt());
+    }
+    assert_eq!(world.plants[0].energy, 8.5);
+    assert_eq!(world.plants[0].position, DVec2::new(30.0, 0.0));
+    assert_eq!(world.plants[0].radius(), 2.0 * 8.5_f64.sqrt());
+    for tick in 2..=30 {
+        world.advance(tick).unwrap();
+    }
+    assert_eq!(world.plants[0].energy, 50.0);
+    assert_eq!(world.world_config().half_size(), DVec2::new(40.0, 20.0));
+    assert!(world.plants[0].position.x + world.plants[0].radius() <= 40.0);
+}
+
+#[test]
+fn configured_movement_and_sensing_use_instance_world_rules() {
+    let mut config = Config::<(), (), FixedMutation> {
+        initial_animals: 1,
+        minimum_population: 0,
+        plants: 1,
+        world: WorldConfig {
+            width: 40.0,
+            height: 40.0,
+        },
+        immigration: ImmigrationConfig {
+            energy: 100.0,
+            position: Placement::Fixed(DVec2::ZERO),
+        },
+        ..Config::default()
+    };
+    config.animal.body.upkeep = 0.0;
+    config.animal.body.max_speed = 12.0;
+    config.animal.body.movement_time_step = 0.25;
+    config.animal.body.radius_scale = 0.1;
+    config.animal.feeding.contact_scale = 0.0;
+    config.plant.initial_position = Placement::Fixed(DVec2::new(8.0, 0.0));
+    config.plant.initial_energy = 20.0;
+    config.plant.max_energy = 50.0;
+    config.sensing = SensingConfig {
+        distance_scale: 0.25,
+        softening: 0.2,
+        gradient_dead_zone: 10.0,
+    };
+    let genome = FixedGenome {
+        action: MoveAction {
+            direction: DVec2::X,
+            speed_fraction: 0.75,
+        },
+        ..FixedGenome::default()
+    };
+    let mut world = Ecosystem::<FixedMind, FixedGenome, FixedMutation>::with_genetics(
+        config.clone(),
+        73,
+        Some(genome.clone()),
+    )
+    .unwrap();
+    let sensed = world.sense(DVec2::ZERO);
+    assert!((sensed.strength - 0.4 / 0.3).abs() < 1e-12);
+    assert_eq!(sensed.gradient, DVec2::ZERO);
+    world.advance(1).unwrap();
+    assert_eq!(world.animals[&id(1)].body.position, DVec2::new(2.25, 0.0));
+    for tick in 2..=12 {
+        world.advance(tick).unwrap();
+    }
+    assert_eq!(world.animals[&id(1)].body.position, DVec2::new(19.0, 0.0));
+
+    config.animal.body.movement_dead_zone = 2.0;
+    config.sensing.gradient_dead_zone = 0.5;
+    let mut world =
+        Ecosystem::<FixedMind, FixedGenome, FixedMutation>::with_genetics(config, 73, Some(genome))
+            .unwrap();
+    assert_eq!(world.sense(DVec2::ZERO).gradient, DVec2::X);
+    world.advance(1).unwrap();
+    assert_eq!(world.animals[&id(1)].body.position, DVec2::ZERO);
+}
+
+#[test]
+fn invalid_physics_and_conflicting_restore_parameters_are_rejected() {
+    use crate::universe::Universe;
+    let config = Config {
+        initial_animals: 0,
+        plants: 0,
+        minimum_population: 0,
+        ..Config::default()
+    };
+    let invalid_changes: &[fn(&mut Config)] = &[
+        |c| c.world.width = 0.0,
+        |c| c.world.height = f64::INFINITY,
+        |c| c.immigration.energy = -1.0,
+        |c| c.immigration.position = Placement::Fixed(DVec2::splat(10000.0)),
+        |c| c.animal.reproduction.threshold = 0.0,
+        |c| c.animal.reproduction.child_energy_fraction = 1.0,
+        |c| c.animal.reproduction.child_energy_fraction = 0.0,
+        |c| c.animal.body.upkeep = -1.0,
+        |c| c.animal.body.max_speed = f64::INFINITY,
+        |c| c.plant.max_energy = 0.0,
+        |c| c.plant.initial_energy = 401.0,
+        |c| c.sensing.softening = 0.0,
+        |c| c.genetics.initialization.hidden_units = 0,
+        |c| c.genetics.mutation.max_delta = f32::NAN,
+    ];
+    for change in invalid_changes {
+        let mut invalid = config.clone();
+        change(&mut invalid);
+        assert!(Ecosystem::new(invalid, 74).is_err());
+    }
+    let universe = Universe::new(config.clone(), 74).unwrap();
+    for change in [
+        (|c: &mut Config| c.world.width = 1000.0) as fn(&mut Config),
+        |c| c.immigration.energy = 200.0,
+        |c| c.plants = 1,
+        |c| c.minimum_population = 1,
+        |c| c.genetics.initialization.hidden_units = 7,
+        |c| c.genetics.mutation.max_delta = 0.1,
+    ] {
+        let mut changed = config.clone();
+        change(&mut changed);
+        assert!(universe.clone().restore(changed).is_err());
+    }
+    let mut world = Ecosystem::new(config, 74).unwrap();
+    world.parameters.world.height = 0.0;
+    assert!(world.validate().is_err());
 }

@@ -23,7 +23,7 @@ impl<M, U> EcosystemUpdate<M, U>
 where
     M: Mind<GeneticContext, Update = U>,
 {
-    pub(super) fn apply<G, P>(self, world: &mut Ecosystem<M, G, P>) {
+    pub(super) fn apply<G, P, IC>(self, world: &mut Ecosystem<M, G, P, M::Config, IC>) {
         world.animals.retain(|id, _| self.animals.contains_key(id));
         for (id, Animal { body, mind }) in self.animals {
             match mind {
@@ -51,7 +51,8 @@ where
     M: Mind<GeneticContext, Input = FoodObservation, Output = MoveAction> + AsRef<G> + TryFrom<G>,
     M::Error: Into<anyhow::Error>,
     G: RandomInit<GeneticContext> + Mutate<GeneticContext, P>,
-    P: Clone,
+    P: Clone + PartialEq + Default,
+    G::Config: PartialEq,
 {
     pub(super) fn compute_tick(
         &self,
@@ -100,7 +101,11 @@ where
                 .get_mut(&id)
                 .expect("acting animal exists")
                 .body;
-            let position = clamp_position(body.position + action.displacement(), body.radius());
+            let position = clamp_position(
+                body.position + action.displacement(self.parameters.body),
+                body.radius(),
+                self.parameters.world,
+            );
             decisions.push(Decision {
                 id,
                 observation,
@@ -124,8 +129,10 @@ where
             let body = &mut animal.body;
             update.plants.retain(|plant| {
                 let distance = body.position.distance(plant.position);
-                if distance < 0.8 * (body.radius() + plant.radius()) {
-                    let gain = plant.energy * 0.1;
+                if distance
+                    < self.parameters.feeding.contact_scale * (body.radius() + plant.radius())
+                {
+                    let gain = plant.energy * self.parameters.feeding.efficiency;
                     body.energy += gain;
                     if body.metrics.animal.food_gained.enabled() {
                         body.metrics.food_gained += gain;
@@ -154,8 +161,19 @@ where
             }
         }
         while update.plants.len() < self.plant_target {
-            let position = random_position(&mut update.rng);
-            add_plant(&mut update.plants, &mut update.next_plant, position, 0.0)?;
+            let position = self
+                .parameters
+                .plant
+                .replacement_position
+                .position()
+                .unwrap_or_else(|| random_position(&mut update.rng, self.parameters.world));
+            add_plant(
+                &mut update.plants,
+                &mut update.next_plant,
+                position,
+                self.parameters.plant.replacement_energy,
+                self.parameters.plant.radius_scale,
+            )?;
             update
                 .plants
                 .last_mut()
@@ -165,14 +183,7 @@ where
         }
         let count = self.minimum_population.saturating_sub(update.animals.len());
         for _ in 0..count {
-            let Animal { body, mind } = Self::immigrant(
-                self.immigrant_genome.as_ref(),
-                Admission::default(),
-                &mut update.rng,
-                &mut update.context,
-                &self.metrics,
-                self.mind_config.as_ref(),
-            )?;
+            let Animal { body, mind } = self.immigrant(&mut update.rng, &mut update.context)?;
             let id = allocate_animal(&mut update.next_animal)?;
             update.animals.insert(
                 id,
@@ -187,7 +198,9 @@ where
         let mut parents: VecDeque<_> = update
             .animals
             .iter()
-            .filter_map(|(&id, animal)| (animal.body.energy > BIRTH_THRESHOLD).then_some(id))
+            .filter_map(|(&id, animal)| {
+                (animal.body.energy > self.parameters.reproduction.threshold).then_some(id)
+            })
             .collect();
         while let Some(parent) = parents.pop_front() {
             let animal = update.animals.get_mut(&parent).expect("parent exists");
@@ -195,13 +208,20 @@ where
             if body.metrics.animal.offspring.enabled() {
                 body.metrics.offspring += 1;
             }
-            body.energy *= 0.5;
-            let energy = body.energy;
+            let before = body.energy;
+            let energy = before * self.parameters.reproduction.child_energy_fraction;
+            body.energy *= 1.0 - self.parameters.reproduction.child_energy_fraction;
+            ensure!(
+                energy < before && body.energy.is_finite(),
+                "reproduction must reduce offspring energy"
+            );
             let direction = DVec2::new(
                 update.rng.random_range(-0.5..0.5),
                 update.rng.random_range(-0.5..0.5),
             );
-            let offset = 0.5 * body.radius() * direction.normalize_or(DVec2::X);
+            let offset = self.parameters.reproduction.separation_scale
+                * body.radius()
+                * direction.normalize_or(DVec2::X);
             let child_position = body.position + offset;
             body.position -= offset;
             // In this ecosystem, inference changes mind state, not the inherited
@@ -218,7 +238,8 @@ where
                 self.metrics.config.enabled,
             )?;
             let child = allocate_animal(&mut update.next_animal)?;
-            let mut body = Body::new(child_position, energy);
+            let mut body =
+                Body::with_radius_scale(child_position, energy, self.parameters.body.radius_scale);
             body.metrics =
                 metrics::BodyCache::new(self.metrics.body_config, self.metrics.animal_config);
             update.animals.insert(
@@ -230,20 +251,21 @@ where
             );
             events.push(Event::Birth { parent, child });
             // Historical ordered traversal also visits newly appended children.
-            if energy > BIRTH_THRESHOLD {
+            if energy > self.parameters.reproduction.threshold {
                 parents.push_back(child);
             }
         }
         for (&id, animal) in &mut update.animals {
             let body = &mut animal.body;
-            body.energy -= UPKEEP;
-            body.position = clamp_position(body.position, body.radius());
+            body.energy -= self.parameters.body.upkeep;
+            body.position = clamp_position(body.position, body.radius(), self.parameters.world);
             ensure!(id.0 > 0 && id.0 < update.next_animal, "invalid animal ID");
-            validate_body(body)?;
+            validate_body(body, self.parameters)?;
         }
         for plant in &mut update.plants {
-            plant.energy = (plant.energy + 1.0).min(RIPE_ENERGY);
-            plant.position = clamp_position(plant.position, plant.radius());
+            plant.energy =
+                (plant.energy + self.parameters.plant.growth).min(self.parameters.plant.max_energy);
+            plant.position = clamp_position(plant.position, plant.radius(), self.parameters.world);
         }
         ensure!(update.rng.state() != [0; 32], "world RNG state is all zero");
         ensure!(
@@ -254,7 +276,12 @@ where
             update.next_animal > 0 && update.next_plant > 0,
             "invalid next ID"
         );
-        validate_plants(&update.plants, self.plant_target, update.next_plant)?;
+        validate_plants(
+            &update.plants,
+            self.plant_target,
+            update.next_plant,
+            self.parameters,
+        )?;
         let report = TickReport {
             tick,
             events,

@@ -13,13 +13,14 @@ serializes directly to CBOR; locks and the viewer live outside it.
 | `Animal<B, M>` | Own a body and its mind together: `body: B`, `mind: M`. |
 | [Mind](../src/mind/mod.rs) | Compute typed output and a state update from input; apply the update and validate mind state. |
 | [Genome / Mutate](../src/genome/mod.rs) | Clone inherited representations and mutate them using an execution context. |
-| [RandomInit](../src/genome/mod.rs) | Initialize a value from the context RNG, independently of Genome. |
+| [RandomInit](../src/genome/mod.rs) | Initialize a value from typed settings and the context RNG, independently of Genome. |
 | [Context](../src/context/mod.rs) | Supply RNG and execution resources; the CPU context owns the genetic RNG. |
 | [Metrics / Aggregate](metrics.md) | Collect typed component summaries and reduce scalar observations. |
 
 `Ecosystem<M, G, P>` can use another compatible mind, genome, and mutation parameter
 type. Genetic minds expose their genome through `AsRef<G>` and construct fresh minds
-through `TryFrom<G>`; the baseline provides infallible `From<RnnGenome>` conversions.
+through `TryFrom<G>`; the baseline validates genome shape and allocates recurrent
+memory during this fallible construction.
 In this ecosystem, thinking leaves the inherited genome unchanged; learned state
 belongs to the mind's update. The Mind contract itself does not require a genome.
 A different experiment implements `Simulation`; the runner imposes no animal,
@@ -34,23 +35,29 @@ Actor, Environment, lifecycle-message protocol, or universal intervention callba
 
 Explicit mind inputs still define what an animal perceives. `AnimalMind<M>` maps
 food observations to three neural signals and three brain outputs to movement;
-its `brain` can be any compatible Mind. The scalar RNN owns 47 inherited parameters
-and four recurrent units, all reading the previous hidden state. Minds receive
-observations, not unrestricted access to the world. The RNN consumes no random draws
+its `brain` can be any compatible Mind. The scalar RNN has three inputs and three
+outputs; hidden width is configured at initialization. Width H gives H² + 7H + 3
+inherited weights/biases (47 at the default H=4). All recurrent units read the
+previous hidden state. Minds receive observations, not unrestricted access to the
+world. The RNN consumes no random draws
 when processing.
 
-Immigration clones the optional genome template or calls `RandomInit::random`, then
-constructs a fresh mind. Reproduction clones the parent's genome, calls `Mutate` with
+Immigration clones the optional genome template or calls `RandomInit::random` with
+the experiment's stored initialization settings, then constructs a fresh mind.
+Reproduction clones the parent's genome, calls `Mutate` with
 the experiment's stored parameters, and constructs the offspring's mind. There is no
 separate inheritance-policy object. Both paths propagate initialization, mutation,
 and conversion errors through Universe computation.
 
-For the baseline, random genomes draw 47 weights in [-0.5, 0.5). Default mutation
+For the default baseline, random genomes draw 47 weights in [-0.5, 0.5). Default mutation
 adds independent noise in [-0.02, 0.02), and new brains start with zero recurrent
-memory. Invalid mutation bounds fail when used; zero preserves the RNG stream.
-Initial and later arrivals both use `Ecosystem::admit` with physical admission
-parameters. A supplied genome template applies to all immigrants without consuming
-genetic random draws.
+memory. Initialization and mutation ranges are validated before baseline execution;
+zero mutation preserves the RNG stream.
+Initial and later arrivals use the same stored `immigration` energy and placement
+and the same admission path; `Ecosystem::admit(count)` uses these settings too.
+A supplied genome template applies to all immigrants without consuming genetic
+random draws. Physical and genetic parameters are canonical checkpointed state;
+metric setup cannot change them on resume.
 
 ## A complete step
 

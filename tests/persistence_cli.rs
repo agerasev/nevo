@@ -165,7 +165,7 @@ impl Checkpoint {
 
 fn read_checkpoint(path: &Path) -> Checkpoint {
     let checkpoint: Checkpoint = ciborium::from_reader(fs::File::open(path).unwrap()).unwrap();
-    assert_eq!(checkpoint.format_version, 7);
+    assert_eq!(checkpoint.format_version, 8);
     checkpoint
 }
 
@@ -191,6 +191,131 @@ fn a_new_process_resumes_the_complete_seeded_state() {
         assert_eq!(full.tick().unwrap(), split.tick().unwrap());
     }
     assert_eq!(full, split);
+}
+
+#[test]
+fn configured_physics_and_brain_shape_survive_process_resume() {
+    let directory = Directory::new();
+    let settings = directory.overlay(
+        "parameters.toml",
+        r#"
+[ecosystem]
+initial_animals = 3
+plants = 9
+minimum_population = 3
+[ecosystem.world]
+width = 80.0
+height = 60.0
+[ecosystem.immigration]
+energy = 70.0
+position = [4.0, 5.0]
+[ecosystem.animal.body]
+upkeep = 1.5
+max_speed = 30.0
+movement_time_step = 0.2
+movement_dead_zone = 0.05
+radius_scale = 0.25
+[ecosystem.animal.reproduction]
+threshold = 60.0
+child_energy_fraction = 0.3
+separation_scale = 0.4
+[ecosystem.animal.feeding]
+efficiency = 0.2
+contact_scale = 0.9
+[ecosystem.plant]
+initial_energy = 80.0
+replacement_energy = 5.0
+growth = 0.75
+max_energy = 100.0
+radius_scale = 0.3
+initial_position = [-2.0, -3.0]
+replacement_position = "random"
+[ecosystem.sensing]
+distance_scale = 0.75
+softening = 0.02
+gradient_dead_zone = 0.005
+[ecosystem.genetics.initialization]
+hidden_units = 6
+weight_min = -0.3
+weight_max = 0.25
+[ecosystem.genetics.mutation]
+max_delta = 0.04
+"#,
+    );
+    directory.success(&[
+        "full", "--config", &settings, "--seed", "17", "--ticks", "0",
+    ]);
+    let initial = directory.latest("full");
+    for animal in initial.state.world().animals().values() {
+        assert_eq!(animal.body.position, glam::DVec2::new(4.0, 5.0));
+        assert_eq!(animal.body.energy, 70.0);
+        assert_eq!(animal.body.radius(), 0.25 * 70.0_f64.sqrt());
+        assert_eq!(animal.mind.brain.genome.hidden_units, 6);
+        assert_eq!(animal.mind.brain.genome.weights.len(), 81);
+        assert_eq!(animal.mind.brain.memory, vec![0.0; 6]);
+        assert!(
+            animal
+                .mind
+                .brain
+                .genome
+                .weights
+                .iter()
+                .all(|w| (-0.3..0.25).contains(w))
+        );
+    }
+    for plant in initial.state.world().plants() {
+        assert_eq!(plant.position, glam::DVec2::new(-2.0, -3.0));
+        assert_eq!(plant.energy, 80.0);
+        assert_eq!(plant.radius(), 0.3 * 80.0_f64.sqrt());
+    }
+    directory.success(&["full", "--ticks", "64"]);
+    directory.success(&[
+        "split", "--config", &settings, "--seed", "17", "--ticks", "32",
+    ]);
+    directory.success(&["split"]);
+    let full = directory.latest("full");
+    let split = directory.latest("split");
+    assert_eq!(full.state.step(), 64);
+    assert_eq!(full.config.ecosystem, initial.config.ecosystem);
+    assert_eq!(full.config.ecosystem, split.config.ecosystem);
+    assert_eq!(full.state, split.state);
+    for animal in split.state.world().animals().values() {
+        assert_eq!(animal.mind.brain.genome.hidden_units, 6);
+        assert_eq!(animal.mind.brain.memory.len(), 6);
+    }
+
+    // Runtime metric selection may change; canonical model settings may not.
+    directory.success(&[
+        "split",
+        "--ticks",
+        "0",
+        "--config",
+        &directory.overlay("metrics-off.toml", "[ecosystem.metrics]\nenabled = false\n"),
+    ]);
+    assert_eq!(directory.latest("split").state, full.state);
+    let config_path = directory.0.join("split/config.toml");
+    let config = fs::read(&config_path).unwrap();
+    let checkpoint_path = directory.checkpoints("split").pop().unwrap();
+    let checkpoint = fs::read(&checkpoint_path).unwrap();
+    let metrics = fs::read(directory.metrics_path("split")).unwrap();
+    for replacement in [
+        "[ecosystem.world]\nwidth = 81.0\n",
+        "[ecosystem.immigration]\nenergy = 71.0\n",
+        "[ecosystem.animal.body]\nupkeep = 1.6\n",
+        "[ecosystem.animal.reproduction]\nchild_energy_fraction = 0.4\n",
+        "[ecosystem.animal.feeding]\nefficiency = 0.3\n",
+        "[ecosystem.plant]\ngrowth = 0.5\n",
+        "[ecosystem.sensing]\nsoftening = 0.03\n",
+        "[ecosystem.genetics.initialization]\nhidden_units = 7\n",
+        "[ecosystem.genetics.mutation]\nmax_delta = 0.05\n",
+    ] {
+        let replacement = directory.overlay("replacement.toml", replacement);
+        let output = directory.run(&["split", "--config", &replacement, "--ticks", "0"]);
+        assert!(!output.status.success(), "accepted altered model settings");
+        assert_eq!(fs::read(&config_path).unwrap(), config);
+        assert_eq!(fs::read(&checkpoint_path).unwrap(), checkpoint);
+        assert_eq!(fs::read(directory.metrics_path("split")).unwrap(), metrics);
+    }
 }
 
 fn drain_metrics(reader: &mut Reader) -> Vec<Record> {

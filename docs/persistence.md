@@ -33,7 +33,7 @@ error; it never silently starts fresh or falls back to another run.
 entropy seed. Ordered `--config PATH` files override individual settings, then CLI
 values override the files. See [configuration precedence](configuration.md).
 If `config.toml` is missing, the checkpoint's embedded configuration is recovered.
-Resume rejects changed seeds or ecosystem initialization settings. Runtime settings
+Resume rejects changed seeds or ecosystem model parameters. Runtime settings
 such as pacing, viewer attachment, tracing, save policy, and metrics can change.
 A tick budget always applies to the current invocation: a saved budget of 256 means another 256 ticks on bare
 resume. Remove `ticks` from `config.toml` for an unlimited continuation.
@@ -74,8 +74,9 @@ Each checkpoint is one CBOR file containing the effective configuration,
 model identifiers, and the directly serialized
 [Universe](../src/universe/mod.rs): step and complete experiment model. The ecosystem
 owns ordered plants and animals (each with body and mind), both RNG states, genomes,
-recurrent memories, the immigrant genome template, mutation parameters, population
-target, and ID counters.
+recurrent memories, the immigrant genome template, physical and genetic parameters,
+population target, and ID counters. Runtime settings cannot replace these canonical
+rules when resuming.
 Animal IDs serialize as integers; loading validates each complete animal and
 the remaining experiment state. Native CBOR arrays hold weights;
 no safetensors payload is used.
@@ -86,8 +87,8 @@ recurrent memory and RNG positions are required state. Finalized statistics rema
 in the single [CBOR metrics log](metrics.md), which is never replayed into checkpoints.
 Core simulation and genetics contracts have no persistence bounds.
 
-The current format is checkpoint version 7, with `foraging-sense-first-v1` and
-`animal-rnn-3-4-3-v1` model identifiers. Only this format is accepted;
+The current format is checkpoint version 8, with `foraging-sense-first-v2` and
+`animal-rnn-3-n-3-v2` model identifiers. Only this format is accepted;
 compatibility and migrations are intentionally unsupported. Rust module/type names
 are not part of the format.
 

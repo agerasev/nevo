@@ -1,10 +1,9 @@
-//! Scalar 3–4–3 recurrent network with a fixed topology and evolved parameters.
+//! Scalar recurrent network with configurable hidden width and evolved parameters.
 
 mod genome;
 mod metrics;
-mod weights;
 
-pub use genome::{RnnGenome, WeightMutation};
+pub use genome::{Initialization, RnnGenome, WeightMutation};
 pub use metrics::{GenomeStatistics, GenomeSummary, MetricsConfig, Statistics, Summary};
 
 use std::array;
@@ -24,7 +23,7 @@ pub struct Config {
 #[serde(deny_unknown_fields)]
 pub struct Rnn {
     pub genome: RnnGenome,
-    pub memory: [f32; 4],
+    pub memory: Vec<f32>,
     #[serde(skip)]
     metrics_config: Option<MetricsConfig>,
     #[serde(skip)]
@@ -38,25 +37,31 @@ impl PartialEq for Rnn {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Update {
-    pub memory: [f32; 4],
+    pub memory: Vec<f32>,
     metrics: Summary,
 }
 
 impl Rnn {
-    pub fn new(genome: RnnGenome) -> Self {
-        Self {
+    pub fn new(genome: RnnGenome) -> Result<Self> {
+        genome.validate()?;
+        let mut memory = Vec::new();
+        memory.try_reserve_exact(genome.hidden_units)?;
+        memory.resize(genome.hidden_units, 0.0);
+        Ok(Self {
             genome,
-            memory: [0.0; 4],
+            memory,
             metrics_config: None,
             metrics: Summary::default(),
-        }
+        })
     }
 }
 
-impl From<RnnGenome> for Rnn {
-    fn from(genome: RnnGenome) -> Self {
+impl TryFrom<RnnGenome> for Rnn {
+    type Error = anyhow::Error;
+
+    fn try_from(genome: RnnGenome) -> Result<Self> {
         Self::new(genome)
     }
 }
@@ -67,18 +72,13 @@ impl AsRef<RnnGenome> for Rnn {
     }
 }
 
-fn matrix_vector<const IN: usize, const OUT: usize>(
-    weights: &[f32],
-    input: &[f32; IN],
-) -> [f32; OUT] {
-    debug_assert_eq!(weights.len(), IN * OUT);
-    array::from_fn(|i| {
-        weights[i * IN..(i + 1) * IN]
-            .iter()
-            .zip(input)
-            .map(|(weight, value)| weight * value)
-            .sum()
-    })
+fn dot(weights: &[f32], input: &[f32]) -> f32 {
+    debug_assert_eq!(weights.len(), input.len());
+    weights
+        .iter()
+        .zip(input)
+        .map(|(weight, value)| weight * value)
+        .sum()
 }
 
 impl<C: Context + ?Sized> Mind<C> for Rnn {
@@ -88,6 +88,9 @@ impl<C: Context + ?Sized> Mind<C> for Rnn {
     type Config = Config;
 
     fn configure(&mut self, config: &Config, metrics_enabled: bool) -> Result<()> {
+        if metrics_enabled {
+            config.metrics.validate()?;
+        }
         self.metrics_config = (metrics_enabled
             && (config.metrics.activation.enabled() || config.metrics.saturation))
             .then_some(config.metrics);
@@ -98,18 +101,30 @@ impl<C: Context + ?Sized> Mind<C> for Rnn {
     fn compute_update(&self, input: Self::Input, _cx: &mut C) -> Result<(Self::Output, Update)> {
         <Self as Mind<C>>::validate(self)?;
         let weights = &self.genome.weights;
-        let sensed: [f32; 4] = matrix_vector(&weights[..12], &input);
-        // All four recurrent units read the previous tick's memory. The C++ dot
+        let hidden = self.genome.hidden_units;
+        let recurrent_offset = 3 * hidden;
+        let hidden_bias_offset = recurrent_offset + hidden * hidden;
+        let output_offset = hidden_bias_offset + hidden;
+        let output_bias_offset = output_offset + 3 * hidden;
+        // Every recurrent unit reads the previous tick's memory. The C++ dot
         // product aliased its input and output, overwriting components mid-update.
-        let recalled: [f32; 4] = matrix_vector(&weights[12..28], &self.memory);
-        let memory: [f32; 4] =
-            array::from_fn(|i| (recalled[i] + sensed[i] + weights[28 + i]).tanh());
+        let memory: Vec<_> = (0..hidden)
+            .map(|i| {
+                let sensed = dot(&weights[3 * i..3 * (i + 1)], &input);
+                let begin = recurrent_offset + hidden * i;
+                let recalled = dot(&weights[begin..begin + hidden], &self.memory);
+                (recalled + sensed + weights[hidden_bias_offset + i]).tanh()
+            })
+            .collect();
         ensure!(
             memory.iter().all(|value| value.is_finite()),
             "non-finite prepared recurrent memory"
         );
-        let mut output: [f32; 3] = matrix_vector(&weights[32..44], &memory);
-        for (value, bias) in output.iter_mut().zip(&weights[44..]) {
+        let mut output: [f32; 3] = array::from_fn(|i| {
+            let begin = output_offset + hidden * i;
+            dot(&weights[begin..begin + hidden], &memory)
+        });
+        for (value, bias) in output.iter_mut().zip(&weights[output_bias_offset..]) {
             *value += bias;
         }
 
@@ -127,9 +142,10 @@ impl<C: Context + ?Sized> Mind<C> for Rnn {
     }
 
     fn validate(&self) -> Result<()> {
+        self.genome.validate()?;
         ensure!(
-            self.genome.weights.iter().all(|value| value.is_finite()),
-            "non-finite genome weight"
+            self.memory.len() == self.genome.hidden_units,
+            "recurrent memory length differs from hidden_units"
         );
         ensure!(
             self.memory.iter().all(|value| value.is_finite()),

@@ -116,6 +116,11 @@ impl Config {
 
     pub fn loop_options(&self) -> Result<LoopOptions> {
         self.ecosystem.validate()?;
+        self.ecosystem.genetics.initialization.validate()?;
+        self.ecosystem.genetics.mutation.validate()?;
+        if self.ecosystem.metrics.enabled {
+            self.ecosystem.animal.mind.brain.metrics.validate()?;
+        }
         ensure!(
             self.keep_checkpoints > 0,
             "keep-checkpoints must be at least one"

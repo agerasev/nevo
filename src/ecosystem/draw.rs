@@ -1,7 +1,7 @@
 use glam::Vec2;
 use wgame::{prelude::*, rgb::Rgb};
 
-use super::{Animal, Body, Ecosystem, HALF_SIZE, Plant};
+use super::{Animal, Body, Ecosystem, Plant};
 use crate::viewer::{Bounds, Draw, Drawing, Label};
 
 const PLANT: Rgb<f32> = Rgb::new(0.20, 0.74, 0.32);
@@ -68,9 +68,9 @@ impl<B: Draw, M> Draw for Animal<B, M> {
     }
 }
 
-impl<M, G, P, MC> Draw for Ecosystem<M, G, P, MC> {
+impl<M, G, P, MC, IC> Draw for Ecosystem<M, G, P, MC, IC> {
     fn draw(&self, drawing: &mut Drawing<'_>) {
-        let half = HALF_SIZE.as_vec2();
+        let half = self.world_config().half_size().as_vec2();
         drawing.scene.add(
             &drawing
                 .library

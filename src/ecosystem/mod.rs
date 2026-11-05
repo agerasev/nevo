@@ -8,8 +8,9 @@ mod update;
 mod draw;
 
 pub use config::{
-    AnimalConfig, AnimalMetricsConfig, BodyConfig, BodyMetricsConfig, Config, MetricsConfig,
-    Placement, PlantConfig, PlantMetricsConfig,
+    AnimalConfig, AnimalMetricsConfig, BodyConfig, BodyMetricsConfig, Config, FeedingConfig,
+    GeneticsConfig, ImmigrationConfig, MetricsConfig, Placement, PlantConfig, PlantMetricsConfig,
+    ReproductionConfig, SensingConfig, WorldConfig,
 };
 pub use metrics::{
     AnimalSummary, BodySummary, EventSummary, PlantSummary, PopulationSummary, Summary, Window,
@@ -34,13 +35,7 @@ use crate::{
     universe::Simulation,
 };
 
-pub const HALF_SIZE: DVec2 = DVec2::new(630.0, 350.0);
-const RIPE_ENERGY: f64 = 400.0;
-const BIRTH_THRESHOLD: f64 = 400.0;
-const START_ENERGY: f64 = 100.0;
-const UPKEEP: f64 = 2.0;
-const MAX_SPEED: f64 = 100.0;
-const DT: f64 = 0.1;
+use config::{BodyParameters, Parameters};
 
 type GeneticContext = Cpu<Xoshiro256PlusPlus>;
 
@@ -70,11 +65,12 @@ pub struct MoveAction {
 }
 
 impl MoveAction {
-    fn displacement(self) -> DVec2 {
-        if self.direction.length() <= 0.01 {
+    fn displacement(self, body: BodyParameters) -> DVec2 {
+        if self.direction.length() <= body.movement_dead_zone {
             return DVec2::ZERO;
         }
-        self.direction.normalize_or_zero() * (self.speed_fraction.clamp(0.0, 1.0) * MAX_SPEED * DT)
+        self.direction.normalize_or_zero()
+            * (self.speed_fraction.clamp(0.0, 1.0) * body.max_speed * body.movement_time_step)
     }
 }
 
@@ -84,20 +80,25 @@ pub struct Plant {
     pub id: u64,
     pub position: DVec2,
     pub energy: f64,
+    radius_scale: f64,
     #[serde(skip)]
     metrics: metrics::PlantCache,
 }
 impl Plant {
     pub fn new(id: u64, position: DVec2, energy: f64) -> Self {
+        Self::with_radius_scale(id, position, energy, PlantConfig::default().radius_scale)
+    }
+    fn with_radius_scale(id: u64, position: DVec2, energy: f64, radius_scale: f64) -> Self {
         Self {
             id,
             position,
             energy,
+            radius_scale,
             metrics: Default::default(),
         }
     }
     pub fn radius(&self) -> f64 {
-        radius(self.energy)
+        radius(self.energy, self.radius_scale)
     }
 }
 
@@ -106,19 +107,24 @@ impl Plant {
 pub struct Body {
     pub position: DVec2,
     pub energy: f64,
+    radius_scale: f64,
     #[serde(skip)]
     metrics: metrics::BodyCache,
 }
 impl Body {
     pub fn new(position: DVec2, energy: f64) -> Self {
+        Self::with_radius_scale(position, energy, BodyConfig::default().radius_scale)
+    }
+    fn with_radius_scale(position: DVec2, energy: f64, radius_scale: f64) -> Self {
         Self {
             position,
             energy,
+            radius_scale,
             metrics: Default::default(),
         }
     }
     pub fn radius(&self) -> f64 {
-        radius(self.energy)
+        radius(self.energy, self.radius_scale)
     }
 }
 
@@ -130,11 +136,11 @@ pub struct Animal<B, M> {
     pub mind: M,
 }
 
-fn radius(energy: f64) -> f64 {
-    0.5 * energy.max(0.0).sqrt()
+fn radius(energy: f64, scale: f64) -> f64 {
+    scale * energy.max(0.0).sqrt()
 }
-fn clamp_position(position: DVec2, radius: f64) -> DVec2 {
-    let limit = (HALF_SIZE - radius).max(DVec2::ZERO);
+fn clamp_position(position: DVec2, radius: f64, world: WorldConfig) -> DVec2 {
+    let limit = (world.half_size() - radius).max(DVec2::ZERO);
     position.clamp(-limit, limit)
 }
 
@@ -165,24 +171,8 @@ pub struct TickReport {
     pub decisions: Vec<Decision>,
 }
 
-/// Physical parameters for an arrival, whether at initialization or later.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Admission {
-    /// None draws a uniform position using the world's spatial RNG.
-    pub position: Option<DVec2>,
-    pub energy: f64,
-}
-impl Default for Admission {
-    fn default() -> Self {
-        Self {
-            position: None,
-            energy: START_ENERGY,
-        }
-    }
-}
-
-fn random_position(rng: &mut Xoshiro256PlusPlus) -> DVec2 {
-    DVec2::new(rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0)) * HALF_SIZE
+fn random_position(rng: &mut Xoshiro256PlusPlus, world: WorldConfig) -> DVec2 {
+    DVec2::new(rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0)) * world.half_size()
 }
 
 fn allocate_animal(next_animal: &mut u64) -> Result<AnimalId> {
@@ -199,26 +189,46 @@ fn add_plant(
     next_plant: &mut u64,
     position: DVec2,
     energy: f64,
+    radius_scale: f64,
 ) -> Result<()> {
     let next = next_plant
         .checked_add(1)
         .ok_or_else(|| anyhow::anyhow!("plant ID allocator exhausted"))?;
-    plants.push(Plant::new(*next_plant, position, energy));
+    plants.push(Plant::with_radius_scale(
+        *next_plant,
+        position,
+        energy,
+        radius_scale,
+    ));
     *next_plant = next;
     Ok(())
 }
 
-fn validate_body(body: &Body) -> Result<()> {
+fn validate_body(body: &Body, parameters: Parameters) -> Result<()> {
     // Negative energy is legitimate between upkeep and the next cull.
     ensure!(body.energy.is_finite(), "non-finite animal energy");
     ensure!(
-        body.position.is_finite() && body.position.abs().cmple(HALF_SIZE).all(),
+        body.position.is_finite()
+            && body
+                .position
+                .abs()
+                .cmple(parameters.world.half_size())
+                .all(),
         "invalid animal position"
+    );
+    ensure!(
+        body.radius_scale == parameters.body.radius_scale && body.radius().is_finite(),
+        "invalid animal radius"
     );
     Ok(())
 }
 
-fn validate_plants(plants: &[Plant], target: usize, next_plant: u64) -> Result<()> {
+fn validate_plants(
+    plants: &[Plant],
+    target: usize,
+    next_plant: u64,
+    parameters: Parameters,
+) -> Result<()> {
     ensure!(plants.len() == target, "plant count differs from target");
     let mut ids = BTreeSet::new();
     for plant in plants {
@@ -227,12 +237,21 @@ fn validate_plants(plants: &[Plant], target: usize, next_plant: u64) -> Result<(
             "invalid or duplicate plant ID"
         );
         ensure!(
-            (0.0..=RIPE_ENERGY).contains(&plant.energy),
+            (0.0..=parameters.plant.max_energy).contains(&plant.energy),
             "invalid plant energy"
         );
         ensure!(
-            plant.position.is_finite() && plant.position.abs().cmple(HALF_SIZE).all(),
+            plant.position.is_finite()
+                && plant
+                    .position
+                    .abs()
+                    .cmple(parameters.world.half_size())
+                    .all(),
             "invalid plant position"
+        );
+        ensure!(
+            plant.radius_scale == parameters.plant.radius_scale && plant.radius().is_finite(),
+            "invalid plant radius"
         );
     }
     Ok(())
@@ -247,6 +266,7 @@ pub struct Ecosystem<
     G = RnnGenome,
     P = WeightMutation,
     MC = <M as Mind<GeneticContext>>::Config,
+    IC = <G as RandomInit<GeneticContext>>::Config,
 > {
     rng: Xoshiro256PlusPlus,
     context: GeneticContext,
@@ -258,6 +278,8 @@ pub struct Ecosystem<
     minimum_population: usize,
     immigrant_genome: Option<G>,
     mutation: P,
+    initialization: IC,
+    parameters: Parameters,
     #[serde(skip)]
     metrics: metrics::Cache,
     #[serde(skip)]
@@ -266,11 +288,13 @@ pub struct Ecosystem<
 
 impl Ecosystem {
     pub fn new(config: Config, seed: u64) -> Result<Self> {
-        Self::with_genetics(config, seed, None, WeightMutation::default())
+        config.genetics.initialization.validate()?;
+        config.genetics.mutation.validate()?;
+        Self::with_genetics(config, seed, None)
     }
 }
 
-impl<M, G, P, MC> Ecosystem<M, G, P, MC> {
+impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
     pub fn empty(
         plant_target: usize,
         minimum_population: usize,
@@ -278,7 +302,10 @@ impl<M, G, P, MC> Ecosystem<M, G, P, MC> {
         genetic_seed: u64,
         immigrant_genome: Option<G>,
         mutation: P,
-    ) -> Self {
+    ) -> Self
+    where
+        IC: Default,
+    {
         Self {
             rng: Xoshiro256PlusPlus::seed_from_u64(world_seed),
             context: Cpu {
@@ -292,9 +319,15 @@ impl<M, G, P, MC> Ecosystem<M, G, P, MC> {
             minimum_population,
             immigrant_genome,
             mutation,
+            initialization: IC::default(),
+            parameters: Parameters::default(),
             metrics: Default::default(),
             mind_config: None,
         }
+    }
+
+    pub fn world_config(&self) -> WorldConfig {
+        self.parameters.world
     }
 
     pub fn animals(&self) -> &BTreeMap<AnimalId, Animal<Body, M>> {
@@ -313,28 +346,29 @@ impl<M, G, P, MC> Ecosystem<M, G, P, MC> {
         self.minimum_population = minimum;
     }
 
-    /// Fill an empty plant layout with ripe food, after initial animal admission.
-    pub fn seed_plants(&mut self, position: Option<DVec2>) -> Result<()> {
+    /// Fill an empty plant layout using its configured initial admission settings.
+    pub fn seed_plants(&mut self) -> Result<()> {
         ensure!(self.plants.is_empty(), "plants are already initialized");
-        if let Some(position) = position {
-            ensure!(
-                position.is_finite() && position.abs().cmple(HALF_SIZE).all(),
-                "invalid plant position"
-            );
-        }
         for _ in 0..self.plant_target {
-            let position = position.unwrap_or_else(|| self.random_position());
-            self.add_plant(position, RIPE_ENERGY)?;
+            let position = self
+                .parameters
+                .plant
+                .initial_position
+                .position()
+                .unwrap_or_else(|| random_position(&mut self.rng, self.parameters.world));
+            self.add_plant(position, self.parameters.plant.initial_energy)?;
         }
         Ok(())
     }
 
-    fn random_position(&mut self) -> DVec2 {
-        random_position(&mut self.rng)
-    }
-
     fn add_plant(&mut self, position: DVec2, energy: f64) -> Result<()> {
-        add_plant(&mut self.plants, &mut self.next_plant, position, energy)?;
+        add_plant(
+            &mut self.plants,
+            &mut self.next_plant,
+            position,
+            energy,
+            self.parameters.plant.radius_scale,
+        )?;
         self.plants
             .last_mut()
             .expect("new plant exists")
@@ -346,9 +380,10 @@ impl<M, G, P, MC> Ecosystem<M, G, P, MC> {
     fn sense(&self, position: DVec2) -> FoodObservation {
         let mut field = FoodObservation::default();
         for plant in &self.plants {
-            let displacement = (plant.position - position) * (0.5 / HALF_SIZE.y);
-            let distance = displacement.length() + 0.01;
-            let mass = plant.energy / RIPE_ENERGY;
+            let displacement = (plant.position - position)
+                * (self.parameters.sensing.distance_scale / self.parameters.world.half_size().y);
+            let distance = displacement.length() + self.parameters.sensing.softening;
+            let mass = plant.energy / self.parameters.plant.max_energy;
             field.strength += mass / distance;
             field.gradient += mass * displacement / (distance * distance * distance);
         }
@@ -356,7 +391,7 @@ impl<M, G, P, MC> Ecosystem<M, G, P, MC> {
             field.strength /= self.plants.len() as f64;
             field.gradient /= self.plants.len() as f64;
         }
-        field.gradient = if field.gradient.length() > 0.01 {
+        field.gradient = if field.gradient.length() > self.parameters.sensing.gradient_dead_zone {
             field.gradient.normalize()
         } else {
             DVec2::ZERO
@@ -370,13 +405,13 @@ where
     M: Mind<GeneticContext, Input = FoodObservation, Output = MoveAction> + AsRef<G> + TryFrom<G>,
     M::Error: Into<anyhow::Error>,
     G: RandomInit<GeneticContext> + Mutate<GeneticContext, P>,
-    P: Clone,
+    P: Clone + PartialEq + Default,
+    G::Config: PartialEq,
 {
     pub fn with_genetics(
-        config: Config<M::Config>,
+        config: Config<M::Config, G::Config, P>,
         seed: u64,
         immigrant_genome: Option<G>,
-        mutation: P,
     ) -> Result<Self> {
         config.validate()?;
         let mut seeds = SplitMix64::seed_from_u64(seed);
@@ -388,29 +423,25 @@ where
             world_seed,
             genetic_seed,
             immigrant_genome,
-            mutation,
+            config.genetics.mutation.clone(),
         );
+        world.parameters = config.parameters();
+        world.initialization = config.genetics.initialization.clone();
         world.configure(&config)?;
-        world.admit(config.initial_animals, config.admission())?;
-        world.seed_plants(config.initial_plant_position.position())?;
+        world.admit(config.initial_animals)?;
+        world.seed_plants()?;
         world.validate()?;
         Ok(world)
     }
 
-    /// Create complete animals through the same path at startup and during a run.
-    pub fn admit(&mut self, count: usize, admission: Admission) -> Result<Vec<AnimalId>> {
-        ensure!(admission.energy.is_finite(), "non-finite admission energy");
-        if let Some(position) = admission.position {
-            ensure!(
-                position.is_finite() && position.abs().cmple(HALF_SIZE).all(),
-                "invalid admission position"
-            );
-        }
+    /// All arrivals use the same persisted admission settings and construction path.
+    pub fn admit(&mut self, count: usize) -> Result<Vec<AnimalId>> {
         let mut arrivals = Vec::with_capacity(count);
         for _ in 0..count {
-            let animal = Self::immigrant(
+            let animal = Self::make_immigrant(
                 self.immigrant_genome.as_ref(),
-                admission,
+                self.parameters,
+                &self.initialization,
                 &mut self.rng,
                 &mut self.context,
                 &self.metrics,
@@ -424,19 +455,44 @@ where
     }
 
     fn immigrant(
+        &self,
+        rng: &mut Xoshiro256PlusPlus,
+        context: &mut GeneticContext,
+    ) -> Result<Animal<Body, M>> {
+        Self::make_immigrant(
+            self.immigrant_genome.as_ref(),
+            self.parameters,
+            &self.initialization,
+            rng,
+            context,
+            &self.metrics,
+            self.mind_config.as_ref(),
+        )
+    }
+
+    fn make_immigrant(
         template: Option<&G>,
-        admission: Admission,
+        parameters: Parameters,
+        initialization: &G::Config,
         rng: &mut Xoshiro256PlusPlus,
         context: &mut GeneticContext,
         metrics: &metrics::Cache,
         mind_config: Option<&M::Config>,
     ) -> Result<Animal<Body, M>> {
-        let position = admission.position.unwrap_or_else(|| random_position(rng));
+        let position = parameters
+            .immigration
+            .position
+            .position()
+            .unwrap_or_else(|| random_position(rng, parameters.world));
         let genome = match template {
             Some(template) => template.clone(),
-            None => G::random(context)?,
+            None => G::random(initialization, context)?,
         };
-        let mut body = Body::new(position, admission.energy);
+        let mut body = Body::with_radius_scale(
+            position,
+            parameters.immigration.energy,
+            parameters.body.radius_scale,
+        );
         body.metrics = metrics::BodyCache::new(metrics.body_config, metrics.animal_config);
         Ok(Animal {
             body,
@@ -460,14 +516,23 @@ where
     M: Mind<GeneticContext, Input = FoodObservation, Output = MoveAction> + AsRef<G> + TryFrom<G>,
     M::Error: Into<anyhow::Error>,
     G: RandomInit<GeneticContext> + Mutate<GeneticContext, P>,
-    P: Clone,
+    P: Clone + PartialEq + Default,
+    G::Config: PartialEq,
 {
-    type Config = Config<M::Config>;
+    type Config = Config<M::Config, G::Config, P>;
     type Report = TickReport;
     type Update = EcosystemUpdate<M, M::Update>;
 
     fn configure(&mut self, config: &Self::Config) -> Result<()> {
         config.validate()?;
+        ensure!(
+            self.parameters == config.parameters()
+                && self.initialization == config.genetics.initialization
+                && self.mutation == config.genetics.mutation
+                && self.plant_target == config.plants
+                && self.minimum_population == config.minimum_population,
+            "model parameters differ from the stored ecosystem"
+        );
         for animal in self.animals.values_mut() {
             animal
                 .mind
@@ -494,6 +559,7 @@ where
     }
 
     fn validate(&self) -> Result<()> {
+        self.parameters.validate()?;
         ensure!(self.rng.state() != [0; 32], "world RNG state is all zero");
         ensure!(
             self.context.rng.state() != [0; 32],
@@ -505,7 +571,7 @@ where
         );
         for (id, animal) in &self.animals {
             ensure!(id.0 > 0 && id.0 < self.next_animal, "invalid animal ID");
-            validate_body(&animal.body)?;
+            validate_body(&animal.body, self.parameters)?;
             animal.mind.validate()?;
         }
         if let Some(template) = &self.immigrant_genome {
@@ -513,7 +579,12 @@ where
             let mind = M::try_from(template.clone()).map_err(Into::into)?;
             mind.validate()?;
         }
-        validate_plants(&self.plants, self.plant_target, self.next_plant)
+        validate_plants(
+            &self.plants,
+            self.plant_target,
+            self.next_plant,
+            self.parameters,
+        )
     }
 }
 
@@ -522,15 +593,22 @@ mod tests;
 
 impl PartialEq for Body {
     fn eq(&self, other: &Self) -> bool {
-        self.position == other.position && self.energy == other.energy
+        self.position == other.position
+            && self.energy == other.energy
+            && self.radius_scale == other.radius_scale
     }
 }
 impl PartialEq for Plant {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id && self.position == other.position && self.energy == other.energy
+        self.id == other.id
+            && self.position == other.position
+            && self.energy == other.energy
+            && self.radius_scale == other.radius_scale
     }
 }
-impl<M: PartialEq, G: PartialEq, P: PartialEq, MC> PartialEq for Ecosystem<M, G, P, MC> {
+impl<M: PartialEq, G: PartialEq, P: PartialEq, MC, IC: PartialEq> PartialEq
+    for Ecosystem<M, G, P, MC, IC>
+{
     fn eq(&self, other: &Self) -> bool {
         self.rng == other.rng
             && self.context == other.context
@@ -542,5 +620,7 @@ impl<M: PartialEq, G: PartialEq, P: PartialEq, MC> PartialEq for Ecosystem<M, G,
             && self.minimum_population == other.minimum_population
             && self.immigrant_genome == other.immigrant_genome
             && self.mutation == other.mutation
+            && self.initialization == other.initialization
+            && self.parameters == other.parameters
     }
 }

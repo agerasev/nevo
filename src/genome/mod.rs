@@ -6,9 +6,11 @@ use crate::context::Context;
 
 pub trait Genome<C: Context + ?Sized>: Clone + Sized {}
 
-/// Construct random state using the supplied context, independently of inheritance.
+/// Construct random state from typed settings and a context, independently of inheritance.
 pub trait RandomInit<C: Context + ?Sized>: Sized {
-    fn random(cx: &mut C) -> Result<Self>;
+    type Config: Default + Clone + std::fmt::Debug;
+
+    fn random(config: &Self::Config, cx: &mut C) -> Result<Self>;
 }
 
 pub trait Mutate<C: Context + ?Sized, P: Clone>: Genome<C> {
