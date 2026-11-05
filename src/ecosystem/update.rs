@@ -195,6 +195,22 @@ where
             events.push(Event::Immigrant { id });
         }
 
+        // Pay for controlled travel before checking reproduction or splitting energy.
+        // Arrivals have not acted; birth offsets and growth clamping are not travel.
+        if self.parameters.body.movement_cost_per_distance > 0.0 {
+            for decision in &decisions {
+                let distance = decision.position_before.distance(decision.position_after);
+                let cost = distance * self.parameters.body.movement_cost_per_distance;
+                ensure!(cost.is_finite(), "non-finite movement energy cost");
+                update
+                    .animals
+                    .get_mut(&decision.id)
+                    .expect("acting animal exists")
+                    .body
+                    .energy -= cost;
+            }
+        }
+
         let mut parents: VecDeque<_> = update
             .animals
             .iter()

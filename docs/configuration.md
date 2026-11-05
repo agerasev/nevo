@@ -64,6 +64,7 @@ includes these defaults, so it also serves as a complete editable configuration.
 | `immigration.energy` | `100` | Energy for every admitted animal. |
 | `immigration.position` | `"random"` | Placement for every admitted animal. |
 | `animal.body.upkeep` | `2` | Energy spent per animal per tick. |
+| `animal.body.movement_cost_per_distance` | `0` | Energy per unit of controlled distance after boundary clamping. |
 | `animal.body.max_speed`, `animal.body.movement_time_step` | `100`, `0.1` | Movement scale; maximum displacement is their product. |
 | `animal.body.movement_dead_zone` | `0.01` | Direction magnitudes at or below this do not move. |
 | `animal.body.radius_scale` | `0.5` | Radius coefficient in `scale × sqrt(max(energy, 0))`. |
@@ -89,8 +90,21 @@ An explicit `"random"` overrides a fixed position from an earlier file. Fixed
 positions must be finite and inside the configured arena; bodies remain clamped
 to its bounds. Startup admits animals before seeding plants, preserving draw order.
 
-`movement_time_step` scales movement only: upkeep and plant growth remain per-tick
-quantities. `tick_hz` changes wall-clock pacing only. Boundary clamping, the
+The [movement-cost preset](../configs/movement-cost.toml) sets upkeep to `0.2`
+and movement cost to `0.18` per distance unit. At the default maximum displacement
+of 10, an acting animal spends between 0.2 and 2 energy per tick. Blocked movement
+costs no movement energy; birth offsets and growth clamping are excluded. Movement
+fees are deducted after feeding and before reproduction; all present animals pay
+upkeep at the end of the tick. This is an experimental setting, with reduced jitter
+still an untested hypothesis.
+
+```sh
+cargo run --locked -- --config configs/baseline.toml --config configs/movement-cost.toml --config configs/metrics.toml --config configs/viewer.toml
+```
+
+`movement_time_step` scales displacement and hence distance-based movement cost:
+upkeep and plant growth remain per-tick quantities. `tick_hz` changes wall-clock
+pacing only. Boundary clamping, the
 food-field equations, hidden `tanh`, and observation/action meanings remain model
 rules. Hidden width is fixed within a run; evolution changes weights and biases.
 

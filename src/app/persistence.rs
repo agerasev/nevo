@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 
 use super::config::Config;
 
-const FORMAT_VERSION: u32 = 8;
-pub(super) const WORLD_MODEL: &str = "foraging-sense-first-v2";
+const FORMAT_VERSION: u32 = 9;
+pub(super) const WORLD_MODEL: &str = "foraging-sense-first-v3";
 pub(super) const AGENT_MODEL: &str = "animal-rnn-3-n-3-v2";
 
 #[derive(Serialize, Deserialize)]

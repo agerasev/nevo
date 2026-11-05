@@ -62,6 +62,8 @@ World dimensions, body and plant dynamics, reproduction, feeding, sensing, and
 genetic initialization/mutation are configurable. Initial and later immigrants
 use the same energy, placement, and genome initialization settings. The initial
 population and immigration floor only decide how many animals to admit.
+Layer [movement-cost.toml](configs/movement-cost.toml) to try lower upkeep plus a
+fee for distance traveled; see the [cost rules](docs/configuration.md).
 
 The viewer runs independently of simulation speed. Its preset enables VSync without
 slowing simulation; there is no additional rendering timer.
