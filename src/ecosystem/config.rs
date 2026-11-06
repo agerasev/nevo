@@ -100,6 +100,7 @@ pub struct Config<
 > {
     /// Size of the first batch of immigrants.
     pub initial_animals: usize,
+    /// Initial count; also the maintained count when replenishment is omitted.
     pub plants: usize,
     /// Population floor maintained by later immigration; zero disables it.
     pub minimum_population: usize,
@@ -135,6 +136,14 @@ impl<MC, IC, P> Config<MC, IC, P> {
             !self.metrics.enabled || self.metrics.window_ticks > 0,
             "metrics window_ticks must be positive"
         );
+        if let Some(replenishment) = self.plant.replenishment
+            && self.plant.initial_position == Placement::Random
+        {
+            ensure!(
+                self.plants <= replenishment.max_initial_attempts,
+                "initial plant count exceeds max_initial_attempts"
+            );
+        }
         self.parameters().validate()
     }
 
@@ -358,13 +367,20 @@ impl Parameters {
         self.plant
             .patches
             .validate(self.world, self.plant.max_radius(), self.plant.growth)?;
-        if self.plant.patches.count > 0 {
+        if let Some(replenishment) = self.plant.replenishment {
+            replenishment.validate(self.world, self.plant.max_radius(), self.plant.patches)?;
+            ensure!(
+                self.plant.replacement_position == Placement::Random,
+                "density-based replenishment requires random replacement_position"
+            );
+        }
+        if self.plant.patches.count > 0 || self.plant.replenishment.is_some() {
             let limit = self.world.half_size() - DVec2::splat(self.plant.max_radius());
             for placement in [self.plant.initial_position, self.plant.replacement_position] {
                 if let Some(position) = placement.position() {
                     ensure!(
                         position.abs().cmple(limit).all(),
-                        "fixed plant positions must leave room for mature plants when patches are enabled"
+                        "fixed plant positions must leave room for mature plants when patches or replenishment are enabled"
                     );
                 }
             }
@@ -474,6 +490,9 @@ pub struct PlantConfig {
     pub initial_position: Placement,
     pub replacement_position: Placement,
     pub patches: super::patches::Config,
+    /// Omit to retain the baseline's immediate fixed-count replacement.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replenishment: Option<super::replenishment::Config>,
 }
 impl Default for PlantConfig {
     fn default() -> Self {
@@ -487,6 +506,7 @@ impl Default for PlantConfig {
             initial_position: parameters.initial_position,
             replacement_position: parameters.replacement_position,
             patches: parameters.patches,
+            replenishment: parameters.replenishment,
         }
     }
 }
@@ -501,6 +521,7 @@ impl PlantConfig {
             initial_position: self.initial_position,
             replacement_position: self.replacement_position,
             patches: self.patches,
+            replenishment: self.replenishment,
         }
     }
 }
@@ -515,6 +536,7 @@ pub(super) struct PlantParameters {
     pub initial_position: Placement,
     pub replacement_position: Placement,
     pub patches: super::patches::Config,
+    pub replenishment: Option<super::replenishment::Config>,
 }
 impl Default for PlantParameters {
     fn default() -> Self {
@@ -527,6 +549,7 @@ impl Default for PlantParameters {
             initial_position: Placement::Random,
             replacement_position: Placement::Random,
             patches: super::patches::Config::default(),
+            replenishment: None,
         }
     }
 }

@@ -141,20 +141,46 @@ where
                 events.push(Event::Death { id });
             }
         }
-        while update.plants.len() < self.plant_target {
-            let position = plant_position(
-                self.parameters.plant.replacement_position,
-                &self.patches,
-                self.parameters,
-                &mut update.rng,
+        if let Some(config) = self.parameters.plant.replenishment {
+            let sampler = replenishment::Sampler::new(
+                config,
+                self.parameters.world,
+                self.parameters.plant.max_radius(),
+                self.parameters.plant.patches,
             )?;
-            add_plant(
-                &mut update.plants,
-                &mut update.next_plant,
-                position,
-                self.parameters.plant.replacement_energy,
-                self.parameters.plant.radius_scale,
-            )?;
+            let attempts = sampler.attempts(&mut update.rng);
+            let before = update.plants.len();
+            for _ in 0..attempts {
+                if let Some(position) =
+                    sampler.propose(&update.plants, &self.patches, &mut update.rng)
+                {
+                    add_plant(
+                        &mut update.plants,
+                        &mut update.next_plant,
+                        position,
+                        self.parameters.plant.replacement_energy,
+                        self.parameters.plant.radius_scale,
+                    )?;
+                }
+            }
+            update
+                .metrics
+                .observe_replenishment(attempts, update.plants.len() - before);
+        } else {
+            while update.plants.len() < self.plant_target {
+                let position = plant_position(
+                    self.parameters.plant.replacement_position,
+                    self.parameters,
+                    &mut update.rng,
+                )?;
+                add_plant(
+                    &mut update.plants,
+                    &mut update.next_plant,
+                    position,
+                    self.parameters.plant.replacement_energy,
+                    self.parameters.plant.radius_scale,
+                )?;
+            }
         }
         let count = self.minimum_population.saturating_sub(update.animals.len());
         for _ in 0..count {

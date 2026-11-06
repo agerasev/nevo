@@ -1,7 +1,14 @@
-# Layer on large-world.toml. Cluster plants while retaining uniform growth rates.
+# Layer on large-world.toml. Local capacity and recovery, with uniform growth.
 [ecosystem.plant.patches]
 count = 6
 spread = 120.0
-density_fraction = 0.9
 growth_floor = 1.0
 growth_peak = 1.0
+
+[ecosystem.plant.replenishment]
+density_floor = 0.0001
+density_peak = 0.006
+crowding_radius = 40.0
+recovery_rate = 0.002
+max_attempts_per_tick = 128
+max_initial_attempts = 100000

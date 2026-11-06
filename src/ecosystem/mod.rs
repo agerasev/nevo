@@ -3,6 +3,7 @@
 mod config;
 mod metrics;
 mod patches;
+mod replenishment;
 mod update;
 
 #[cfg(feature = "viewer")]
@@ -14,6 +15,7 @@ pub use config::{
 };
 pub use metrics::{Summary, Window};
 pub use patches::Config as PatchConfig;
+pub use replenishment::Config as ReplenishmentConfig;
 pub use update::EcosystemUpdate;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -170,18 +172,16 @@ fn random_position<R: Rng + ?Sized>(rng: &mut R, world: WorldConfig) -> DVec2 {
 
 fn plant_position(
     placement: Placement,
-    patches: &patches::Landscape,
     parameters: Parameters,
     rng: &mut Xoshiro256PlusPlus,
 ) -> Result<DVec2> {
     match placement.position() {
         Some(position) => Ok(position),
-        None => patches.position(
-            parameters.plant.patches,
-            parameters.world,
-            parameters.plant.max_radius(),
-            rng,
-        ),
+        None if parameters.plant.patches.count > 0 || parameters.plant.replenishment.is_some() => {
+            let limit = patches::inset(parameters.world, parameters.plant.max_radius())?;
+            Ok(patches::uniform_position(rng, limit))
+        }
+        None => Ok(random_position(rng, parameters.world)),
     }
 }
 
@@ -239,12 +239,15 @@ fn validate_plants(
     next_plant: u64,
     parameters: Parameters,
 ) -> Result<()> {
-    ensure!(plants.len() == target, "plant count differs from target");
-    let position_limit = if parameters.plant.patches.count > 0 {
-        parameters.world.half_size() - DVec2::splat(parameters.plant.max_radius())
-    } else {
-        parameters.world.half_size()
-    };
+    if parameters.plant.replenishment.is_none() {
+        ensure!(plants.len() == target, "plant count differs from target");
+    }
+    let position_limit =
+        if parameters.plant.patches.count > 0 || parameters.plant.replenishment.is_some() {
+            parameters.world.half_size() - DVec2::splat(parameters.plant.max_radius())
+        } else {
+            parameters.world.half_size()
+        };
     let mut ids = BTreeSet::new();
     for plant in plants {
         ensure!(
@@ -351,10 +354,36 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
     /// Fill an empty plant layout using its configured initial admission settings.
     fn seed_plants(&mut self) -> Result<()> {
         ensure!(self.plants.is_empty(), "plants are already initialized");
+        if let Some(config) = self.parameters.plant.replenishment
+            && self.parameters.plant.initial_position == Placement::Random
+        {
+            let sampler = replenishment::Sampler::new(
+                config,
+                self.parameters.world,
+                self.parameters.plant.max_radius(),
+                self.parameters.plant.patches,
+            )?;
+            for _ in 0..config.max_initial_attempts {
+                if self.plants.len() == self.plant_target {
+                    break;
+                }
+                if let Some(position) = sampler.propose(&self.plants, &self.patches, &mut self.rng)
+                {
+                    self.add_plant(position, self.parameters.plant.initial_energy)?;
+                }
+            }
+            ensure!(
+                self.plants.len() == self.plant_target,
+                "could only seed {} of {} plants within max_initial_attempts={}; lower ecosystem.plants, increase capacity, or raise the initial attempt budget",
+                self.plants.len(),
+                self.plant_target,
+                config.max_initial_attempts
+            );
+            return Ok(());
+        }
         for _ in 0..self.plant_target {
             let position = plant_position(
                 self.parameters.plant.initial_position,
-                &self.patches,
                 self.parameters,
                 &mut self.rng,
             )?;

@@ -26,11 +26,15 @@ fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover()
     };
     config.plant.patches = crate::ecosystem::PatchConfig {
         count: 3,
-        density_fraction: 0.8,
         growth_floor: 0.25,
         growth_peak: 1.75,
         ..Default::default()
     };
+    config.plant.replenishment = Some(crate::ecosystem::ReplenishmentConfig {
+        density_floor: 0.0001,
+        density_peak: 0.001,
+        ..Default::default()
+    });
     let world: Ecosystem =
         Ecosystem::with_genetics(config.clone(), 23, Some(RnnGenome::default())).unwrap();
     let mut value = Value::serialized(&Universe::from_world(world).unwrap()).unwrap();

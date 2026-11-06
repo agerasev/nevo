@@ -7,9 +7,11 @@ movement; it does not by itself establish adaptation.
 | Metric | Interpretation |
 | --- | --- |
 | `population` | Animals at the window endpoint. |
+| `plant_count` | Plants at the window endpoint, including zero-energy seedlings. |
 | `mean_animal_energy`, `mean_plant_energy` | Energy means at that endpoint. |
 | `food_per_tick` | Assimilated energy per observed tick. |
-| `plant_growth_per_tick` | Plant energy added by growth per observed tick, after capping; excludes replacement energy. |
+| `plant_growth_per_tick` | Plant energy added by growth per observed tick, after capping; excludes admission energy. |
+| `plant_recruitment_attempts_per_tick`, `plant_recruits_per_tick` | Proposals (including rejections) and accepted seedlings per observed tick; present only with density-based replenishment. |
 | `births_per_tick`, `deaths_per_tick`, `immigrants_per_tick` | Events per observed tick. |
 | `distance_per_animal_tick` | Controlled travel per active animal-tick. |
 

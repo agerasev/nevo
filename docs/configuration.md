@@ -27,22 +27,35 @@ Sources still contribute at all distances; finite-range sensing is a later miles
 This changes the world model, so earlier checkpoints require their original build.
 
 Layer [resource patches](../configs/resource-patches.toml) on the larger world to
-cluster plants around fixed, seeded Gaussian patches. Both initial and replacement
-plants sample the same landscape; harvesting can still change the standing
-distribution. Patch centers persist in checkpoints, independently of animal
-initialization. Explicit plant positions override random placement.
+give fixed, seeded Gaussian patches a local plant capacity. Patch centers persist
+in checkpoints, independently of animal initialization. The optional
+`plant.replenishment` table enables density-based replenishment; omitting it keeps
+the baseline's immediate replacement to a fixed plant count.
 
-`plant.patches.density_fraction` mixes clustered and uniform placement. The optional
-[patch-growth overlay](../configs/patch-growth.toml) independently varies growth
-between a floor in poor areas and a peak at patch centers. Overlapping patches
-blend smoothly without exceeding the peak. See the [patch contract](../src/ecosystem/patches/mod.rs)
-for settings and sampling bounds. Plants need room to mature inside the arena;
-Gaussian samples are truncated, not clamped onto its edges.
+Replenishment samples fresh continuous positions according to unused capacity.
+Crowding sums a Gaussian contribution from every plant, including zero-energy
+seedlings, with correction for arena boundaries. Its radius is independent of
+patch spread. Plants retain room to mature inside the arena, and there is no grid
+or fixed planting site. Capacity is a soft local limit: adding one plant raises
+density throughout its neighborhood and can cause a local overshoot. Total plant
+count varies with consumption and recovery.
 
-The density-only preset keeps the original per-plant growth rate. When varying
-growth, compare [measured plant production](metrics.md) as well as collected food:
-clustering plants in fertile regions can increase supply even with unchanged
-plant count. Patches are disabled by default. For a bounded patchy-world run:
+The [replenishment contract](../src/ecosystem/replenishment/mod.rs) defines density
+units, recovery, and sampling limits. Importance sampling concentrates proposals
+near patches when useful, with acceptance adjusted to the proposal distribution.
+Successful and rejected proposals, including draws outside the usable arena,
+consume the tick budget; a full landscape need not admit any seedlings. Settings
+that exceed the configured attempt limit are rejected rather than silently
+slowing recovery. Initial planting uses the same crowding rule and must establish
+the requested `ecosystem.plants` within its separate attempt limit or fail clearly.
+Explicit initial positions override that sampling; fixed replacement positions
+are incompatible with density-based replenishment.
+
+The [patch-growth overlay](../configs/patch-growth.toml) independently varies
+individual plant growth across the same landscape. The resource-patches preset
+keeps per-plant growth uniform, but plant count and food production can still
+change. Compare [measured plant production](metrics.md) as well as collected food.
+For a bounded patchy-world run:
 
 ```sh
 cargo run --locked -- --config configs/large-world.toml --config configs/resource-patches.toml --seed 1

@@ -301,66 +301,145 @@ fn patch_layout_is_seeded_independently_of_animal_admission() {
 }
 
 #[test]
-fn patched_world_rejects_fixed_or_stored_plants_without_room_to_mature() {
+fn spatial_resources_reject_fixed_or_stored_plants_without_room_to_mature() {
+    for replenishment in [None, Some(ReplenishmentConfig::default())] {
+        let mut config = Config {
+            initial_animals: 0,
+            plants: 1,
+            minimum_population: 0,
+            ..Config::default()
+        };
+        config.plant.patches.count = usize::from(replenishment.is_none());
+        config.plant.replenishment = replenishment;
+        let edge = config.world.half_size();
+        config.plant.initial_position = Placement::Fixed(edge);
+        assert!(config.validate().is_err());
+        config.plant.initial_position = Placement::Random;
+        let mut world = Ecosystem::new(config, 3).unwrap();
+        world.plants[0].position = edge;
+        assert!(world.validate().is_err());
+    }
+}
+
+#[test]
+fn initial_replenishment_reports_exhaustion_when_capacity_cannot_fit_the_count() {
     let mut config = Config {
         initial_animals: 0,
+        plants: 2,
+        minimum_population: 0,
+        world: WorldConfig {
+            width: 40.0,
+            height: 40.0,
+        },
+        ..Config::default()
+    };
+    // The first plant is accepted, then its broad crowding kernel exceeds the
+    // low capacity throughout this small arena.
+    config.plant.replenishment = Some(ReplenishmentConfig {
+        density_floor: 0.0001,
+        density_peak: 0.0001,
+        recovery_rate: 0.0,
+        max_initial_attempts: 3,
+        ..ReplenishmentConfig::default()
+    });
+    config.validate().unwrap();
+    let error = Ecosystem::new(config, 3).unwrap_err().to_string();
+    assert!(error.contains("could only seed 1 of 2 plants"), "{error}");
+    assert!(error.contains("max_initial_attempts=3"), "{error}");
+}
+
+#[test]
+fn zero_recovery_leaves_harvested_plants_absent_instead_of_topping_up() {
+    let mut config = Config {
+        initial_animals: 1,
         plants: 1,
         minimum_population: 0,
         ..Config::default()
     };
-    config.plant.patches.count = 1;
-    let edge = config.world.half_size();
-    config.plant.initial_position = Placement::Fixed(edge);
-    assert!(config.validate().is_err());
-    config.plant.initial_position = Placement::Random;
-    let mut world = Ecosystem::new(config, 3).unwrap();
-    world.plants[0].position = edge;
-    assert!(world.validate().is_err());
+    config.immigration.position = Placement::Fixed(DVec2::ZERO);
+    config.plant.initial_position = Placement::Fixed(DVec2::ZERO);
+    config.plant.replenishment = Some(ReplenishmentConfig {
+        recovery_rate: 0.0,
+        ..ReplenishmentConfig::default()
+    });
+    let mut world: Ecosystem =
+        Ecosystem::with_genetics(config, 3, Some(RnnGenome::default())).unwrap();
+    let report = world.advance(1).unwrap();
+    assert!(
+        report
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::Meal { .. }))
+    );
+    assert!(world.plants.is_empty());
+    world.advance(2).unwrap();
+    assert!(world.plants.is_empty());
+    world.validate().unwrap();
 }
 
 #[test]
-fn initial_and_replacement_plants_remain_in_the_same_patch() {
+fn replenishment_can_grow_an_empty_population_within_its_tick_attempt_budget() {
+    use crate::metrics::Metrics;
+
     let mut config = Config {
-        initial_animals: 1,
-        plants: 16,
+        initial_animals: 0,
+        plants: 0,
+        minimum_population: 0,
+        world: WorldConfig {
+            width: 100.0,
+            height: 100.0,
+        },
+        ..Config::default()
+    };
+    config.plant.replenishment = Some(ReplenishmentConfig {
+        density_floor: 0.000625,
+        density_peak: 0.000625,
+        recovery_rate: 1.0,
+        max_attempts_per_tick: 4,
+        ..ReplenishmentConfig::default()
+    });
+    let mut world = Ecosystem::new(config, 3).unwrap();
+    assert!(world.plants.is_empty());
+    assert_eq!(world.metrics().plant_recruitment_attempts_per_tick, None);
+    assert_eq!(world.metrics().plant_recruits_per_tick, None);
+    world.advance(1).unwrap();
+    assert!((1..=4).contains(&world.plants.len()));
+    let summary = world.metrics();
+    assert_eq!(summary.plant_count, Some(world.plants.len() as u64));
+    assert_eq!(summary.plant_recruitment_attempts_per_tick, Some(4.0));
+    assert_eq!(
+        summary.plant_recruits_per_tick,
+        Some(world.plants.len() as f64)
+    );
+    world.validate().unwrap();
+}
+
+#[test]
+fn replenishment_without_patches_keeps_plants_fixed_as_they_mature() {
+    let mut config = Config {
+        initial_animals: 0,
+        plants: 8,
         minimum_population: 0,
         ..Config::default()
     };
     config.plant.initial_energy = 0.0;
-    config.plant.growth = 0.0;
-    config.plant.patches = PatchConfig {
-        count: 1,
-        spread: 0.001,
-        density_fraction: 1.0,
-        ..PatchConfig::default()
-    };
-    let mut world: Ecosystem =
-        Ecosystem::with_genetics(config, 3, Some(RnnGenome::default())).unwrap();
-    let anchor = world.plants[0].position;
-    world.animals.get_mut(&id(1)).unwrap().body.position = anchor;
-    let landscape = world.patches.clone();
-    assert!(
-        world
-            .plants
-            .iter()
-            .all(|p| p.position.distance(anchor) < 0.1)
-    );
-    let report = world.advance(1).unwrap();
+    config.plant.growth = 1.0;
+    config.plant.replenishment = Some(ReplenishmentConfig {
+        recovery_rate: 0.0,
+        ..ReplenishmentConfig::default()
+    });
+    let mut world = Ecosystem::new(config, 3).unwrap();
+    let positions: Vec<_> = world.plants.iter().map(|plant| plant.position).collect();
+    world.advance(1).unwrap();
+    assert!(world.plants.iter().all(|plant| plant.energy == 1.0));
     assert_eq!(
-        report
-            .events
-            .iter()
-            .filter(|e| matches!(e, Event::Meal { .. }))
-            .count(),
-        16
-    );
-    assert!(
         world
             .plants
             .iter()
-            .all(|p| p.id > 16 && p.position.distance(anchor) < 0.1)
+            .map(|plant| plant.position)
+            .collect::<Vec<_>>(),
+        positions
     );
-    assert_eq!(world.patches, landscape);
 }
 
 #[test]
@@ -380,7 +459,6 @@ fn capped_growth_and_replacement_energy_balance_the_plant_stock() {
     config.plant.growth = 0.1;
     config.plant.patches = PatchConfig {
         count: 2,
-        density_fraction: 1.0,
         growth_floor: 2.0,
         growth_peak: 2.0,
         ..PatchConfig::default()
@@ -417,12 +495,13 @@ fn plants_grow_faster_near_patches_without_drifting_as_they_mature() {
     config.plant.patches = PatchConfig {
         count: 1,
         spread: 10.0,
-        density_fraction: 1.0,
         growth_floor: 0.1,
         growth_peak: 2.0,
     };
     let mut world = Ecosystem::new(config, 3).unwrap();
-    world.plants[1].position = -world.plants[0].position;
+    world.patches = serde_json::from_str(r#"{"centers": [[0.0, 0.0]]}"#).unwrap();
+    world.plants[0].position = DVec2::ZERO;
+    world.plants[1].position = DVec2::new(620.0, 0.0);
     let positions: Vec<_> = world.plants.iter().map(|plant| plant.position).collect();
     world.advance(1).unwrap();
     assert!(world.plants[0].energy > world.plants[1].energy);
@@ -1039,6 +1118,7 @@ fn metrics_are_pure_and_do_not_change_reports_or_checkpoint_bytes() {
     config.metrics.enabled = false;
     config.animal.body.movement_cost = 0.003;
     config.animal.body.movement_energy_power = 1.0;
+    config.plant.replenishment = Some(ReplenishmentConfig::default());
     let mut measured_config = config.clone();
     measured_config.metrics = MetricsConfig {
         enabled: true,

@@ -24,6 +24,8 @@ pub(super) struct Cache {
     immigrants: u64,
     food: f64,
     plant_growth: f64,
+    plant_recruitment_attempts: u64,
+    plant_recruits: u64,
     distance: f64,
 }
 
@@ -40,6 +42,8 @@ impl Default for Cache {
             immigrants: 0,
             food: 0.0,
             plant_growth: 0.0,
+            plant_recruitment_attempts: 0,
+            plant_recruits: 0,
             distance: 0.0,
         }
     }
@@ -83,6 +87,13 @@ impl Cache {
         }
     }
 
+    pub(super) fn observe_replenishment(&mut self, attempts: usize, recruits: usize) {
+        if self.window.is_some() {
+            self.plant_recruitment_attempts += attempts as u64;
+            self.plant_recruits += recruits as u64;
+        }
+    }
+
     pub fn observe(&mut self, report: &TickReport) {
         let Some(window) = &mut self.window else {
             return;
@@ -111,6 +122,8 @@ pub struct Summary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub population: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub plant_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mean_animal_energy: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mean_plant_energy: Option<f64>,
@@ -118,6 +131,10 @@ pub struct Summary {
     pub food_per_tick: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plant_growth_per_tick: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plant_recruitment_attempts_per_tick: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plant_recruits_per_tick: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub births_per_tick: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,6 +165,7 @@ impl<M, G, P, MC, IC> Metrics for Ecosystem<M, G, P, MC, IC> {
         let cache = &self.metrics;
         summary.window = cache.window;
         summary.population = Some(self.animals.len() as u64);
+        summary.plant_count = Some(self.plants.len() as u64);
         summary.mean_animal_energy = (!self.animals.is_empty()).then(|| {
             self.animals.values().map(|a| a.body.energy).sum::<f64>() / self.animals.len() as f64
         });
@@ -157,6 +175,11 @@ impl<M, G, P, MC, IC> Metrics for Ecosystem<M, G, P, MC, IC> {
             let ticks = window.samples as f64;
             summary.food_per_tick = Some(cache.food / ticks);
             summary.plant_growth_per_tick = Some(cache.plant_growth / ticks);
+            if self.parameters.plant.replenishment.is_some() {
+                summary.plant_recruitment_attempts_per_tick =
+                    Some(cache.plant_recruitment_attempts as f64 / ticks);
+                summary.plant_recruits_per_tick = Some(cache.plant_recruits as f64 / ticks);
+            }
             summary.births_per_tick = Some(cache.births as f64 / ticks);
             summary.deaths_per_tick = Some(cache.deaths as f64 / ticks);
             summary.immigrants_per_tick = Some(cache.immigrants as f64 / ticks);
