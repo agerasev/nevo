@@ -28,7 +28,7 @@ pub use update::EcosystemUpdate;
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, ensure};
-use glam::DVec2;
+use glam::Vec2;
 use rand::{Rng, RngExt, SeedableRng};
 use rand_xoshiro::{SplitMix64, Xoshiro256PlusPlus};
 
@@ -62,46 +62,46 @@ impl AnimalId {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AnimalObservation {
-    pub strength: f64,
+    pub strength: f32,
     /// Food gradient in body coordinates: x forward, y left.
-    pub gradient: DVec2,
+    pub gradient: Vec2,
     /// Body-relative velocity multiplied by sensing.velocity_scale.
-    pub velocity: DVec2,
+    pub velocity: Vec2,
     /// Angular velocity multiplied by sensing.angular_velocity_scale.
-    pub angular_velocity: f64,
+    pub angular_velocity: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Plant {
     pub id: u64,
-    pub position: DVec2,
-    pub energy: f64,
-    pub velocity: DVec2,
-    pub angular_velocity: f64,
-    radius_scale: f64,
+    pub position: Vec2,
+    pub energy: f32,
+    pub velocity: Vec2,
+    pub angular_velocity: f32,
+    radius_scale: f32,
 }
 impl Plant {
-    pub fn new(id: u64, position: DVec2, energy: f64) -> Self {
+    pub fn new(id: u64, position: Vec2, energy: f32) -> Self {
         Self::with_radius_scale(id, position, energy, PlantConfig::default().radius_scale)
     }
-    fn with_radius_scale(id: u64, position: DVec2, energy: f64, radius_scale: f64) -> Self {
+    fn with_radius_scale(id: u64, position: Vec2, energy: f32, radius_scale: f32) -> Self {
         Self {
             id,
             position,
             energy,
-            velocity: DVec2::ZERO,
+            velocity: Vec2::ZERO,
             angular_velocity: 0.0,
             radius_scale,
         }
     }
-    pub fn radius(&self) -> f64 {
+    pub fn radius(&self) -> f32 {
         radius(self.energy, self.radius_scale)
     }
-    pub fn mass(&self, mass_per_energy: f64) -> f64 {
+    pub fn mass(&self, mass_per_energy: f32) -> f32 {
         self.energy.max(0.0) * mass_per_energy
     }
-    pub fn inertia(&self, mass_per_energy: f64) -> f64 {
+    pub fn inertia(&self, mass_per_energy: f32) -> f32 {
         0.5 * self.mass(mass_per_energy) * self.radius().powi(2)
     }
 }
@@ -114,17 +114,17 @@ pub struct Animal<B, M> {
     pub mind: M,
 }
 
-fn radius(energy: f64, scale: f64) -> f64 {
+fn radius(energy: f32, scale: f32) -> f32 {
     scale * energy.max(0.0).sqrt()
 }
-fn clamp_position(position: DVec2, radius: f64, world: WorldConfig) -> DVec2 {
-    let limit = (world.half_size() - radius).max(DVec2::ZERO);
+fn clamp_position(position: Vec2, radius: f32, world: WorldConfig) -> Vec2 {
+    let limit = (world.half_size() - radius).max(Vec2::ZERO);
     position.clamp(-limit, limit)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Event {
-    Meal { id: AnimalId, plant: u64, gain: f64 },
+    Meal { id: AnimalId, plant: u64, gain: f32 },
     Death { id: AnimalId },
     Immigrant { id: AnimalId },
     Birth { parent: AnimalId, child: AnimalId },
@@ -136,16 +136,16 @@ pub struct Decision {
     pub observation: AnimalObservation,
     pub action: MotorAction,
     /// Energy when sensed, before feeding, splitting, and upkeep.
-    pub energy: f64,
-    pub position_before: DVec2,
+    pub energy: f32,
+    pub position_before: Vec2,
     /// Movement endpoint, before birth offsets and clamping after growth.
-    pub position_after: DVec2,
-    pub heading_before: f64,
-    pub heading_after: f64,
+    pub position_after: Vec2,
+    pub heading_before: f32,
+    pub heading_after: f32,
     /// Actual path length through motion substeps, excluding birth/growth shifts.
-    pub distance: f64,
+    pub distance: f32,
     /// Reserve energy charged for positive motor work and resistive losses.
-    pub movement_energy: f64,
+    pub movement_energy: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -160,7 +160,7 @@ fn plant_position(
     parameters: Parameters,
     obstacles: &[Obstacle],
     rng: &mut Xoshiro256PlusPlus,
-) -> Result<DVec2> {
+) -> Result<Vec2> {
     placement_position(
         placement,
         parameters.plant.max_radius(),
@@ -172,14 +172,14 @@ fn plant_position(
 
 fn placement_position(
     placement: Placement,
-    radius: f64,
+    radius: f32,
     parameters: Parameters,
     obstacles: &[Obstacle],
     rng: &mut Xoshiro256PlusPlus,
-) -> Result<DVec2> {
+) -> Result<Vec2> {
     let limit = parameters.world.half_size() - radius;
     ensure!(
-        limit.is_finite() && limit.cmpge(DVec2::ZERO).all(),
+        limit.is_finite() && limit.cmpge(Vec2::ZERO).all(),
         "admitted body must fit inside the arena"
     );
     let attempts = if placement.position().is_some() {
@@ -211,9 +211,9 @@ fn allocate_animal(next_animal: &mut u64) -> Result<AnimalId> {
 fn add_plant(
     plants: &mut Vec<Plant>,
     next_plant: &mut u64,
-    position: DVec2,
-    energy: f64,
-    radius_scale: f64,
+    position: Vec2,
+    energy: f32,
+    radius_scale: f32,
 ) -> Result<()> {
     let next = next_plant
         .checked_add(1)
@@ -417,7 +417,7 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
         Ok(())
     }
 
-    fn add_plant(&mut self, position: DVec2, energy: f64) -> Result<()> {
+    fn add_plant(&mut self, position: Vec2, energy: f32) -> Result<()> {
         add_plant(
             &mut self.plants,
             &mut self.next_plant,
@@ -443,7 +443,7 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
         field.gradient = if field.gradient.length() > self.parameters.sensing.gradient_dead_zone {
             body.world_to_body(field.gradient.normalize())
         } else {
-            DVec2::ZERO
+            Vec2::ZERO
         };
         field.velocity = body.world_to_body(body.velocity) * self.parameters.sensing.velocity_scale;
         field.angular_velocity =
@@ -558,7 +558,7 @@ where
             parameters.immigration.energy,
             parameters.body.radius_scale,
         );
-        body.heading = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
+        body.heading = rng.random_range(-std::f32::consts::PI..std::f32::consts::PI);
         body.confine(parameters.world);
         Ok(Animal {
             body,

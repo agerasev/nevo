@@ -1,7 +1,7 @@
 //! Fixed Gaussian fertility shared by resource capacity and plant growth.
 
 use anyhow::{Result, ensure};
-use glam::DVec2;
+use glam::Vec2;
 use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 
@@ -13,11 +13,11 @@ pub struct Config {
     /// Number of fixed centres; zero gives a uniformly zero fertility field.
     pub count: usize,
     /// Standard deviation in world units, shared by both spatial axes.
-    pub spread: f64,
+    pub spread: f32,
     /// Multiplier on plant growth far from all patch centres.
-    pub growth_floor: f64,
+    pub growth_floor: f32,
     /// Multiplier at a patch centre; overlapping patches do not exceed it.
-    pub growth_peak: f64,
+    pub growth_peak: f32,
 }
 
 impl Default for Config {
@@ -32,7 +32,7 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn validate(self, world: WorldConfig, max_radius: f64, base_growth: f64) -> Result<()> {
+    pub fn validate(self, world: WorldConfig, max_radius: f32, base_growth: f32) -> Result<()> {
         ensure!(
             self.spread.is_finite() && self.spread > 0.0,
             "patch spread must be finite and positive"
@@ -51,7 +51,7 @@ impl Config {
             "maximum patch growth must be finite and nonnegative"
         );
         ensure!(
-            self.count <= isize::MAX as usize / size_of::<DVec2>(),
+            self.count <= isize::MAX as usize / size_of::<Vec2>(),
             "patch count produces an oversized landscape"
         );
         ensure!(
@@ -60,7 +60,7 @@ impl Config {
         );
         let limit = inset(world, max_radius)?;
         ensure!(
-            self.count == 0 || limit.cmpgt(DVec2::ZERO).all(),
+            self.count == 0 || limit.cmpgt(Vec2::ZERO).all(),
             "patches require room for mature plants inside the arena"
         );
         Ok(())
@@ -70,18 +70,18 @@ impl Config {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Landscape {
-    centers: Vec<DVec2>,
+    centers: Vec<Vec2>,
 }
 
 impl Landscape {
-    pub(super) fn centers(&self) -> &[DVec2] {
+    pub(super) fn centers(&self) -> &[Vec2] {
         &self.centers
     }
 
     pub(super) fn generate<R: Rng + ?Sized>(
         config: Config,
         world: WorldConfig,
-        max_radius: f64,
+        max_radius: f32,
         rng: &mut R,
     ) -> Result<Self> {
         config.validate(world, max_radius, 0.0)?;
@@ -96,7 +96,7 @@ impl Landscape {
         &self,
         config: Config,
         world: WorldConfig,
-        max_radius: f64,
+        max_radius: f32,
     ) -> Result<()> {
         config.validate(world, max_radius, 0.0)?;
         ensure!(
@@ -114,7 +114,7 @@ impl Landscape {
     }
 
     /// Smooth blend in [0, 1]; overlapping Gaussian bumps never exceed one.
-    pub(super) fn fertility(&self, position: DVec2, config: Config) -> f64 {
+    pub(super) fn fertility(&self, position: Vec2, config: Config) -> f32 {
         let unfertile = self.centers.iter().fold(1.0, |remaining, center| {
             let relative = (position - center) / config.spread;
             remaining * (1.0 - (-0.5 * relative.length_squared()).exp())
@@ -122,7 +122,7 @@ impl Landscape {
         1.0 - unfertile
     }
 
-    pub(super) fn growth_multiplier(&self, position: DVec2, config: Config) -> f64 {
+    pub(super) fn growth_multiplier(&self, position: Vec2, config: Config) -> f32 {
         if config.growth_floor == config.growth_peak {
             return config.growth_floor;
         }
@@ -131,10 +131,10 @@ impl Landscape {
     }
 }
 
-pub(super) fn inset(world: WorldConfig, max_radius: f64) -> Result<DVec2> {
+pub(super) fn inset(world: WorldConfig, max_radius: f32) -> Result<Vec2> {
     let half_size = world.half_size();
     ensure!(
-        half_size.is_finite() && half_size.cmpgt(DVec2::ZERO).all(),
+        half_size.is_finite() && half_size.cmpgt(Vec2::ZERO).all(),
         "patch arena dimensions must be finite and positive"
     );
     ensure!(
@@ -144,8 +144,8 @@ pub(super) fn inset(world: WorldConfig, max_radius: f64) -> Result<DVec2> {
     Ok(half_size - max_radius)
 }
 
-pub(super) fn uniform_position<R: Rng + ?Sized>(rng: &mut R, limit: DVec2) -> DVec2 {
-    DVec2::new(rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0)) * limit
+pub(super) fn uniform_position<R: Rng + ?Sized>(rng: &mut R, limit: Vec2) -> Vec2 {
+    Vec2::new(rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0)) * limit
 }
 
 #[cfg(test)]

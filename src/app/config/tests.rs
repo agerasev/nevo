@@ -107,7 +107,7 @@ fn merging_preserves_sibling_fields_and_replaces_arrays() {
     assert!(!config.viewer.enable && !config.viewer.vsync);
     assert_eq!(
         config.ecosystem.immigration.position,
-        nevo::ecosystem::Placement::Fixed(glam::DVec2::new(3.0, 4.0))
+        nevo::ecosystem::Placement::Fixed(glam::Vec2::new(3.0, 4.0))
     );
 }
 

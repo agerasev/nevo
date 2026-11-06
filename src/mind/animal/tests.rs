@@ -1,6 +1,6 @@
 use super::*;
 use crate::context::Cpu;
-use glam::DVec2;
+use glam::Vec2;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
@@ -41,9 +41,9 @@ fn observation_signals_keep_body_order_and_zero_outputs_are_idle() {
     let action = mind
         .process(
             AnimalObservation {
-                gradient: DVec2::new(0.25, -0.5),
+                gradient: Vec2::new(0.25, -0.5),
                 strength: 2.0,
-                velocity: DVec2::new(1.5, -2.5),
+                velocity: Vec2::new(1.5, -2.5),
                 angular_velocity: 0.75,
             },
             &mut context(),
@@ -58,7 +58,7 @@ fn observation_signals_keep_body_order_and_zero_outputs_are_idle() {
 fn motor_outputs_allow_only_forward_thrust_and_signed_turning() {
     let mut mind = AnimalMind::from_brain(Probe::default());
     for (output, thrust, turn) in [
-        ([2.0, -1.0], 2.0_f64.tanh(), (-1.0_f64).tanh()),
+        ([2.0, -1.0], 2.0_f32.tanh(), (-1.0_f32).tanh()),
         ([-2.0, 0.0], 0.0, 0.0),
         ([f32::MAX, -f32::MAX], 1.0, -1.0),
     ] {
@@ -76,11 +76,11 @@ fn invalid_signals_and_outputs_do_not_apply_brain_updates() {
     let mut mind = AnimalMind::from_brain(Probe::default());
     for observation in [
         AnimalObservation {
-            strength: f64::NAN,
+            strength: f32::NAN,
             ..AnimalObservation::default()
         },
         AnimalObservation {
-            velocity: DVec2::splat(f64::MAX),
+            velocity: Vec2::splat(f32::INFINITY),
             ..AnimalObservation::default()
         },
     ] {

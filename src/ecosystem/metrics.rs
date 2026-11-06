@@ -83,9 +83,9 @@ impl Cache {
     }
 
     /// Actual plant energy gained after capping, excluding admission energy.
-    pub(super) fn observe_plant_growth(&mut self, energy: f64) {
+    pub(super) fn observe_plant_growth(&mut self, energy: f32) {
         if self.window.is_some() {
-            self.plant_growth += energy;
+            self.plant_growth += f64::from(energy);
         }
     }
 
@@ -103,12 +103,12 @@ impl Cache {
         window.active_animal_ticks += report.decisions.len() as u64;
         for decision in &report.decisions {
             // Includes actors that subsequently die; excludes birth/growth displacement.
-            self.distance += decision.distance;
-            self.movement_energy += decision.movement_energy;
+            self.distance += f64::from(decision.distance);
+            self.movement_energy += f64::from(decision.movement_energy);
         }
         for event in &report.events {
             match event {
-                Event::Meal { gain, .. } => self.food += gain,
+                Event::Meal { gain, .. } => self.food += f64::from(*gain),
                 Event::Birth { .. } => self.births += 1,
                 Event::Death { .. } => self.deaths += 1,
                 Event::Immigrant { .. } => self.immigrants += 1,
@@ -172,10 +172,15 @@ impl<M, G, P, MC, IC> Metrics for Ecosystem<M, G, P, MC, IC> {
         summary.population = Some(self.animals.len() as u64);
         summary.plant_count = Some(self.plants.len() as u64);
         summary.mean_animal_energy = (!self.animals.is_empty()).then(|| {
-            self.animals.values().map(|a| a.body.energy).sum::<f64>() / self.animals.len() as f64
+            self.animals
+                .values()
+                .map(|a| f64::from(a.body.energy))
+                .sum::<f64>()
+                / self.animals.len() as f64
         });
-        summary.mean_plant_energy = (!self.plants.is_empty())
-            .then(|| self.plants.iter().map(|p| p.energy).sum::<f64>() / self.plants.len() as f64);
+        summary.mean_plant_energy = (!self.plants.is_empty()).then(|| {
+            self.plants.iter().map(|p| f64::from(p.energy)).sum::<f64>() / self.plants.len() as f64
+        });
         if let Some(window) = cache.window {
             let ticks = window.samples as f64;
             summary.food_per_tick = Some(cache.food / ticks);

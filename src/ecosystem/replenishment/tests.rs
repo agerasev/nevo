@@ -13,17 +13,17 @@ fn crowding_is_gaussian_and_independent_of_plant_energy() {
     let patches = PatchConfig::default();
     let sampler = Sampler::new(config, WorldConfig::default(), 10.0, patches).unwrap();
     let landscape = patches::Landscape::default();
-    let mut plants = [Plant::new(1, DVec2::ZERO, 0.0)];
-    let center = sampler.acceptance(DVec2::ZERO, &plants, &landscape);
-    let shoulder = sampler.acceptance(DVec2::new(10.0, 0.0), &plants, &landscape);
+    let mut plants = [Plant::new(1, Vec2::ZERO, 0.0)];
+    let center = sampler.acceptance(Vec2::ZERO, &plants, &landscape);
+    let shoulder = sampler.acceptance(Vec2::new(10.0, 0.0), &plants, &landscape);
     assert!(shoulder > center && shoulder < 1.0);
-    assert!(((1.0 - shoulder) / (1.0 - center) - 0.6065306597126334).abs() < 1e-12);
+    assert!(((1.0 - shoulder) / (1.0 - center) - (-0.5_f32).exp()).abs() < 4.0 * f32::EPSILON);
     assert_eq!(
         shoulder,
-        sampler.acceptance(DVec2::new(0.0, -10.0), &plants, &landscape)
+        sampler.acceptance(Vec2::new(0.0, -10.0), &plants, &landscape)
     );
     plants[0].energy = 1.0;
-    assert_eq!(sampler.acceptance(DVec2::ZERO, &plants, &landscape), center);
+    assert_eq!(sampler.acceptance(Vec2::ZERO, &plants, &landscape), center);
 }
 
 #[test]
@@ -51,15 +51,15 @@ fn gaussian_envelope_preserves_the_deficit_in_overlapping_patches() {
     };
     let sampler = Sampler::new(config, WorldConfig::default(), 10.0, patches).unwrap();
     assert!(sampler.gaussian_envelope);
-    let fertility = landscape.fertility(DVec2::ZERO, patches);
+    let fertility = landscape.fertility(Vec2::ZERO, patches);
     let capacity = 0.002 + 0.008 * fertility;
-    let envelope = sampler.envelope(DVec2::ZERO, &landscape);
+    let envelope = sampler.envelope(Vec2::ZERO, &landscape);
     assert!(envelope > capacity);
-    let plants = [Plant::new(1, DVec2::ZERO, 0.0)];
-    let deficit = capacity - sampler.kernel_scale(DVec2::ZERO);
-    let acceptance = sampler.acceptance(DVec2::ZERO, &plants, &landscape);
+    let plants = [Plant::new(1, Vec2::ZERO, 0.0)];
+    let deficit = capacity - sampler.kernel_scale(Vec2::ZERO);
+    let acceptance = sampler.acceptance(Vec2::ZERO, &plants, &landscape);
     assert!(acceptance > 0.0 && acceptance < 1.0);
-    assert!((envelope * acceptance - deficit).abs() < 1e-12);
+    assert!((envelope * acceptance - deficit).abs() < 4.0 * f32::EPSILON * capacity);
 }
 
 #[test]
@@ -87,15 +87,15 @@ fn gaussian_proposals_have_the_expected_moments_and_spend_outside_attempts() {
     let sampler = Sampler::new(config, WorldConfig::default(), 10.0, patches).unwrap();
     assert!(sampler.gaussian_envelope);
     let center = landscape.centers()[0];
-    let mut sum = DVec2::ZERO;
-    let mut squares = DVec2::ZERO;
+    let mut sum = Vec2::ZERO;
+    let mut squares = Vec2::ZERO;
     for _ in 0..4096 {
         let offset = sampler.propose(&[], &landscape, &mut rng).unwrap() - center;
         sum += offset;
         squares += offset * offset;
     }
     assert!((sum / 4096.0).abs().max_element() < 0.3);
-    assert!((squares / (4096.0 * 25.0) - DVec2::ONE).abs().max_element() < 0.1);
+    assert!((squares / (4096.0 * 25.0) - Vec2::ONE).abs().max_element() < 0.1);
 
     let thin = Sampler::new(
         config,
@@ -162,8 +162,8 @@ fn boundary_correction_restores_missing_kernel_mass() {
     )
     .unwrap();
     assert!(
-        (sampler.kernel_scale(sampler.limit) / sampler.kernel_scale(DVec2::ZERO) - 4.0).abs()
-            < 1e-12
+        (sampler.kernel_scale(sampler.limit) / sampler.kernel_scale(Vec2::ZERO) - 4.0).abs()
+            < 8.0 * f32::EPSILON
     );
 
     let broad = Sampler::new(
@@ -179,8 +179,8 @@ fn boundary_correction_restores_missing_kernel_mass() {
         PatchConfig::default(),
     )
     .unwrap();
-    for position in [DVec2::ZERO, broad.limit] {
-        assert!((broad.kernel_scale(position) * 6000.0 - 1.0).abs() < 1e-12);
+    for position in [Vec2::ZERO, broad.limit] {
+        assert!((broad.kernel_scale(position) * 6000.0 - 1.0).abs() < 8.0 * f32::EPSILON);
     }
 }
 
@@ -210,7 +210,7 @@ fn proposal_budgets_use_bounded_stochastic_rounding() {
             assert!((lower..=upper).contains(&attempts));
             total += attempts;
         }
-        assert!((total as f64 / 2048.0 - rate).abs() < 0.05);
+        assert!((total as f32 / 2048.0 - rate).abs() < 0.05);
     }
     let zero = Sampler::new(
         Config {
@@ -236,13 +236,13 @@ fn invalid_density_and_proposal_settings_are_rejected() {
         |c| c.density_floor = -1.0,
         |c| c.density_floor = 1.0,
         |c| c.density_peak = 0.0,
-        |c| c.density_peak = f64::INFINITY,
+        |c| c.density_peak = f32::INFINITY,
         |c| c.crowding_radius = 0.0,
-        |c| c.crowding_radius = f64::NAN,
-        |c| c.crowding_radius = f64::MIN_POSITIVE,
+        |c| c.crowding_radius = f32::NAN,
+        |c| c.crowding_radius = f32::MIN_POSITIVE,
         |c| c.recovery_rate = -1.0,
-        |c| c.recovery_rate = f64::NAN,
-        |c| c.recovery_rate = f64::MAX,
+        |c| c.recovery_rate = f32::NAN,
+        |c| c.recovery_rate = f32::MAX,
         |c| c.max_attempts_per_tick = 5,
     ];
     for change in invalid_changes {
@@ -265,7 +265,7 @@ fn invalid_density_and_proposal_settings_are_rejected() {
             },
         )
         .unwrap();
-    for spread in [1000.0, f64::MAX, f64::MIN_POSITIVE] {
+    for spread in [1000.0, f32::MAX, f32::MIN_POSITIVE] {
         let sampler = Sampler::new(
             varying,
             world,
@@ -278,11 +278,11 @@ fn invalid_density_and_proposal_settings_are_rejected() {
         )
         .unwrap();
         assert!(!sampler.gaussian_envelope);
-        assert!((sampler.proposal_mass - 505.92).abs() < 1e-10);
+        assert!((sampler.proposal_mass - 505.92).abs() < 2.0 * f32::EPSILON * 505.92);
     }
     assert!(
         Config {
-            density_peak: f64::MAX,
+            density_peak: f32::MAX,
             ..varying
         }
         .validate(
@@ -300,8 +300,8 @@ fn invalid_density_and_proposal_settings_are_rejected() {
         Config::default()
             .validate(
                 WorldConfig {
-                    width: f64::MAX,
-                    height: f64::MAX
+                    width: f32::MAX,
+                    height: f32::MAX
                 },
                 0.0,
                 patches,

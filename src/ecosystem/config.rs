@@ -3,7 +3,7 @@
 use std::{fmt, str::FromStr};
 
 use anyhow::{Result, ensure};
-use glam::DVec2;
+use glam::Vec2;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::mind::{animal, rnn};
@@ -13,11 +13,11 @@ use crate::mind::{animal, rnn};
 pub enum Placement {
     #[default]
     Random,
-    Fixed(DVec2),
+    Fixed(Vec2),
 }
 
 impl Placement {
-    pub fn position(self) -> Option<DVec2> {
+    pub fn position(self) -> Option<Vec2> {
         match self {
             Self::Random => None,
             Self::Fixed(position) => Some(position),
@@ -54,10 +54,7 @@ impl FromStr for Placement {
         let (x, y) = value
             .split_once(',')
             .ok_or_else(|| anyhow::anyhow!("expected random or X,Y"))?;
-        Ok(Self::Fixed(DVec2::new(
-            x.trim().parse()?,
-            y.trim().parse()?,
-        )))
+        Ok(Self::Fixed(Vec2::new(x.trim().parse()?, y.trim().parse()?)))
     }
 }
 
@@ -75,11 +72,11 @@ impl<'de> Deserialize<'de> for Placement {
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum Value {
-            Point([f64; 2]),
+            Point([f32; 2]),
             Text(String),
         }
         match Value::deserialize(deserializer)? {
-            Value::Point(point) => Ok(Self::Fixed(DVec2::from_array(point))),
+            Value::Point(point) => Ok(Self::Fixed(Vec2::from_array(point))),
             Value::Text(text) => text.parse().map_err(de::Error::custom),
         }
     }
@@ -183,8 +180,8 @@ impl<MC, IC, P> Config<MC, IC, P> {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorldConfig {
-    pub width: f64,
-    pub height: f64,
+    pub width: f32,
+    pub height: f32,
 }
 impl Default for WorldConfig {
     fn default() -> Self {
@@ -195,8 +192,8 @@ impl Default for WorldConfig {
     }
 }
 impl WorldConfig {
-    pub fn half_size(self) -> DVec2 {
-        DVec2::new(self.width, self.height) * 0.5
+    pub fn half_size(self) -> Vec2 {
+        Vec2::new(self.width, self.height) * 0.5
     }
 }
 
@@ -204,15 +201,15 @@ impl WorldConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct PhysicsConfig {
     /// Physical time per ecological tick; viewer pacing does not change it.
-    pub time_step: f64,
+    pub time_step: f32,
     /// Fixed RK4 steps per ecological tick, each lasting time_step / substeps.
     pub substeps: u32,
     /// Common inertial mass per unit of stored animal or plant energy.
-    pub mass_per_energy: f64,
+    pub mass_per_energy: f32,
     /// Natural angular frequency of normal contact repulsion.
-    pub contact_frequency: f64,
+    pub contact_frequency: f32,
     /// Contact damping ratio; one is critical damping for an isolated pair.
-    pub contact_damping: f64,
+    pub contact_damping: f32,
     /// Bounded random placement attempts for each immigrant or fixed-count plant.
     pub max_placement_attempts: u32,
 }
@@ -232,7 +229,7 @@ impl Default for PhysicsConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ImmigrationConfig {
-    pub energy: f64,
+    pub energy: f32,
     pub position: Placement,
 }
 impl Default for ImmigrationConfig {
@@ -248,15 +245,15 @@ impl Default for ImmigrationConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct SensingConfig {
     /// Inverse world-unit scale applied to displacement from each food source.
-    pub distance_scale: f64,
+    pub distance_scale: f32,
     /// Gain on summed strength and gradient, before the gradient dead zone.
-    pub signal_scale: f64,
-    pub softening: f64,
-    pub gradient_dead_zone: f64,
+    pub signal_scale: f32,
+    pub softening: f32,
+    pub gradient_dead_zone: f32,
     /// Gain on body-relative linear velocity before neural encoding.
-    pub velocity_scale: f64,
+    pub velocity_scale: f32,
     /// Gain on angular velocity before neural encoding.
-    pub angular_velocity_scale: f64,
+    pub angular_velocity_scale: f32,
 }
 impl Default for SensingConfig {
     fn default() -> Self {
@@ -281,9 +278,9 @@ pub struct GeneticsConfig<IC = rnn::Initialization, P = rnn::WeightMutation> {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ReproductionConfig {
-    pub threshold: f64,
-    pub child_energy_fraction: f64,
-    pub separation_scale: f64,
+    pub threshold: f32,
+    pub child_energy_fraction: f32,
+    pub separation_scale: f32,
 }
 impl Default for ReproductionConfig {
     fn default() -> Self {
@@ -298,7 +295,7 @@ impl Default for ReproductionConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FeedingConfig {
-    pub efficiency: f64,
+    pub efficiency: f32,
 }
 impl Default for FeedingConfig {
     fn default() -> Self {
@@ -321,14 +318,14 @@ pub(super) struct Parameters {
 }
 impl Parameters {
     pub fn validate(self) -> Result<()> {
-        fn nonnegative(value: f64, name: &str) -> Result<()> {
+        fn nonnegative(value: f32, name: &str) -> Result<()> {
             ensure!(
                 value.is_finite() && value >= 0.0,
                 "{name} must be finite and nonnegative"
             );
             Ok(())
         }
-        fn positive(value: f64, name: &str) -> Result<()> {
+        fn positive(value: f32, name: &str) -> Result<()> {
             ensure!(
                 value.is_finite() && value > 0.0,
                 "{name} must be finite and positive"
@@ -358,7 +355,7 @@ impl Parameters {
             "physics substeps must be positive"
         );
         positive(
-            self.physics.time_step / f64::from(self.physics.substeps),
+            self.physics.time_step / self.physics.substeps as f32,
             "physics substep duration",
         )?;
         nonnegative(self.immigration.energy, "immigration energy")?;
@@ -461,7 +458,7 @@ impl Parameters {
             );
         }
         if self.plant.patches.count > 0 || self.plant.replenishment.is_some() {
-            let limit = self.world.half_size() - DVec2::splat(self.plant.max_radius());
+            let limit = self.world.half_size() - Vec2::splat(self.plant.max_radius());
             for placement in [self.plant.initial_position, self.plant.replacement_position] {
                 if let Some(position) = placement.position() {
                     ensure!(
@@ -504,22 +501,22 @@ pub struct AnimalConfig<MC = animal::Config<rnn::Config>> {
 #[serde(default, deny_unknown_fields)]
 pub struct BodyConfig {
     /// Reserve energy spent once per ecological tick.
-    pub upkeep: f64,
-    pub max_acceleration: f64,
-    pub max_angular_acceleration: f64,
+    pub upkeep: f32,
+    pub max_acceleration: f32,
+    pub max_angular_acceleration: f32,
     /// Linear velocity decay rate (inverse physical time).
-    pub linear_drag: f64,
+    pub linear_drag: f32,
     /// Angular velocity decay rate (inverse physical time).
-    pub angular_drag: f64,
+    pub angular_drag: f32,
     /// Reserve-energy units per mechanical-energy unit; zero disables motor costs.
-    pub energy_scale: f64,
+    pub energy_scale: f32,
     /// Fraction of supplied work converted to positive mechanical work.
-    pub motor_efficiency: f64,
+    pub motor_efficiency: f32,
     /// Resistive power coefficient multiplying squared applied force.
-    pub force_loss: f64,
+    pub force_loss: f32,
     /// Resistive power coefficient multiplying squared applied torque.
-    pub torque_loss: f64,
-    pub radius_scale: f64,
+    pub torque_loss: f32,
+    pub radius_scale: f32,
 }
 impl Default for BodyConfig {
     fn default() -> Self {
@@ -557,16 +554,16 @@ impl BodyConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct BodyParameters {
-    pub upkeep: f64,
-    pub max_acceleration: f64,
-    pub max_angular_acceleration: f64,
-    pub linear_drag: f64,
-    pub angular_drag: f64,
-    pub energy_scale: f64,
-    pub motor_efficiency: f64,
-    pub force_loss: f64,
-    pub torque_loss: f64,
-    pub radius_scale: f64,
+    pub upkeep: f32,
+    pub max_acceleration: f32,
+    pub max_angular_acceleration: f32,
+    pub linear_drag: f32,
+    pub angular_drag: f32,
+    pub energy_scale: f32,
+    pub motor_efficiency: f32,
+    pub force_loss: f32,
+    pub torque_loss: f32,
+    pub radius_scale: f32,
 }
 impl Default for BodyParameters {
     fn default() -> Self {
@@ -587,15 +584,15 @@ impl Default for BodyParameters {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct PlantConfig {
-    pub initial_energy: f64,
-    pub replacement_energy: f64,
-    pub growth: f64,
-    pub max_energy: f64,
-    pub radius_scale: f64,
+    pub initial_energy: f32,
+    pub replacement_energy: f32,
+    pub growth: f32,
+    pub max_energy: f32,
+    pub radius_scale: f32,
     /// Linear velocity decay rate (inverse physical time).
-    pub linear_drag: f64,
+    pub linear_drag: f32,
     /// Angular velocity decay rate (inverse physical time).
-    pub angular_drag: f64,
+    pub angular_drag: f32,
     pub initial_position: Placement,
     pub replacement_position: Placement,
     pub patches: super::patches::Config,
@@ -641,13 +638,13 @@ impl PlantConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct PlantParameters {
-    pub initial_energy: f64,
-    pub replacement_energy: f64,
-    pub growth: f64,
-    pub max_energy: f64,
-    pub radius_scale: f64,
-    pub linear_drag: f64,
-    pub angular_drag: f64,
+    pub initial_energy: f32,
+    pub replacement_energy: f32,
+    pub growth: f32,
+    pub max_energy: f32,
+    pub radius_scale: f32,
+    pub linear_drag: f32,
+    pub angular_drag: f32,
     pub initial_position: Placement,
     pub replacement_position: Placement,
     pub patches: super::patches::Config,
@@ -672,7 +669,7 @@ impl Default for PlantParameters {
 }
 
 impl PlantParameters {
-    pub fn max_radius(self) -> f64 {
+    pub fn max_radius(self) -> f32 {
         self.radius_scale * self.max_energy.sqrt()
     }
 }

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use glam::DVec2;
+use glam::Vec2;
 use nevo::{
     context::{Context, Cpu},
     ecosystem::AnimalObservation,
@@ -38,15 +38,15 @@ fn animal_accepts_another_mind_and_propagates_its_errors() {
     let action = agent
         .process(
             AnimalObservation {
-                gradient: DVec2::new(0.25, -0.5),
+                gradient: Vec2::new(0.25, -0.5),
                 strength: 1.0,
                 ..AnimalObservation::default()
             },
             &mut cx,
         )
         .unwrap();
-    assert_eq!(action.thrust, 0.25_f64.tanh());
-    assert_eq!(action.turn, (-0.5_f64).tanh());
+    assert_eq!(action.thrust, 0.25_f32.tanh());
+    assert_eq!(action.turn, (-0.5_f32).tanh());
     assert_eq!(
         agent
             .process(

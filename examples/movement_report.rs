@@ -4,7 +4,7 @@
 use std::{collections::BTreeMap, fs, io::BufReader, path::PathBuf};
 
 use anyhow::{Context, Result, ensure};
-use glam::DVec2;
+use glam::Vec2;
 use nevo::{
     ecosystem::{Config, Event, TickReport},
     run::Run,
@@ -100,7 +100,7 @@ fn observe(
     report: &TickReport,
     state: &Universe,
     config: &Config,
-    previous: &mut BTreeMap<u64, DVec2>,
+    previous: &mut BTreeMap<u64, Vec2>,
 ) -> Totals {
     let world = state.world();
     let body = config.animal.body;
@@ -109,9 +109,13 @@ fn observe(
         animal_ticks: world.animals().len() as u64,
         plant_ticks: world.plants().len() as u64,
         active_animal_ticks: report.decisions.len() as u64,
-        upkeep_energy: world.animals().len() as f64 * body.upkeep,
-        animal_energy: world.animals().values().map(|a| a.body.energy).sum(),
-        plant_energy: world.plants().iter().map(|p| p.energy).sum(),
+        upkeep_energy: world.animals().len() as f64 * f64::from(body.upkeep),
+        animal_energy: world
+            .animals()
+            .values()
+            .map(|a| f64::from(a.body.energy))
+            .sum(),
+        plant_energy: world.plants().iter().map(|p| f64::from(p.energy)).sum(),
         ..Totals::default()
     };
     for event in &report.events {
@@ -119,15 +123,15 @@ fn observe(
             Event::Birth { .. } => sample.births += 1,
             Event::Death { .. } => sample.deaths += 1,
             Event::Immigrant { .. } => sample.immigrants += 1,
-            Event::Meal { gain, .. } => sample.food += gain,
+            Event::Meal { gain, .. } => sample.food += f64::from(*gain),
         }
     }
     let mut current = BTreeMap::new();
     for decision in &report.decisions {
         let delta = decision.position_after - decision.position_before;
         let distance = delta.length();
-        sample.distance += decision.distance;
-        sample.movement_energy += decision.movement_energy;
+        sample.distance += f64::from(decision.distance);
+        sample.movement_energy += f64::from(decision.movement_energy);
         sample.moving_actions += u64::from(decision.distance > 1e-9);
         // Net travel direction differs from body heading; zero net travel resets pairs.
         if distance <= 1e-9 {
@@ -138,8 +142,9 @@ fn observe(
             let dot = last.dot(direction).clamp(-1.0, 1.0);
             sample.travel_direction_pairs += 1;
             sample.turns_over_90 += u64::from(dot < 0.0);
-            sample.turns_over_150 += u64::from(dot < -(3.0_f64.sqrt() / 2.0));
-            sample.turn_degrees += last.perp_dot(direction).abs().atan2(dot).to_degrees();
+            sample.turns_over_150 += u64::from(dot < -(3.0_f32.sqrt() / 2.0));
+            sample.turn_degrees +=
+                f64::from(last.perp_dot(direction).abs().atan2(dot).to_degrees());
         }
         current.insert(decision.id.serial(), direction);
     }
@@ -155,9 +160,9 @@ fn main() -> Result<()> {
     );
     let checkpoint: Checkpoint = ciborium::from_reader(BufReader::new(fs::File::open(&path)?))?;
     ensure!(
-        checkpoint.format_version == 16
-            && checkpoint.world_model == "foraging-fixed-contacts-v11"
-            && checkpoint.agent_model == "animal-rnn-6-n-2-v3",
+        checkpoint.format_version == 17
+            && checkpoint.world_model == "foraging-f32-contacts-v12"
+            && checkpoint.agent_model == "animal-rnn-6-n-2-v4",
         "unsupported checkpoint; use the matching simulation build"
     );
     checkpoint.state.validate()?;
@@ -230,11 +235,11 @@ mod tests {
         let mut previous = BTreeMap::new();
         let mut total = Totals::default();
         for (delta, distance, energy) in [
-            (DVec2::X, 2.0, 0.0001),
-            (DVec2::X, 3.0, 0.0002),
-            (-DVec2::X, 4.0, 0.0003),
-            (DVec2::ZERO, 0.0, 0.0004),
-            (DVec2::Y, 5.0, 0.0005),
+            (Vec2::X, 2.0, 0.0001),
+            (Vec2::X, 3.0, 0.0002),
+            (-Vec2::X, 4.0, 0.0003),
+            (Vec2::ZERO, 0.0, 0.0004),
+            (Vec2::Y, 5.0, 0.0005),
         ] {
             let mut report = state.advance().unwrap();
             report.decisions[0].position_after = report.decisions[0].position_before + delta;
@@ -248,6 +253,6 @@ mod tests {
         assert_eq!(total.turns_over_150, 1);
         assert_eq!(total.turn_degrees, 180.0);
         assert_eq!(total.distance, 14.0);
-        assert!((total.movement_energy - 0.0015).abs() < 1e-12);
+        assert!((total.movement_energy - 0.0015).abs() < f64::from(f32::EPSILON) * 0.0015);
     }
 }

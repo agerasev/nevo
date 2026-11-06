@@ -72,12 +72,12 @@ where
         cx: &mut C,
     ) -> Result<(MotorAction, Self::Update)> {
         let input = [
-            observation.gradient.x as f32,
-            observation.gradient.y as f32,
-            observation.strength as f32,
-            observation.velocity.x as f32,
-            observation.velocity.y as f32,
-            observation.angular_velocity as f32,
+            observation.gradient.x,
+            observation.gradient.y,
+            observation.strength,
+            observation.velocity.x,
+            observation.velocity.y,
+            observation.angular_velocity,
         ];
         ensure!(
             input.iter().all(|value| value.is_finite()),
@@ -90,8 +90,8 @@ where
         );
         Ok((
             MotorAction {
-                thrust: f64::from(output[0]).tanh().max(0.0),
-                turn: f64::from(output[1]).tanh(),
+                thrust: output[0].tanh().max(0.0),
+                turn: output[1].tanh(),
             },
             update,
         ))

@@ -3,14 +3,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, ensure};
-use glam::DVec2;
+use glam::Vec2;
 use phy::{Rk4, Solver, System, Var, Visitor};
 
 use super::{Body, MotorAction, Obstacle, Plant, body, config::Parameters};
 
 pub(super) use super::body::Motion;
 
-type Integrator = Rk4<f64>;
+type Integrator = Rk4<f32>;
 
 pub(super) struct Step {
     pub motions: Vec<Motion>,
@@ -19,38 +19,38 @@ pub(super) struct Step {
 }
 
 struct Particle {
-    position: Var<DVec2, Integrator>,
-    velocity: Var<DVec2, Integrator>,
-    heading: Var<f64, Integrator>,
-    angular_velocity: Var<f64, Integrator>,
-    distance: Var<f64, Integrator>,
-    work: Var<f64, Integrator>,
-    force_squared_time: Var<f64, Integrator>,
-    torque_squared_time: Var<f64, Integrator>,
-    mass: f64,
-    radius: f64,
-    linear_drag: f64,
-    angular_drag: f64,
-    acceleration: f64,
-    angular_acceleration: f64,
-    force: f64,
-    torque: f64,
+    position: Var<Vec2, Integrator>,
+    velocity: Var<Vec2, Integrator>,
+    heading: Var<f32, Integrator>,
+    angular_velocity: Var<f32, Integrator>,
+    distance: Var<f32, Integrator>,
+    work: Var<f32, Integrator>,
+    force_squared_time: Var<f32, Integrator>,
+    torque_squared_time: Var<f32, Integrator>,
+    mass: f32,
+    radius: f32,
+    linear_drag: f32,
+    angular_drag: f32,
+    acceleration: f32,
+    angular_acceleration: f32,
+    force: f32,
+    torque: f32,
 }
 
 impl Particle {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        position: DVec2,
-        velocity: DVec2,
-        heading: f64,
-        angular_velocity: f64,
-        mass: f64,
-        radius: f64,
-        inertia: f64,
-        linear_drag: f64,
-        angular_drag: f64,
-        acceleration: f64,
-        angular_acceleration: f64,
+        position: Vec2,
+        velocity: Vec2,
+        heading: f32,
+        angular_velocity: f32,
+        mass: f32,
+        radius: f32,
+        inertia: f32,
+        linear_drag: f32,
+        angular_drag: f32,
+        acceleration: f32,
+        angular_acceleration: f32,
     ) -> Result<Self> {
         ensure!(
             position.is_finite()
@@ -74,7 +74,7 @@ impl Particle {
         );
         Ok(Self {
             position: Var::new(position),
-            velocity: Var::new(if mass > 0.0 { velocity } else { DVec2::ZERO }),
+            velocity: Var::new(if mass > 0.0 { velocity } else { Vec2::ZERO }),
             heading: Var::new(heading),
             angular_velocity: Var::new(if mass > 0.0 { angular_velocity } else { 0.0 }),
             distance: Var::default(),
@@ -127,7 +127,7 @@ struct Scene<'a> {
 }
 
 impl Scene<'_> {
-    fn contact_acceleration(&self, penetration: f64, relative_velocity: f64) -> Result<f64> {
+    fn contact_acceleration(&self, penetration: f32, relative_velocity: f32) -> Result<f32> {
         let physics = self.parameters.physics;
         let acceleration = physics.contact_frequency.powi(2) * penetration
             - (2.0 * physics.contact_damping * physics.contact_frequency) * relative_velocity;
@@ -171,7 +171,7 @@ impl Scene<'_> {
             if particle.mass == 0.0 {
                 continue;
             }
-            let forward = DVec2::from_angle(*particle.heading);
+            let forward = Vec2::from_angle(*particle.heading);
             particle.position.deriv = *particle.velocity;
             particle.velocity.deriv =
                 particle.acceleration * forward - particle.linear_drag * *particle.velocity;
@@ -197,7 +197,7 @@ impl Scene<'_> {
             .iter()
             .filter(|particle| particle.mass > 0.0)
             .map(|particle| particle.radius)
-            .fold(0.0_f64, f64::max);
+            .fold(0.0_f32, f32::max);
         if max_radius > 0.0 {
             let cell_size = 2.0 * max_radius;
             ensure!(cell_size.is_finite(), "disk diameter is too large");
@@ -283,8 +283,8 @@ impl Scene<'_> {
     }
 }
 
-impl System<Integrator, f64> for Scene<'_> {
-    fn compute_derivs(&mut self, _: &<Integrator as Solver<f64>>::Context) {
+impl System<Integrator, f32> for Scene<'_> {
+    fn compute_derivs(&mut self, _: &<Integrator as Solver<f32>>::Context) {
         if self.error.is_none()
             && let Err(error) = self.derivatives()
         {
@@ -292,7 +292,7 @@ impl System<Integrator, f64> for Scene<'_> {
         }
     }
 
-    fn visit_vars<V: Visitor<Integrator, f64>>(&mut self, visitor: &mut V) {
+    fn visit_vars<V: Visitor<Integrator, f32>>(&mut self, visitor: &mut V) {
         for particle in &mut self.particles {
             visitor.apply(&mut particle.position);
             visitor.apply(&mut particle.velocity);
@@ -306,25 +306,25 @@ impl System<Integrator, f64> for Scene<'_> {
     }
 }
 
-fn length(vector: DVec2) -> f64 {
+fn length(vector: Vec2) -> f32 {
     vector.x.hypot(vector.y)
 }
 
-fn coincident_normal(relative_velocity: DVec2) -> DVec2 {
+fn coincident_normal(relative_velocity: Vec2) -> Vec2 {
     let speed = length(relative_velocity);
     if speed > 0.0 && speed.is_finite() {
         -relative_velocity / speed
     } else {
-        DVec2::X
+        Vec2::X
     }
 }
 
-fn cell(position: DVec2, width: f64) -> Result<(i64, i64)> {
+fn cell(position: Vec2, width: f32) -> Result<(i64, i64)> {
     let coordinates = (position / width).floor();
-    // Leave room for neighboring bucket coordinates, including f64 rounding.
-    let limit = (i64::MAX / 2) as f64;
+    // Leave room for neighboring bucket coordinates, including f32 rounding.
+    let limit = (i64::MAX / 2) as f32;
     ensure!(
-        coordinates.is_finite() && coordinates.abs().cmplt(DVec2::splat(limit)).all(),
+        coordinates.is_finite() && coordinates.abs().cmplt(Vec2::splat(limit)).all(),
         "physical spatial index is out of range"
     );
     Ok((coordinates.x as i64, coordinates.y as i64))
@@ -395,7 +395,7 @@ pub(super) fn advance(
         contacts: BTreeSet::new(),
         error: None,
     };
-    let step = physics.time_step / f64::from(physics.substeps);
+    let step = physics.time_step / physics.substeps as f32;
     for _ in 0..physics.substeps {
         Integrator::default().solve_step(&mut scene, step);
         if let Some(error) = &scene.error {

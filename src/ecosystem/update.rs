@@ -263,8 +263,8 @@ where
                 energy < before && body.energy.is_finite(),
                 "reproduction must reduce offspring energy"
             );
-            let direction = DVec2::from_angle(
-                body.heading + update.rng.random_range(0.0..std::f64::consts::TAU),
+            let direction = Vec2::from_angle(
+                body.heading + update.rng.random_range(0.0..std::f32::consts::TAU),
             );
             let offset = self.parameters.reproduction.separation_scale * body.radius() * direction;
             let child_position = body.position + offset;
@@ -324,7 +324,7 @@ where
             }
             plant.energy = energy;
             plant.position = clamp_position(plant.position, plant.radius(), self.parameters.world);
-            let limit = (self.parameters.world.half_size() - plant.radius()).max(DVec2::ZERO);
+            let limit = (self.parameters.world.half_size() - plant.radius()).max(Vec2::ZERO);
             for axis in 0..2 {
                 if (plant.position[axis] >= limit[axis] && plant.velocity[axis] > 0.0)
                     || (plant.position[axis] <= -limit[axis] && plant.velocity[axis] < 0.0)

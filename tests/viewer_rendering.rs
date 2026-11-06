@@ -7,7 +7,7 @@ mod support;
 
 use std::{sync::mpsc, time::Duration};
 
-use glam::{DVec2, Vec2};
+use glam::Vec2;
 use nevo::{
     ecosystem::{Animal, Body, Ecosystem, Obstacle, Plant},
     universe::Universe,
@@ -114,16 +114,16 @@ fn entities_collect_owned_geometry_without_mind_traits() {
     let library = Library::new(&graphics);
     let mut drawing = Drawing::new(&library);
     {
-        let plant = Plant::new(1, DVec2::new(-0.5, 0.0), 0.0001);
+        let plant = Plant::new(1, Vec2::new(-0.5, 0.0), 0.0001);
         let mut animal = Animal {
-            body: Body::new(DVec2::new(0.5, 0.0), 0.0004),
+            body: Body::new(Vec2::new(0.5, 0.0), 0.0004),
             mind: UnrelatedMind,
         };
-        animal.body.heading = std::f64::consts::FRAC_PI_2;
+        animal.body.heading = std::f32::consts::FRAC_PI_2;
         plant.draw(&mut drawing);
         animal.draw(&mut drawing);
         Obstacle {
-            position: DVec2::new(0.0, 0.5),
+            position: Vec2::new(0.0, 0.5),
             radius: 0.2,
         }
         .draw(&mut drawing);
@@ -164,11 +164,11 @@ fn entities_collect_owned_geometry_without_mind_traits() {
 fn overlapping_circles_hide_borders_inside_their_fills() {
     let graphics = graphics();
     let library = Library::new(&graphics);
-    let plant = |x| Plant::new(1, DVec2::new(x, 0.0), 0.0025);
+    let plant = |x| Plant::new(1, Vec2::new(x, 0.0), 0.0025);
     let body = |x| {
-        let mut body = Body::new(DVec2::new(x, 0.0), 0.0025);
+        let mut body = Body::new(Vec2::new(x, 0.0), 0.0025);
         // Keep the heading marker clear of the horizontal border checks.
-        body.heading = std::f64::consts::FRAC_PI_2;
+        body.heading = std::f32::consts::FRAC_PI_2;
         body
     };
     let green = [51, 189, 82, 255];

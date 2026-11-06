@@ -7,9 +7,9 @@ use super::{Body, Plant};
 pub(super) fn assimilate(
     body: &mut Body,
     plant: &Plant,
-    efficiency: f64,
-    mass_per_energy: f64,
-) -> Result<f64> {
+    efficiency: f32,
+    mass_per_energy: f32,
+) -> Result<f32> {
     let gain = efficiency * plant.energy;
     if gain == 0.0 {
         return Ok(0.0);
@@ -40,15 +40,15 @@ pub(super) fn assimilate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use glam::DVec2;
+    use glam::Vec2;
 
     #[test]
     fn assimilation_transfers_only_edible_mass_and_its_momentum() {
-        let mut animal = Body::new(DVec2::new(-2.0, 0.0), 0.5);
-        animal.velocity = DVec2::new(2.0, 1.0);
+        let mut animal = Body::new(Vec2::new(-2.0, 0.0), 0.5);
+        animal.velocity = Vec2::new(2.0, 1.0);
         animal.angular_velocity = 0.2;
-        let mut plant = Plant::new(1, DVec2::new(2.0, 1.0), 1.0);
-        plant.velocity = DVec2::new(-1.0, 2.0);
+        let mut plant = Plant::new(1, Vec2::new(2.0, 1.0), 1.0);
+        plant.velocity = Vec2::new(-1.0, 2.0);
         plant.angular_velocity = -0.1;
         let efficiency = 0.25;
         let mass_unit = 3.0;
@@ -65,8 +65,11 @@ mod tests {
             0.25
         );
         assert!((animal.mass(mass_unit) * animal.velocity).distance(momentum) < 1e-12);
-        assert!(animal.position.distance(center) < 1e-12);
-        assert!((animal.inertia(mass_unit) * animal.angular_velocity - angular).abs() < 1e-12);
+        assert!(animal.position.distance(center) < 2.0 * f32::EPSILON * center.length());
+        assert!(
+            (animal.inertia(mass_unit) * animal.angular_velocity - angular).abs()
+                < 4.0 * f32::EPSILON * angular.abs()
+        );
         assert_eq!(animal.energy, 0.75);
     }
 }

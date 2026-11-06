@@ -1,7 +1,7 @@
 //! Fixed circular obstacles; overlapping circles describe their geometric union.
 
 use anyhow::{Result, ensure};
-use glam::DVec2;
+use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
 use super::WorldConfig;
@@ -10,14 +10,14 @@ use super::WorldConfig;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Obstacle {
-    pub position: DVec2,
-    pub radius: f64,
+    pub position: Vec2,
+    pub radius: f32,
 }
 
 pub(super) fn validate(obstacles: &[Obstacle], world: WorldConfig) -> Result<()> {
     let half_size = world.half_size();
     ensure!(
-        half_size.is_finite() && half_size.cmpgt(DVec2::ZERO).all(),
+        half_size.is_finite() && half_size.cmpgt(Vec2::ZERO).all(),
         "obstacle arena dimensions must be finite and positive"
     );
     for obstacle in obstacles {
@@ -25,7 +25,7 @@ pub(super) fn validate(obstacles: &[Obstacle], world: WorldConfig) -> Result<()>
             obstacle.position.is_finite() && obstacle.radius.is_finite() && obstacle.radius > 0.0,
             "obstacles require finite centres and positive finite radii"
         );
-        let limit = half_size - DVec2::splat(obstacle.radius);
+        let limit = half_size - Vec2::splat(obstacle.radius);
         ensure!(
             obstacle.position.abs().cmple(limit).all(),
             "obstacle circles must fit entirely inside the arena"
@@ -35,7 +35,7 @@ pub(super) fn validate(obstacles: &[Obstacle], world: WorldConfig) -> Result<()>
 }
 
 /// Test clearance from validated obstacles; touching circles do not overlap.
-pub(super) fn clear(position: DVec2, radius: f64, obstacles: &[Obstacle]) -> bool {
+pub(super) fn clear(position: Vec2, radius: f32, obstacles: &[Obstacle]) -> bool {
     if !position.is_finite() || !radius.is_finite() || radius < 0.0 {
         return false;
     }
@@ -49,11 +49,10 @@ pub(super) fn clear(position: DVec2, radius: f64, obstacles: &[Obstacle]) -> boo
 #[cfg(feature = "viewer")]
 impl crate::viewer::Draw for Obstacle {
     fn draw(&self, drawing: &mut crate::viewer::Drawing<'_>) {
-        use glam::Vec2;
         use wgame::{prelude::*, rgb::Rgb};
 
-        let position = self.position.as_vec2();
-        let radius = self.radius as f32;
+        let position = self.position;
+        let radius = self.radius;
         let outer_radius = radius * 1.04;
         let circle = drawing.library.shapes().unit_circle();
         drawing.scene.add(

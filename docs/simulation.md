@@ -25,7 +25,7 @@ through the common `mass_per_energy` scale, and inertia is `0.5 * mass * radiusÂ
 Plants have passive linear and angular drag. Zero-energy plants remain physically
 inactive until they grow; animals with nonpositive reserves are culled next tick.
 
-The [shared dynamics](../src/ecosystem/physics/mod.rs) use `phy`'s `f64` RK4
+The [shared dynamics](../src/ecosystem/physics/mod.rs) use `phy`'s `f32` RK4
 integrator and `geom2`'s disk contact geometry. Contacts between moving disks,
 arena walls, and fixed infinite-mass obstacles use non-attractive normal spring
 and damping forces. Contacts are compliant and allow temporary overlap. Reduced

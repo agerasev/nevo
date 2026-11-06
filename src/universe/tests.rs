@@ -4,7 +4,7 @@ use crate::{
     mind::rnn::RnnGenome,
 };
 use ciborium::Value;
-use glam::DVec2;
+use glam::Vec2;
 
 fn field<'a>(value: &'a mut Value, path: &[&str]) -> &'a mut Value {
     let Some((head, tail)) = path.split_first() else {
@@ -40,7 +40,7 @@ fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover()
         ..Default::default()
     });
     config.obstacles = vec![Obstacle {
-        position: DVec2::new(150.0, 0.0),
+        position: Vec2::new(150.0, 0.0),
         radius: 20.0,
     }];
     let world: Ecosystem =
@@ -63,9 +63,9 @@ fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover()
         .as_array_mut()
         .unwrap();
     // A touching meal and a separate moving plant against the static obstacle.
-    let meal_x = -100.0 + 10.0 * 1.2_f64.sqrt() + 10.0 - 0.001;
+    let meal_x = -100.0 + 10.0 * 1.2_f32.sqrt() + 10.0 - 0.001;
     *field(&mut plants[0], &["position"]) =
-        Value::Array(vec![Value::Float(meal_x), Value::Float(0.0)]);
+        Value::Array(vec![Value::Float(f64::from(meal_x)), Value::Float(0.0)]);
     *field(&mut plants[1], &["position"]) =
         Value::Array(vec![Value::Float(120.0), Value::Float(0.0)]);
     *field(&mut plants[1], &["velocity"]) =
@@ -186,7 +186,7 @@ fn invalid_saved_kinematics_are_rejected() {
 fn invalid_saved_obstacles_are_rejected() {
     let mut config: Config = crate::test_support::ecosystem("world/debug");
     config.obstacles = vec![Obstacle {
-        position: DVec2::new(150.0, 0.0),
+        position: Vec2::new(150.0, 0.0),
         radius: 20.0,
     }];
     let universe = Universe::new(config, 1).unwrap();

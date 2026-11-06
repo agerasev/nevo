@@ -10,8 +10,8 @@ const HEADING: Rgb<f32> = Rgb::new(0.18, 0.14, 0.04);
 
 impl Draw for Plant {
     fn draw(&self, drawing: &mut Drawing<'_>) {
-        let position = self.position.as_vec2();
-        let radius = self.radius() as f32;
+        let position = self.position;
+        let radius = self.radius();
         let outer_radius = radius * 1.05;
         let circle = drawing.library.shapes().unit_circle();
         // All borders sit below all fills, including other objects' fills.
@@ -38,8 +38,8 @@ impl Draw for Plant {
 
 impl Draw for Body {
     fn draw(&self, drawing: &mut Drawing<'_>) {
-        let position = self.position.as_vec2();
-        let radius = self.radius() as f32;
+        let position = self.position;
+        let radius = self.radius();
         let outer_radius = radius * 1.07;
         let circle = drawing.library.shapes().unit_circle();
         drawing.scene.add(
@@ -60,7 +60,7 @@ impl Draw for Body {
             &circle
                 .fill_color(HEADING)
                 .scale(radius * 0.2)
-                .move_to(position + self.forward().as_vec2() * (radius * 0.6))
+                .move_to(position + self.forward() * (radius * 0.6))
                 .order(3),
         );
         drawing.include_bounds(Bounds {
@@ -78,7 +78,7 @@ impl<B: Draw, M> Draw for Animal<B, M> {
 
 impl<M, G, P, MC, IC> Draw for Ecosystem<M, G, P, MC, IC> {
     fn draw(&self, drawing: &mut Drawing<'_>) {
-        let half = self.world_config().half_size().as_vec2();
+        let half = self.world_config().half_size();
         drawing.scene.add(
             &drawing
                 .library
