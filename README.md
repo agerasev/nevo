@@ -133,28 +133,17 @@ conclusions in [history](docs/history/README.md). Run configurations live in
 - Use the [July 26 foraging experiment](docs/history/2016-07-26-ecosystem.md)
   as the Rust baseline. Start with continuous 2D space, replenishing food, and one
   animal body type. Wrapping boundaries remain part of the planned Rust world.
-- Include internal-state perception. World perception remains an open design:
-  investigate a 1D angular retina with color and distance, and possibly gradient
-  sensing as smell, with modality ablations.
+- Develop richer spatial ecology and body-relative perception/control; see the
+  [research roadmap](docs/roadmap.md) for milestones and unresolved design choices.
 - Begin with the minimum evolutionary degrees of freedom needed to demonstrate
   adaptation. The first baseline evolves weights and biases with fixed topology.
 - Use [windowed statistics](docs/metrics.md) to study behavior and evolution;
   establish adaptation through controlled comparisons, not population survival alone.
 - Record concise conclusions from major research milestones in [history](docs/history/README.md).
 
-## Proposed design
+## Next milestones
 
-These are working proposals, not implemented interfaces or settled parameters.
-
-- A simple retina can use fixed body-relative rays, reporting the nearest surface's
-  color and normalized distance with an explicit miss value. Specify field of
-  view, range, resolution, and occlusion before implementing it.
-- Compare vision-only, smell-only, and combined perception using matched trial
-  seeds and budgets. A first ablation can mask input channels while retaining the
-  same network architecture; training without a modality and disabling it only
-  during evaluation answer different questions.
-- Record code/configuration/seeds with results. Target repeatability within the
-  same build/platform first; a seeded RNG alone is not a portability promise.
-
-Open choices include retina and smell definitions, which internal signals to
-expose, and how to select genomes across trials.
+The [research and implementation roadmap](docs/roadmap.md) collects the proposed
+ecology, sensing, physics, and evolution changes in runnable steps, with checks
+and decisions to settle before implementation. It is the authoritative home for
+these plans; current behavior remains documented above and in [docs/](docs/README.md).

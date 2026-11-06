@@ -3,6 +3,7 @@
 Documentation here describes the current system, plans, and open questions.
 Only selected historical conclusions live separately under `history/`.
 
+- [Research roadmap](roadmap.md): proposed milestones, design choices, and checks.
 - [Simulation contracts](simulation.md): components, world rules, and execution.
 - [Configuration](configuration.md): presets, explicit settings, and override order.
 - [Metrics](metrics.md): typed aggregation, selections, windows, and interpretation.
