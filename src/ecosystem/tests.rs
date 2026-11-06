@@ -255,11 +255,33 @@ fn field_uses_maturity_distance_and_the_world_axes() {
         .unwrap();
     let balanced = fixture.world.sense(DVec2::ZERO);
     assert_eq!(balanced.gradient, DVec2::ZERO);
-    assert!((balanced.strength - 1.0 / 0.11).abs() < 1e-12);
+    assert!((balanced.strength - 0.004 / 0.11).abs() < 1e-12);
     fixture.world.plants[1].energy *= 0.5;
     let unbalanced = fixture.world.sense(DVec2::ZERO);
     assert!((unbalanced.gradient - DVec2::X).length() < 1e-12);
-    assert!((unbalanced.strength - 0.75 / 0.11).abs() < 1e-12);
+    assert!((unbalanced.strength - 0.003 / 0.11).abs() < 1e-12);
+}
+
+#[test]
+fn sensing_is_independent_of_arena_dimensions() {
+    let mut fixture = Fixture::debug(3);
+    fixture.world.plants[0].position = DVec2::new(70.0, 35.0);
+    let sensed = fixture.world.sense(DVec2::ZERO);
+    fixture.world.parameters.world.width *= 2.0;
+    fixture.world.parameters.world.height *= 4.0;
+    assert_eq!(fixture.world.sense(DVec2::ZERO), sensed);
+}
+
+#[test]
+fn zero_energy_plants_do_not_dilute_sensing() {
+    let mut fixture = Fixture::debug(3);
+    fixture.world.plants[0].position = DVec2::new(70.0, 35.0);
+    let sensed = fixture.world.sense(DVec2::ZERO);
+    fixture
+        .world
+        .add_plant(DVec2::new(-70.0, 0.0), 0.0)
+        .unwrap();
+    assert_eq!(fixture.world.sense(DVec2::ZERO), sensed);
 }
 
 #[test]
@@ -666,20 +688,34 @@ fn movement_uses_configured_speed_timestep_and_dead_zone() {
 }
 
 #[test]
-fn sensing_uses_instance_world_scale_and_dead_zone() {
+fn sensing_applies_configured_scales_before_the_gradient_dead_zone() {
     let mut fixture = Fixture::debug(73);
-    fixture.world.parameters.world.height = 40.0;
     fixture.world.plants[0].position = DVec2::new(8.0, 0.0);
     fixture.world.parameters.sensing = SensingConfig {
-        distance_scale: 0.25,
-        softening: 0.2,
-        gradient_dead_zone: 10.0,
+        distance_scale: 0.125,
+        signal_scale: 2.0,
+        softening: 1.0,
+        gradient_dead_zone: 0.3,
     };
     let sensed = fixture.world.sense(DVec2::ZERO);
-    assert!((sensed.strength - 1.0 / 0.3).abs() < 1e-12);
+    assert_eq!(sensed.strength, 1.0);
     assert_eq!(sensed.gradient, DVec2::ZERO);
-    fixture.world.parameters.sensing.gradient_dead_zone = 0.5;
-    assert!(fixture.world.sense(DVec2::ZERO).gradient.distance(DVec2::X) < 1e-12);
+    fixture.world.parameters.sensing.signal_scale = 4.0;
+    let amplified = fixture.world.sense(DVec2::ZERO);
+    assert_eq!(amplified.strength, 2.0);
+    assert_eq!(amplified.gradient, DVec2::X);
+}
+
+#[test]
+fn sensing_scales_must_be_finite_and_positive() {
+    for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let mut parameters = Parameters::default();
+        parameters.sensing.distance_scale = invalid;
+        assert!(parameters.validate().is_err());
+        parameters.sensing = SensingConfig::default();
+        parameters.sensing.signal_scale = invalid;
+        assert!(parameters.validate().is_err());
+    }
 }
 
 #[test]

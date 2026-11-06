@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use super::config::Config;
 
 const FORMAT_VERSION: u32 = 11;
-pub(super) const WORLD_MODEL: &str = "foraging-sense-first-v5";
+pub(super) const WORLD_MODEL: &str = "foraging-sense-first-v6";
 pub(super) const AGENT_MODEL: &str = "animal-rnn-3-n-3-v2";
 
 #[derive(Serialize, Deserialize)]
@@ -356,7 +356,10 @@ mod tests {
         for (name, invalid) in [
             ("format_version", ciborium::Value::from(3)),
             ("format_version", ciborium::Value::from(99)),
-            ("world_model", ciborium::Value::from("another-world")),
+            (
+                "world_model",
+                ciborium::Value::from("foraging-sense-first-v5"),
+            ),
             ("agent_model", ciborium::Value::from("another-agent")),
         ] {
             let mut value = ciborium::Value::serialized(&checkpoint).unwrap();

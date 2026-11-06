@@ -18,6 +18,14 @@ budget with [upkeep only](../configs/movement/upkeep-only.toml),
 [flat movement cost](../configs/movement/flat.toml), or
 [energy-proportional movement cost](../configs/movement/cost.toml).
 
+The bounded [larger-world preset](../configs/large-world.toml) expands the arena
+while preserving initial plant and animal densities. Local sensing uses fixed
+`sensing.distance_scale` and `sensing.signal_scale`, independent of arena dimensions
+and plant count. Their defaults retain the original 500-plant baseline's signal
+scale; sparse worlds no longer amplify each source by averaging over fewer plants.
+Sources still contribute at all distances; finite-range sensing is a later milestone.
+This changes the world model, so earlier checkpoints require their original build.
+
 Energy units use a reference reproduction threshold of `1.0`, consistently for
 animals, plants, food gains, and costs. Changing the configured threshold changes
 the experiment, not its units. Earlier logs keep their original units.

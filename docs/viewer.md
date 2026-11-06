@@ -16,6 +16,12 @@ the saved pacing setting remains the startup value.
 closing the window stops the worker. `viewer.vsync` controls presentation without
 changing simulation time or pacing.
 
+In **World**, drag with the left mouse button to pan and scroll to zoom around the
+cursor. **Fit world** or Home with the arena focused restores automatic fitting.
+Manual navigation preserves the center and magnification when resizing or switching
+tabs. Camera state belongs to the viewer and is not saved in simulation checkpoints.
+Try the [larger-world preset](../configs/large-world.toml) with `--viewer --paused`.
+
 The [rendering tests](../tests/viewer_rendering.rs) require a GPU or software adapter:
 
 ```sh

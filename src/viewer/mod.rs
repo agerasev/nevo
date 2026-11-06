@@ -1,10 +1,12 @@
 //! Model-independent viewing through wgame. Simulation types opt into drawing.
 
+mod camera;
 mod controls;
 mod drawing;
 mod metrics;
 mod window;
 
+pub use camera::Camera;
 pub use drawing::{Bounds, Drawing, Label};
 pub use window::{Options, Tab, show};
 

@@ -356,17 +356,14 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
     fn sense(&self, position: DVec2) -> FoodObservation {
         let mut field = FoodObservation::default();
         for plant in &self.plants {
-            let displacement = (plant.position - position)
-                * (self.parameters.sensing.distance_scale / self.parameters.world.half_size().y);
+            let displacement = (plant.position - position) * self.parameters.sensing.distance_scale;
             let distance = displacement.length() + self.parameters.sensing.softening;
             let mass = plant.energy / self.parameters.plant.max_energy;
             field.strength += mass / distance;
             field.gradient += mass * displacement / (distance * distance * distance);
         }
-        if !self.plants.is_empty() {
-            field.strength /= self.plants.len() as f64;
-            field.gradient /= self.plants.len() as f64;
-        }
+        field.strength *= self.parameters.sensing.signal_scale;
+        field.gradient *= self.parameters.sensing.signal_scale;
         field.gradient = if field.gradient.length() > self.parameters.sensing.gradient_dead_zone {
             field.gradient.normalize()
         } else {

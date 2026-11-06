@@ -1,7 +1,7 @@
 # Research roadmap
 
-This is a plan, not implemented behavior. The sequence and mechanisms below are
-recommendations; **Open** choices require agreement before implementation.
+Completed milestones are marked below; the remaining sequence and mechanisms are
+recommendations. **Open** choices require agreement before implementation.
 The [controller comparison](history/2026-11-05-gradient-comparison.md) reached the
 food-production ceiling, while [costly movement](history/2026-11-05-costly-movement-models.md)
 slowed reproductive turnover. Prioritize environments where navigation and
@@ -11,10 +11,9 @@ Each milestone should yield a bounded runnable preset and relevant invariants.
 Steps 1–4 establish navigation; 5–6 extend ecology. Step 7 can happen earlier;
 8–9 need an established evaluation environment.
 
-1. **Larger worlds and camera navigation.** Add pan, cursor-centered zoom, and
-   fit-world controls. Decouple local sensing from arena size and total plant count;
-   enlarging the arena must preserve equivalent local scenes. Initially scale food
-   supply with area to separate size from scarcity.
+1. **Completed: larger worlds and camera navigation.** [Camera controls](viewer.md)
+   and fixed [sensing scales](configuration.md) support a bounded
+   [larger-world preset](../configs/large-world.toml) with unchanged initial densities.
 2. **Persistent resource patches.** Introduce seeded fertility, with placement
    density and growth multipliers controlled separately. Replacements must retain
    the spatial distribution. **Open:** patch scale/representation and weighted

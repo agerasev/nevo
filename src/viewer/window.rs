@@ -13,7 +13,7 @@ use wgame::{
 };
 use wgame_egui::{EguiWindow, egui};
 
-use super::{Draw, Drawing, Label, controls::Controls, metrics};
+use super::{Camera, Draw, Drawing, Label, controls::Controls, metrics};
 use crate::run::{Command, Control, UniverseView};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -70,6 +70,8 @@ pub async fn show<U: Draw>(
     options: Options,
 ) -> wgame::Result<()> {
     let active_tab = Cell::new(options.initial_tab);
+    let fit_camera = Cell::new(false);
+    let mut camera = Camera::default();
     let metrics = RefCell::new(metrics::Panel::new(options.metrics_path.clone()));
     let initial = control.status();
     let controls = RefCell::new(Controls::new(initial.interval));
@@ -122,7 +124,16 @@ pub async fn show<U: Draw>(
                 }
             });
             let mut tab = active_tab.get();
-            tab_bar(ui, &mut tab);
+            ui.horizontal(|ui| {
+                tab_bar(ui, &mut tab);
+                if tab == Tab::World {
+                    ui.separator();
+                    if ui.button("Fit world").clicked() {
+                        fit_camera.set(true);
+                    }
+                    ui.weak("Drag to pan · Scroll to zoom · Home to fit");
+                }
+            });
             active_tab.set(tab);
         });
         egui::CentralPanel::default()
@@ -170,6 +181,14 @@ pub async fn show<U: Draw>(
         let Some(mut frame) = host.next_frame().await? else {
             return Ok(());
         };
+        if fit_camera.replace(false) {
+            camera.fit();
+        }
+        if frame.visible() && active_tab.get() == Tab::World {
+            camera.update(drawing.bounds, frame.logical_size(), frame.input());
+        } else {
+            camera.cancel_gesture();
+        }
         if loop_status.stop.is_none() && active_tab.get() == Tab::World {
             for event in &frame.input().events {
                 if let Event::Key {
@@ -187,7 +206,7 @@ pub async fn show<U: Draw>(
             }
         }
         if frame.visible() {
-            drawing.render(&mut frame);
+            drawing.render(&mut frame, &camera);
         }
         frame.present();
     }

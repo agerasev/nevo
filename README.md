@@ -14,6 +14,8 @@ cargo run --locked -- runs/baseline --config configs/baseline.toml --seed 1 --ti
 cargo run --locked -- runs/baseline --config configs/viewer.toml
 # Inspect a small deterministic scene.
 cargo run --locked -- --config configs/debug.toml --viewer --paused
+# Explore a larger world with camera pan and zoom.
+cargo run --locked -- --config configs/large-world.toml --viewer --paused
 ```
 
 Run directories contain resolved configuration, checkpoints, and metrics.

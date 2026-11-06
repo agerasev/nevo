@@ -202,15 +202,18 @@ impl Default for ImmigrationConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SensingConfig {
-    /// Multiplier applied before dividing displacement by the world's half-height.
+    /// Inverse world-unit scale applied to displacement from each food source.
     pub distance_scale: f64,
+    /// Gain on summed strength and gradient, before the gradient dead zone.
+    pub signal_scale: f64,
     pub softening: f64,
     pub gradient_dead_zone: f64,
 }
 impl Default for SensingConfig {
     fn default() -> Self {
         Self {
-            distance_scale: 0.5,
+            distance_scale: 1.0 / 700.0,
+            signal_scale: 1.0 / 500.0,
             softening: 0.01,
             gradient_dead_zone: 0.01,
         }
@@ -289,10 +292,7 @@ impl Parameters {
         nonnegative(self.immigration.energy, "immigration energy")?;
         self.immigration.position.validate(self.world)?;
         positive(self.sensing.distance_scale, "sensing distance_scale")?;
-        positive(
-            self.sensing.distance_scale / self.world.half_size().y,
-            "normalized sensing scale",
-        )?;
+        positive(self.sensing.signal_scale, "sensing signal_scale")?;
         positive(self.sensing.softening, "sensing softening")?;
         positive(self.sensing.softening.powi(3), "cubed sensing softening")?;
         nonnegative(

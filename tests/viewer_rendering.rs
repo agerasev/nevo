@@ -11,10 +11,11 @@ use glam::{DVec2, Vec2};
 use nevo::{
     ecosystem::{Animal, Body, Ecosystem, Plant},
     universe::Universe,
-    viewer::{Bounds, Draw, Drawing},
+    viewer::{Bounds, Camera, Draw, Drawing},
 };
 use wgame::{
     Library,
+    canvas::{CanvasInput, Event},
     gfx::{Graphics, Offscreen, Target},
 };
 
@@ -126,11 +127,24 @@ fn entities_collect_owned_geometry_without_mind_traits() {
         max: Vec2::ONE,
     });
     let mut target = Offscreen::new(&graphics, (100, 100));
-    drawing.render(&mut target);
+    drawing.render(&mut target, &Camera::default());
     let image = pixels(&mut target);
     assert_pixel(&image, 26, 50, [51, 189, 82, 255]);
     assert_pixel(&image, 74, 50, [255, 217, 64, 255]);
     assert_pixel(&image, 50, 50, [14, 18, 19, 255]);
+    // Navigation uses the same drawing path, with zoom anchored at the animal.
+    let mut camera = Camera::default();
+    let mut input = CanvasInput::default();
+    input.events = vec![
+        Event::Moved(Vec2::new(74.0, 50.0)),
+        Event::Scroll(Vec2::new(0.0, 2.0_f32.ln() / 0.005)),
+    ];
+    camera.update(drawing.bounds, (100.0, 100.0), &input);
+    drawing.render(&mut target, &camera);
+    let image = pixels(&mut target);
+    assert_pixel(&image, 74, 50, [255, 217, 64, 255]);
+    assert_pixel(&image, 88, 50, [255, 217, 64, 255]);
+    assert_pixel(&image, 26, 50, [14, 18, 19, 255]);
     // No genetic or inference bounds leak through the world's drawing interface.
     fn assert_draw<T: Draw>() {}
     assert_draw::<Ecosystem<UnrelatedMind, (), (), (), ()>>();
@@ -162,7 +176,7 @@ fn overlapping_circles_hide_borders_inside_their_fills() {
                 max: Vec2::ONE,
             });
             let mut target = Offscreen::new(&graphics, (100, 100));
-            drawing.render(&mut target);
+            drawing.render(&mut target, &Camera::default());
             let image = pixels(&mut target);
             // The neighboring border crosses these interiors in a stroke-based draw.
             assert_pixel(&image, 37, 50, left_color);
@@ -191,6 +205,6 @@ fn ecosystem_drawing_preserves_complete_state() {
     let mut drawing = Drawing::new(&library);
     universe.draw(&mut drawing);
     let mut target = Offscreen::new(&graphics, (100, 100));
-    drawing.render(&mut target);
+    drawing.render(&mut target, &Camera::default());
     assert_eq!(universe, before);
 }
