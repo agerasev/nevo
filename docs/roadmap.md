@@ -21,14 +21,13 @@ Steps 1–4 establish navigation; 5–6 extend ecology. Step 7 can happen earlie
    configurable recovery. [Composable presets](configuration.md) separate
    replenishment from individual plant growth; [metrics](metrics.md) distinguish
    plant production from food intake.
-3. **Body heading and damped locomotion.** Give bodies persistent heading, linear
-   velocity, and angular velocity. Use body-relative sensing/control, initially
-   bounded forward thrust and turning torque with drag. **Open:** sideways/reverse
-   thrust, force versus acceleration, mass/inertia, drag, effort costs, and birth
-   momentum. Effort should cost energy even without displacement. Evaluate `phy`
-   as an integrator; precision and checkpoint integration need resolution first.
-   Physics substeps must not multiply ecological events/rates or rerun brains.
-   Rotating a scene should preserve body-frame inputs and rotate world-frame actions.
+3. **Completed: body heading and damped locomotion.** Bodies
+   retain heading and velocities, with forward and angular acceleration controlled
+   in body coordinates. [Locomotion and movement presets](configuration.md)
+   separate drag and inertia from positive mechanical work and motor losses.
+   [Physics substeps](simulation.md) preserve one mind update and one set of
+   ecological events per tick. Heading is visible in the viewer; obstacles and
+   animal collisions remain in milestone 4.
 4. **Local perception and obstacles.** Start with finite-range body-relative rays
    reporting nearest surfaces and an explicit miss, plus optional food-gradient
    smell. Static obstacles occlude vision; contacts and spawning respect geometry.

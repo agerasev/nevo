@@ -2,12 +2,12 @@ use anyhow::Result;
 use glam::DVec2;
 use nevo::{
     context::{Context, Cpu},
-    ecosystem::FoodObservation,
+    ecosystem::AnimalObservation,
     genome::{Mutate, RandomInit},
     mind::{
         Mind,
         animal::AnimalMind,
-        rnn::{RnnGenome, WeightMutation},
+        rnn::{INPUTS, OUTPUTS, RnnGenome, WeightMutation},
     },
 };
 use rand::{Rng, SeedableRng};
@@ -18,14 +18,14 @@ fn animal_accepts_another_mind_and_propagates_its_errors() {
     struct EchoMind;
 
     impl<C: Context + ?Sized> nevo::mind::Mind<C> for EchoMind {
-        type Input = [f32; 3];
-        type Output = [f32; 3];
+        type Input = [f32; INPUTS];
+        type Output = [f32; OUTPUTS];
         type Update = ();
         type Config = ();
 
         fn compute_update(&self, input: Self::Input, _: &mut C) -> Result<(Self::Output, ())> {
-            anyhow::ensure!(input.iter().all(|v| v.is_finite()), "invalid signal");
-            Ok((input, ()))
+            anyhow::ensure!(input[2] >= 0.0, "negative food strength");
+            Ok(([input[0], input[1]], ()))
         }
 
         fn apply_update(&mut self, _: ()) {}
@@ -37,27 +37,28 @@ fn animal_accepts_another_mind_and_propagates_its_errors() {
     let mut agent = AnimalMind::from_brain(EchoMind);
     let action = agent
         .process(
-            FoodObservation {
+            AnimalObservation {
                 gradient: DVec2::new(0.25, -0.5),
-                strength: -1.0,
+                strength: 1.0,
+                ..AnimalObservation::default()
             },
             &mut cx,
         )
         .unwrap();
-    assert_eq!(action.direction, DVec2::new(0.25, -0.5));
-    assert_eq!(action.speed_fraction, 1.0_f64.tanh());
+    assert_eq!(action.thrust, 0.25_f64.tanh());
+    assert_eq!(action.turn, (-0.5_f64).tanh());
     assert_eq!(
         agent
             .process(
-                FoodObservation {
-                    strength: f64::NAN,
-                    ..FoodObservation::default()
+                AnimalObservation {
+                    strength: -1.0,
+                    ..AnimalObservation::default()
                 },
                 &mut cx,
             )
             .unwrap_err()
             .to_string(),
-        "invalid signal"
+        "negative food strength"
     );
 }
 
@@ -84,7 +85,7 @@ fn mind_initialization_and_mutation_accept_an_unsized_context() {
     genome.mutate(&WeightMutation::default(), cx).unwrap();
     AnimalMind::new(genome)
         .unwrap()
-        .process(FoodObservation::default(), cx)
+        .process(AnimalObservation::default(), cx)
         .unwrap();
 }
 
@@ -94,10 +95,8 @@ fn zero_mutation_preserves_genome_and_random_stream() {
         rng: Xoshiro256PlusPlus::seed_from_u64(17),
     };
     let before = context.clone();
-    let mut genome = RnnGenome {
-        weights: vec![0.5; 47],
-        ..RnnGenome::default()
-    };
+    let mut genome = RnnGenome::default();
+    genome.weights.fill(0.5);
     let original = genome.clone();
 
     genome
@@ -113,10 +112,8 @@ fn invalid_mutation_fails_without_changing_genome_or_random_stream() {
         rng: Xoshiro256PlusPlus::seed_from_u64(17),
     };
     let before = context.clone();
-    let mut genome = RnnGenome {
-        weights: vec![0.5; 47],
-        ..RnnGenome::default()
-    };
+    let mut genome = RnnGenome::default();
+    genome.weights.fill(0.5);
     let original = genome.clone();
 
     for max_delta in [-1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::MAX] {

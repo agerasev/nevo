@@ -1,5 +1,6 @@
 //! The foraging experiment: physical bodies and their minds share one lifetime.
 
+mod body;
 mod config;
 mod metrics;
 mod patches;
@@ -9,6 +10,7 @@ mod update;
 #[cfg(feature = "viewer")]
 mod draw;
 
+pub use body::{Body, MotorAction};
 pub use config::{
     AnimalConfig, BodyConfig, Config, FeedingConfig, GeneticsConfig, ImmigrationConfig,
     MetricsConfig, Placement, PlantConfig, ReproductionConfig, SensingConfig, WorldConfig,
@@ -36,7 +38,7 @@ use crate::{
     universe::Simulation,
 };
 
-use config::{BodyParameters, Parameters};
+use config::Parameters;
 
 type GeneticContext = Cpu<Xoshiro256PlusPlus>;
 
@@ -54,25 +56,14 @@ impl AnimalId {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct FoodObservation {
+pub struct AnimalObservation {
     pub strength: f64,
+    /// Food gradient in body coordinates: x forward, y left.
     pub gradient: DVec2,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct MoveAction {
-    pub direction: DVec2,
-    pub speed_fraction: f64,
-}
-
-impl MoveAction {
-    fn displacement(self, body: BodyParameters) -> DVec2 {
-        if self.direction.length() <= body.movement_dead_zone {
-            return DVec2::ZERO;
-        }
-        self.direction.normalize_or_zero()
-            * (self.speed_fraction.clamp(0.0, 1.0) * body.max_speed * body.movement_time_step)
-    }
+    /// Body-relative velocity multiplied by sensing.velocity_scale.
+    pub velocity: DVec2,
+    /// Angular velocity multiplied by sensing.angular_velocity_scale.
+    pub angular_velocity: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -90,29 +81,6 @@ impl Plant {
     fn with_radius_scale(id: u64, position: DVec2, energy: f64, radius_scale: f64) -> Self {
         Self {
             id,
-            position,
-            energy,
-            radius_scale,
-        }
-    }
-    pub fn radius(&self) -> f64 {
-        radius(self.energy, self.radius_scale)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Body {
-    pub position: DVec2,
-    pub energy: f64,
-    radius_scale: f64,
-}
-impl Body {
-    pub fn new(position: DVec2, energy: f64) -> Self {
-        Self::with_radius_scale(position, energy, BodyConfig::default().radius_scale)
-    }
-    fn with_radius_scale(position: DVec2, energy: f64, radius_scale: f64) -> Self {
-        Self {
             position,
             energy,
             radius_scale,
@@ -150,13 +118,19 @@ pub enum Event {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Decision {
     pub id: AnimalId,
-    pub observation: FoodObservation,
-    pub action: MoveAction,
+    pub observation: AnimalObservation,
+    pub action: MotorAction,
     /// Energy when sensed, before feeding, splitting, and upkeep.
     pub energy: f64,
     pub position_before: DVec2,
     /// Movement endpoint, before birth offsets and clamping after growth.
     pub position_after: DVec2,
+    pub heading_before: f64,
+    pub heading_after: f64,
+    /// Actual path length through motion substeps, excluding birth/growth shifts.
+    pub distance: f64,
+    /// Reserve energy charged for positive motor work and resistive losses.
+    pub movement_energy: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -215,22 +189,7 @@ fn add_plant(
 }
 
 fn validate_body(body: &Body, parameters: Parameters) -> Result<()> {
-    // Negative energy is legitimate between upkeep and the next cull.
-    ensure!(body.energy.is_finite(), "non-finite animal energy");
-    ensure!(
-        body.position.is_finite()
-            && body
-                .position
-                .abs()
-                .cmple(parameters.world.half_size())
-                .all(),
-        "invalid animal position"
-    );
-    ensure!(
-        body.radius_scale == parameters.body.radius_scale && body.radius().is_finite(),
-        "invalid animal radius"
-    );
-    Ok(())
+    body.validate(parameters.world, parameters.body)
 }
 
 fn validate_plants(
@@ -403,10 +362,11 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
         Ok(())
     }
 
-    fn sense(&self, position: DVec2) -> FoodObservation {
-        let mut field = FoodObservation::default();
+    fn sense(&self, body: &Body) -> AnimalObservation {
+        let mut field = AnimalObservation::default();
         for plant in &self.plants {
-            let displacement = (plant.position - position) * self.parameters.sensing.distance_scale;
+            let displacement =
+                (plant.position - body.position) * self.parameters.sensing.distance_scale;
             let distance = displacement.length() + self.parameters.sensing.softening;
             let mass = plant.energy / self.parameters.plant.max_energy;
             field.strength += mass / distance;
@@ -415,17 +375,22 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
         field.strength *= self.parameters.sensing.signal_scale;
         field.gradient *= self.parameters.sensing.signal_scale;
         field.gradient = if field.gradient.length() > self.parameters.sensing.gradient_dead_zone {
-            field.gradient.normalize()
+            body.world_to_body(field.gradient.normalize())
         } else {
             DVec2::ZERO
         };
+        field.velocity = body.world_to_body(body.velocity) * self.parameters.sensing.velocity_scale;
+        field.angular_velocity =
+            body.angular_velocity * self.parameters.sensing.angular_velocity_scale;
         field
     }
 }
 
 impl<M, G, P> Ecosystem<M, G, P>
 where
-    M: Mind<GeneticContext, Input = FoodObservation, Output = MoveAction> + AsRef<G> + TryFrom<G>,
+    M: Mind<GeneticContext, Input = AnimalObservation, Output = MotorAction>
+        + AsRef<G>
+        + TryFrom<G>,
     M::Error: Into<anyhow::Error>,
     G: RandomInit<GeneticContext> + Mutate<GeneticContext, P>,
     P: Clone + PartialEq + Default,
@@ -516,11 +481,13 @@ where
             Some(template) => template.clone(),
             None => G::random(initialization, context)?,
         };
-        let body = Body::with_radius_scale(
+        let mut body = Body::with_radius_scale(
             position,
             parameters.immigration.energy,
             parameters.body.radius_scale,
         );
+        body.heading = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
+        body.confine(parameters.world);
         Ok(Animal {
             body,
             mind: Self::develop(genome, mind_config)?,
@@ -540,7 +507,9 @@ where
 
 impl<M, G, P> Simulation for Ecosystem<M, G, P>
 where
-    M: Mind<GeneticContext, Input = FoodObservation, Output = MoveAction> + AsRef<G> + TryFrom<G>,
+    M: Mind<GeneticContext, Input = AnimalObservation, Output = MotorAction>
+        + AsRef<G>
+        + TryFrom<G>,
     M::Error: Into<anyhow::Error>,
     G: RandomInit<GeneticContext> + Mutate<GeneticContext, P>,
     P: Clone + PartialEq + Default,

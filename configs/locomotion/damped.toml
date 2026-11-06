@@ -1,0 +1,10 @@
+# Forward and angular acceleration with viscous damping.
+[ecosystem.animal.body]
+mass = 1.0
+moment_of_inertia = 1.0
+max_acceleration = 100.0
+max_angular_acceleration = 10.0
+linear_drag = 1.0
+angular_drag = 2.0
+time_step = 0.1
+substeps = 4

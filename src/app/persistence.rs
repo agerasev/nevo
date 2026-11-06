@@ -13,9 +13,9 @@ use serde::{Deserialize, Serialize};
 
 use super::config::Config;
 
-const FORMAT_VERSION: u32 = 13;
-pub(super) const WORLD_MODEL: &str = "foraging-sense-first-v8";
-pub(super) const AGENT_MODEL: &str = "animal-rnn-3-n-3-v2";
+const FORMAT_VERSION: u32 = 14;
+pub(super) const WORLD_MODEL: &str = "foraging-body-frame-v9";
+pub(super) const AGENT_MODEL: &str = "animal-rnn-6-n-2-v3";
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -354,13 +354,13 @@ mod tests {
             state: Universe::new(nevo::ecosystem::Config::default(), 1).unwrap(),
         };
         for (name, invalid) in [
-            ("format_version", ciborium::Value::from(12)),
+            ("format_version", ciborium::Value::from(13)),
             ("format_version", ciborium::Value::from(99)),
             (
                 "world_model",
-                ciborium::Value::from("foraging-sense-first-v7"),
+                ciborium::Value::from("foraging-sense-first-v8"),
             ),
-            ("agent_model", ciborium::Value::from("another-agent")),
+            ("agent_model", ciborium::Value::from("animal-rnn-3-n-3-v2")),
         ] {
             let mut value = ciborium::Value::serialized(&checkpoint).unwrap();
             value

@@ -23,6 +23,7 @@ struct SavedConfig {
 struct Checkpoint {
     format_version: u32,
     world_model: String,
+    agent_model: String,
     config: SavedConfig,
     state: Universe,
 }
@@ -31,6 +32,7 @@ struct Checkpoint {
 struct Totals {
     ticks: u64,
     animal_ticks: u64,
+    plant_ticks: u64,
     active_animal_ticks: u64,
     births: u64,
     deaths: u64,
@@ -42,7 +44,7 @@ struct Totals {
     animal_energy: f64,
     plant_energy: f64,
     moving_actions: u64,
-    heading_pairs: u64,
+    travel_direction_pairs: u64,
     turns_over_90: u64,
     turns_over_150: u64,
     turn_degrees: f64,
@@ -54,6 +56,7 @@ impl Totals {
         add!(
             ticks,
             animal_ticks,
+            plant_ticks,
             active_animal_ticks,
             births,
             deaths,
@@ -65,14 +68,14 @@ impl Totals {
             animal_energy,
             plant_energy,
             moving_actions,
-            heading_pairs,
+            travel_direction_pairs,
             turns_over_90,
             turns_over_150,
             turn_degrees
         );
     }
 
-    fn summary(&self, plants: usize) -> serde_json::Value {
+    fn summary(&self) -> serde_json::Value {
         fn ratio(a: f64, b: f64) -> Option<f64> {
             (b > 0.0).then(|| a / b)
         }
@@ -80,14 +83,14 @@ impl Totals {
             "totals": self,
             "mean_population": ratio(self.animal_ticks as f64, self.ticks as f64),
             "mean_animal_energy": ratio(self.animal_energy, self.animal_ticks as f64),
-            "mean_plant_energy": ratio(self.plant_energy, self.ticks as f64 * plants as f64),
+            "mean_plant_energy": ratio(self.plant_energy, self.plant_ticks as f64),
             "food_per_tick": ratio(self.food, self.ticks as f64),
             "birth_death_ratio": ratio(self.births as f64, self.deaths as f64),
             "distance_per_active_tick": ratio(self.distance, self.active_animal_ticks as f64),
             "moving_fraction": ratio(self.moving_actions as f64, self.active_animal_ticks as f64),
-            "turns_over_90_fraction": ratio(self.turns_over_90 as f64, self.heading_pairs as f64),
-            "turns_over_150_fraction": ratio(self.turns_over_150 as f64, self.heading_pairs as f64),
-            "mean_turn_degrees": ratio(self.turn_degrees, self.heading_pairs as f64),
+            "turns_over_90_fraction": ratio(self.turns_over_90 as f64, self.travel_direction_pairs as f64),
+            "turns_over_150_fraction": ratio(self.turns_over_150 as f64, self.travel_direction_pairs as f64),
+            "mean_turn_degrees": ratio(self.turn_degrees, self.travel_direction_pairs as f64),
             "food_per_energy_spent": ratio(self.food, self.upkeep_energy + self.movement_energy),
         })
     }
@@ -104,6 +107,7 @@ fn observe(
     let mut sample = Totals {
         ticks: 1,
         animal_ticks: world.animals().len() as u64,
+        plant_ticks: world.plants().len() as u64,
         active_animal_ticks: report.decisions.len() as u64,
         upkeep_energy: world.animals().len() as f64 * body.upkeep,
         animal_energy: world.animals().values().map(|a| a.body.energy).sum(),
@@ -122,24 +126,17 @@ fn observe(
     for decision in &report.decisions {
         let delta = decision.position_after - decision.position_before;
         let distance = delta.length();
-        sample.distance += distance;
-        if distance > 0.0 && body.movement_cost > 0.0 {
-            let mass = if body.movement_energy_power == 0.0 {
-                1.0
-            } else {
-                decision.energy.powf(body.movement_energy_power)
-            };
-            sample.movement_energy += mass * (distance * body.movement_cost);
-        }
-        // Ignore numerical noise; stops reset pairs and newborns have no prior heading.
+        sample.distance += decision.distance;
+        sample.movement_energy += decision.movement_energy;
+        sample.moving_actions += u64::from(decision.distance > 1e-9);
+        // Net travel direction differs from body heading; zero net travel resets pairs.
         if distance <= 1e-9 {
             continue;
         }
-        sample.moving_actions += 1;
         let direction = delta / distance;
         if let Some(last) = previous.get(&decision.id.serial()) {
             let dot = last.dot(direction).clamp(-1.0, 1.0);
-            sample.heading_pairs += 1;
+            sample.travel_direction_pairs += 1;
             sample.turns_over_90 += u64::from(dot < 0.0);
             sample.turns_over_150 += u64::from(dot < -(3.0_f64.sqrt() / 2.0));
             sample.turn_degrees += last.perp_dot(direction).abs().atan2(dot).to_degrees();
@@ -158,7 +155,9 @@ fn main() -> Result<()> {
     );
     let checkpoint: Checkpoint = ciborium::from_reader(BufReader::new(fs::File::open(&path)?))?;
     ensure!(
-        checkpoint.format_version == 13 && checkpoint.world_model == "foraging-sense-first-v8",
+        checkpoint.format_version == 14
+            && checkpoint.world_model == "foraging-body-frame-v9"
+            && checkpoint.agent_model == "animal-rnn-6-n-2-v3",
         "unsupported checkpoint; use the matching simulation build"
     );
     checkpoint.state.validate()?;
@@ -183,7 +182,7 @@ fn main() -> Result<()> {
             late.merge(&sample);
         }
         if tick % 1000 == 0 || tick == ticks {
-            windows.push(json!({"end_tick": tick, "summary": window.summary(config.plants)}));
+            windows.push(json!({"end_tick": tick, "summary": window.summary()}));
             window = Totals::default();
         }
     }
@@ -202,9 +201,9 @@ fn main() -> Result<()> {
         serde_json::to_vec_pretty(&json!({
             "checkpoint": path, "seed": seed.to_string(), "ticks": ticks,
             "code_revision": env!("NEVO_REVISION"), "exact_final_state_verified": true,
-            "definition": "Angles between consecutive controlled displacements of the same animal, both longer than 1e-9; stops break pairs; birth offsets excluded.",
+            "definition": "Turn statistics measure angles between consecutive net locomotion displacements of the same animal, both longer than 1e-9; zero net travel breaks pairs. These are travel-direction changes, not body-heading rotations. Distance sums substep path lengths; movement energy is the actual charged work and motor loss. Birth offsets are excluded; mean plant energy uses actual plant counts at each tick endpoint.",
             "late_start_tick": late_start, "late_end_tick": ticks,
-            "overall": total.summary(config.plants), "late": late.summary(config.plants),
+            "overall": total.summary(), "late": late.summary(),
             "windows": windows,
         }))?,
     )?;
@@ -220,29 +219,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn heading_pairs_count_reversals_and_reset_after_stops() {
-        let mut config = Config {
+    fn travel_direction_pairs_count_reversals_and_reset_after_stops() {
+        let config = Config {
             initial_animals: 1,
             plants: 0,
             minimum_population: 0,
             ..Config::default()
         };
-        config.animal.body.movement_cost = 0.00045;
-        config.animal.body.movement_energy_power = 0.0;
         let mut state = Universe::new(config.clone(), 1).unwrap();
         let mut previous = BTreeMap::new();
         let mut total = Totals::default();
-        for delta in [DVec2::X, DVec2::X, -DVec2::X, DVec2::ZERO, DVec2::Y] {
+        for (delta, distance, energy) in [
+            (DVec2::X, 2.0, 0.0001),
+            (DVec2::X, 3.0, 0.0002),
+            (-DVec2::X, 4.0, 0.0003),
+            (DVec2::ZERO, 0.0, 0.0004),
+            (DVec2::Y, 5.0, 0.0005),
+        ] {
             let mut report = state.advance().unwrap();
             report.decisions[0].position_after = report.decisions[0].position_before + delta;
+            report.decisions[0].distance = distance;
+            report.decisions[0].movement_energy = energy;
             total.merge(&observe(&report, &state, &config, &mut previous));
         }
         assert_eq!(total.moving_actions, 4);
-        assert_eq!(total.heading_pairs, 2);
+        assert_eq!(total.travel_direction_pairs, 2);
         assert_eq!(total.turns_over_90, 1);
         assert_eq!(total.turns_over_150, 1);
         assert_eq!(total.turn_degrees, 180.0);
-        assert_eq!(total.distance, 4.0);
-        assert!((total.movement_energy - 0.0018).abs() < 1e-12);
+        assert_eq!(total.distance, 14.0);
+        assert!((total.movement_energy - 0.0015).abs() < 1e-12);
     }
 }

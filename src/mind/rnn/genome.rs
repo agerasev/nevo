@@ -1,12 +1,13 @@
 use anyhow::{Result, ensure};
 use rand::RngExt;
 
+use super::{INPUTS, OUTPUTS};
 use crate::{
     context::Context,
     genome::{Genome, Mutate, RandomInit},
 };
 
-/// Initialization for a recurrent brain with three inputs and three outputs.
+/// Initialization for a recurrent brain with fixed input/output dimensions.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Initialization {
@@ -43,9 +44,9 @@ impl Initialization {
 pub(super) fn weight_count(hidden_units: usize) -> Result<usize> {
     ensure!(hidden_units > 0, "hidden_units must be positive");
     let count = hidden_units
-        .checked_add(7)
+        .checked_add(INPUTS + OUTPUTS + 1)
         .and_then(|n| n.checked_mul(hidden_units))
-        .and_then(|n| n.checked_add(3))
+        .and_then(|n| n.checked_add(OUTPUTS))
         .filter(|&n| n <= isize::MAX as usize / size_of::<f32>())
         .ok_or_else(|| anyhow::anyhow!("hidden_units produces an oversized genome"))?;
     Ok(count)

@@ -126,10 +126,16 @@ fn overwritten_files_still_reject_unknown_keys_and_invalid_types() {
 #[test]
 fn movement_presets_each_specify_a_complete_energy_budget() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("configs/movement");
-    for name in ["upkeep-only", "flat", "cost"] {
+    for name in ["upkeep-only", "work-and-loss"] {
         let text = fs::read_to_string(root.join(format!("{name}.toml"))).unwrap();
         let value: toml::Value = toml::from_str(&text).unwrap();
-        for field in ["upkeep", "movement_cost", "movement_energy_power"] {
+        for field in [
+            "upkeep",
+            "energy_scale",
+            "motor_efficiency",
+            "force_loss",
+            "torque_loss",
+        ] {
             assert!(
                 value["ecosystem"]["animal"]["body"].get(field).is_some(),
                 "{name}: {field}"
@@ -174,7 +180,8 @@ fn preset_categories_own_disjoint_fields_and_compose_independently_of_order() {
                 "debug",
             ],
         ),
-        ("movement", &["upkeep-only", "flat", "cost"]),
+        ("locomotion", &["damped"]),
+        ("movement", &["upkeep-only", "work-and-loss"]),
         ("plant-growth", &["uniform", "patches"]),
         ("viewer", &["window"]),
         ("metrics", &["long-window"]),
@@ -201,7 +208,8 @@ fn preset_categories_own_disjoint_fields_and_compose_independently_of_order() {
 
     let mut paths = [
         "world/large-nonuniform.toml",
-        "movement/cost.toml",
+        "locomotion/damped.toml",
+        "movement/work-and-loss.toml",
         "plant-growth/patches.toml",
         "viewer/window.toml",
         "metrics/long-window.toml",

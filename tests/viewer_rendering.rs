@@ -115,10 +115,11 @@ fn entities_collect_owned_geometry_without_mind_traits() {
     let mut drawing = Drawing::new(&library);
     {
         let plant = Plant::new(1, DVec2::new(-0.5, 0.0), 0.0001);
-        let animal = Animal {
+        let mut animal = Animal {
             body: Body::new(DVec2::new(0.5, 0.0), 0.0004),
             mind: UnrelatedMind,
         };
+        animal.body.heading = std::f64::consts::FRAC_PI_2;
         plant.draw(&mut drawing);
         animal.draw(&mut drawing);
     }
@@ -131,6 +132,7 @@ fn entities_collect_owned_geometry_without_mind_traits() {
     let image = pixels(&mut target);
     assert_pixel(&image, 26, 50, [51, 189, 82, 255]);
     assert_pixel(&image, 74, 50, [255, 217, 64, 255]);
+    assert_pixel(&image, 74, 44, [46, 36, 10, 255]);
     assert_pixel(&image, 50, 50, [14, 18, 19, 255]);
     // Navigation uses the same drawing path, with zoom anchored at the animal.
     let mut camera = Camera::default();
@@ -144,6 +146,7 @@ fn entities_collect_owned_geometry_without_mind_traits() {
     let image = pixels(&mut target);
     assert_pixel(&image, 74, 50, [255, 217, 64, 255]);
     assert_pixel(&image, 88, 50, [255, 217, 64, 255]);
+    assert_pixel(&image, 74, 38, [46, 36, 10, 255]);
     assert_pixel(&image, 26, 50, [14, 18, 19, 255]);
     // No genetic or inference bounds leak through the world's drawing interface.
     fn assert_draw<T: Draw>() {}
@@ -156,7 +159,12 @@ fn overlapping_circles_hide_borders_inside_their_fills() {
     let graphics = graphics();
     let library = Library::new(&graphics);
     let plant = |x| Plant::new(1, DVec2::new(x, 0.0), 0.0025);
-    let body = |x| Body::new(DVec2::new(x, 0.0), 0.0025);
+    let body = |x| {
+        let mut body = Body::new(DVec2::new(x, 0.0), 0.0025);
+        // Keep the heading marker clear of the horizontal border checks.
+        body.heading = std::f64::consts::FRAC_PI_2;
+        body
+    };
     let green = [51, 189, 82, 255];
     let yellow = [255, 217, 64, 255];
     let cases: [(&dyn Draw, &dyn Draw, _, _); 3] = [

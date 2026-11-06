@@ -48,7 +48,9 @@ where
 
 impl<M, G, P> Ecosystem<M, G, P>
 where
-    M: Mind<GeneticContext, Input = FoodObservation, Output = MoveAction> + AsRef<G> + TryFrom<G>,
+    M: Mind<GeneticContext, Input = AnimalObservation, Output = MotorAction>
+        + AsRef<G>
+        + TryFrom<G>,
     M::Error: Into<anyhow::Error>,
     G: RandomInit<GeneticContext> + Mutate<GeneticContext, P>,
     P: Clone + PartialEq + Default,
@@ -73,14 +75,18 @@ where
             if animal.body.energy < 0.0 {
                 continue;
             }
-            let observation = self.sense(animal.body.position);
+            let observation = self.sense(&animal.body);
             let (action, mind) = animal
                 .mind
                 .compute_update(observation, &mut update.context)?;
             ensure!(
-                action.direction.is_finite() && action.speed_fraction.is_finite(),
+                action.thrust.is_finite() && action.turn.is_finite(),
                 "non-finite movement action"
             );
+            let action = MotorAction {
+                thrust: action.thrust.clamp(0.0, 1.0),
+                turn: action.turn.clamp(-1.0, 1.0),
+            };
             actions.push((id, observation, action));
             let body = animal.body.clone();
             update.animals.insert(
@@ -98,20 +104,30 @@ where
                 .get_mut(&id)
                 .expect("acting animal exists")
                 .body;
-            let position = clamp_position(
-                body.position + action.displacement(self.parameters.body),
-                body.radius(),
-                self.parameters.world,
+            let position_before = body.position;
+            let heading_before = body.heading;
+            let motion = body.advance(action, self.parameters.body, self.parameters.world)?;
+            let parameters = self.parameters.body;
+            let movement_energy = (parameters.energy_scale / parameters.motor_efficiency)
+                * motion.mechanical_work
+                + parameters.energy_scale * (parameters.force_loss * motion.force_squared_time)
+                + parameters.energy_scale * (parameters.torque_loss * motion.torque_squared_time);
+            ensure!(
+                movement_energy.is_finite() && movement_energy >= 0.0,
+                "non-finite motor energy cost"
             );
             decisions.push(Decision {
                 id,
                 observation,
                 action,
                 energy: body.energy,
-                position_before: body.position,
-                position_after: position,
+                position_before,
+                position_after: body.position,
+                heading_before,
+                heading_after: body.heading,
+                distance: motion.distance,
+                movement_energy,
             });
-            body.position = position;
         }
 
         let mut events = Vec::new();
@@ -196,32 +212,15 @@ where
             events.push(Event::Immigrant { id });
         }
 
-        // Pay for controlled travel before checking reproduction or splitting energy.
-        // Sensing-time energy is also pre-movement/pre-feeding energy, so a meal
-        // does not retroactively increase the fee. Arrivals have not acted;
-        // birth offsets and growth clamping are not travel.
-        if self.parameters.body.movement_cost > 0.0 {
-            for decision in &decisions {
-                let distance = decision.position_before.distance(decision.position_after);
-                // Stationary animals pay no movement fee, even if E^p overflows.
-                if distance == 0.0 {
-                    continue;
-                }
-                let power = self.parameters.body.movement_energy_power;
-                let mass = if power == 0.0 {
-                    1.0 // Includes zero-energy animals: the flat fee is independent of E.
-                } else {
-                    decision.energy.powf(power)
-                };
-                let cost = mass * (distance * self.parameters.body.movement_cost);
-                ensure!(cost.is_finite(), "non-finite movement energy cost");
-                update
-                    .animals
-                    .get_mut(&decision.id)
-                    .expect("acting animal exists")
-                    .body
-                    .energy -= cost;
-            }
+        // Pay integrated work/losses once, before reproduction. Coasting,
+        // birth offsets and growth clamping do not create a propulsion charge.
+        for decision in &decisions {
+            update
+                .animals
+                .get_mut(&decision.id)
+                .expect("acting animal exists")
+                .body
+                .energy -= decision.movement_energy;
         }
 
         let mut parents: VecDeque<_> = update
@@ -241,15 +240,15 @@ where
                 energy < before && body.energy.is_finite(),
                 "reproduction must reduce offspring energy"
             );
-            let direction = DVec2::new(
-                update.rng.random_range(-0.5..0.5),
-                update.rng.random_range(-0.5..0.5),
+            let direction = DVec2::from_angle(
+                body.heading + update.rng.random_range(0.0..std::f64::consts::TAU),
             );
-            let offset = self.parameters.reproduction.separation_scale
-                * body.radius()
-                * direction.normalize_or(DVec2::X);
+            let offset = self.parameters.reproduction.separation_scale * body.radius() * direction;
             let child_position = body.position + offset;
             body.position -= offset;
+            let heading = body.heading;
+            let velocity = body.velocity;
+            let angular_velocity = body.angular_velocity;
             // In this ecosystem, inference changes mind state, not the inherited
             // genome exposed by AsRef<G>. Existing genomes stay borrowed.
             let inherited = match &animal.mind {
@@ -260,8 +259,12 @@ where
             genome.mutate(&self.mutation, &mut update.context)?;
             let mind = Self::develop(genome, self.mind_config.as_ref())?;
             let child = allocate_animal(&mut update.next_animal)?;
-            let body =
+            let mut body =
                 Body::with_radius_scale(child_position, energy, self.parameters.body.radius_scale);
+            // Splitting preserves motion; each mind chooses its own next action.
+            body.heading = heading;
+            body.velocity = velocity;
+            body.angular_velocity = angular_velocity;
             update.animals.insert(
                 child,
                 Animal {
@@ -278,7 +281,7 @@ where
         for (&id, animal) in &mut update.animals {
             let body = &mut animal.body;
             body.energy -= self.parameters.body.upkeep;
-            body.position = clamp_position(body.position, body.radius(), self.parameters.world);
+            body.confine(self.parameters.world);
             ensure!(id.0 > 0 && id.0 < update.next_animal, "invalid animal ID");
             validate_body(body, self.parameters)?;
         }

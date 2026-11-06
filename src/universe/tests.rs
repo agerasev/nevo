@@ -43,6 +43,10 @@ fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover()
         .unwrap();
     *field(&mut animals[0].1, &["body", "energy"]) = Value::Float(-0.01);
     *field(&mut animals[1].1, &["body", "energy"]) = Value::Float(1.2);
+    *field(&mut animals[1].1, &["body", "heading"]) = Value::Float(0.7);
+    *field(&mut animals[1].1, &["body", "velocity"]) =
+        Value::Array(vec![Value::Float(2.0), Value::Float(-1.0)]);
+    *field(&mut animals[1].1, &["body", "angular_velocity"]) = Value::Float(0.3);
     *field(&mut animals[1].1, &["mind", "brain", "memory"]) =
         Value::Array(vec![Value::Float(0.25); 4]);
     let meal_position = field(&mut animals[1].1, &["body", "position"]).clone();
@@ -120,5 +124,28 @@ fn zero_rngs_and_wrong_weight_dimensions_are_rejected() {
     match value.deserialized::<Universe>() {
         Err(_) => {}
         Ok(invalid) => assert!(invalid.validate().is_err()),
+    }
+}
+
+#[test]
+fn invalid_saved_kinematics_are_rejected() {
+    let universe = Universe::new(crate::test_support::ecosystem("world/debug"), 1).unwrap();
+    for (name, invalid) in [
+        ("heading", Value::Float(f64::NAN)),
+        ("heading", Value::Float(std::f64::consts::PI)),
+        (
+            "velocity",
+            Value::Array(vec![Value::Float(f64::INFINITY), Value::Float(0.0)]),
+        ),
+        ("angular_velocity", Value::Float(f64::NEG_INFINITY)),
+    ] {
+        let mut value = Value::serialized(&universe).unwrap();
+        let animal = &mut field(&mut value, &["world", "animals"])
+            .as_map_mut()
+            .unwrap()[0]
+            .1;
+        *field(animal, &["body", name]) = invalid;
+        let decoded: Universe = value.deserialized().unwrap();
+        assert!(decoded.validate().is_err(), "accepted invalid {name}");
     }
 }

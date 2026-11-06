@@ -8,8 +8,8 @@ type Cx = Cpu<Xoshiro256PlusPlus>;
 #[test]
 fn preparing_and_discarding_memory_does_not_change_the_mind() {
     let mut genome = RnnGenome::default();
-    genome.weights[28] = 0.5;
-    genome.weights[32] = 1.0;
+    genome.weights[40] = 0.5; // hidden 0 bias
+    genome.weights[44] = 1.0; // hidden 0 -> output 0
     let mind = Rnn::new(genome).unwrap();
     let original = mind.clone();
     let mut cx = Cpu {
@@ -17,7 +17,7 @@ fn preparing_and_discarding_memory_does_not_change_the_mind() {
     };
     let original_cx = cx.clone();
 
-    let (_, discarded) = mind.compute_update([0.0; 3], &mut cx).unwrap();
+    let (_, discarded) = mind.compute_update([0.0; INPUTS], &mut cx).unwrap();
     assert_ne!(discarded.memory, mind.memory);
     drop(discarded);
     assert_eq!(mind, original);
@@ -25,7 +25,7 @@ fn preparing_and_discarding_memory_does_not_change_the_mind() {
 }
 
 #[test]
-fn invalid_prepared_memory_fails_before_changing_the_mind() {
+fn nonfinite_inputs_fail_before_changing_the_mind() {
     let mut mind = Rnn::new(RnnGenome::default()).unwrap();
     let original = mind.clone();
     let mut cx = Cpu {
@@ -33,34 +33,56 @@ fn invalid_prepared_memory_fails_before_changing_the_mind() {
     };
     let original_cx = cx.clone();
 
-    assert!(mind.process([f32::NAN, 0.0, 0.0], &mut cx).is_err());
+    for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let mut input = [0.0; INPUTS];
+        input[0] = value;
+        assert!(mind.process(input, &mut cx).is_err());
+    }
     assert_eq!(mind, original);
     assert_eq!(cx, original_cx);
+}
+
+#[test]
+fn output_overflow_does_not_publish_prepared_memory() {
+    let mut genome = RnnGenome {
+        hidden_units: 2,
+        weights: vec![0.0; 24],
+    };
+    genome.weights[16..18].fill(f32::MAX); // Saturate both hidden units.
+    genome.weights[18..20].fill(f32::MAX); // Their finite contributions overflow output 0.
+    let mut brain = Rnn::new(genome).unwrap();
+    let mut cx = Cx {
+        rng: Xoshiro256PlusPlus::seed_from_u64(73),
+    };
+    assert!(brain.process([0.0; INPUTS], &mut cx).is_err());
+    assert_eq!(brain.memory, [0.0, 0.0]);
 }
 
 #[test]
 fn recurrent_units_read_previous_memory_at_a_nondefault_width() {
     let mut genome = RnnGenome {
         hidden_units: 2,
-        weights: vec![0.0; 21],
+        weights: vec![0.0; 24],
     };
     genome.weights[0] = 1.0; // input 0 -> hidden 0
-    genome.weights[8] = 1.0; // previous hidden 0 -> hidden 1
-    genome.weights[12] = 1.0; // hidden 0 -> output 0
-    genome.weights[15] = 1.0; // hidden 1 -> output 1
-    genome.weights[20] = -1.0; // output 2 bias
+    genome.weights[14] = 1.0; // previous hidden 0 -> hidden 1
+    genome.weights[18] = 1.0; // hidden 0 -> output 0
+    genome.weights[21] = 1.0; // hidden 1 -> output 1
+    genome.weights[23] = -1.0; // output 1 bias
     let mut brain = Rnn::new(genome).unwrap();
     let mut cx = Cx {
         rng: Xoshiro256PlusPlus::seed_from_u64(73),
     };
     let before = cx.clone();
+    let mut input = [0.0; INPUTS];
+    input[0] = 1.0;
     assert_eq!(
-        brain.process([1.0, 0.0, 0.0], &mut cx).unwrap(),
-        [1.0_f32.tanh(), 0.0, -1.0]
+        brain.process(input, &mut cx).unwrap(),
+        [1.0_f32.tanh(), -1.0]
     );
     assert_eq!(
-        brain.process([0.0; 3], &mut cx).unwrap(),
-        [0.0, 1.0_f32.tanh().tanh(), -1.0]
+        brain.process([0.0; INPUTS], &mut cx).unwrap(),
+        [0.0, 1.0_f32.tanh().tanh() - 1.0]
     );
     assert_eq!(cx, before);
 }
@@ -77,7 +99,8 @@ fn initialization_respects_width_and_range() {
         weight_max: 0.75,
     };
     let genome = RnnGenome::random(&config, &mut cx).unwrap();
-    assert_eq!(genome.weights.len(), 101);
+    assert_eq!(genome.weights.len(), 114);
+    assert_eq!(RnnGenome::default().weights.len(), 54);
     assert!(genome.weights.iter().all(|w| (-0.25..0.75).contains(w)));
     assert_eq!(Rnn::new(genome).unwrap().memory, vec![0.0; 7]);
 }
@@ -148,6 +171,6 @@ fn invalid_initialization_and_dynamic_shapes_fail_before_using_randomness() {
     }
     let mut brain = Rnn::new(RnnGenome::default()).unwrap();
     brain.memory.pop();
-    assert!(brain.compute_update([0.0; 3], &mut cx).is_err());
+    assert!(brain.compute_update([0.0; INPUTS], &mut cx).is_err());
     assert_eq!(cx, before);
 }

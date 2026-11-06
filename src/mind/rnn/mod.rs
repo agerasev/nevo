@@ -11,6 +11,9 @@ use anyhow::{Result, ensure};
 use super::Mind;
 use crate::context::Context;
 
+pub const INPUTS: usize = 6;
+pub const OUTPUTS: usize = 2;
+
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {}
@@ -61,24 +64,28 @@ fn dot(weights: &[f32], input: &[f32]) -> f32 {
 }
 
 impl<C: Context + ?Sized> Mind<C> for Rnn {
-    type Input = [f32; 3];
-    type Output = [f32; 3];
+    type Input = [f32; INPUTS];
+    type Output = [f32; OUTPUTS];
     type Update = Update;
     type Config = Config;
 
     fn compute_update(&self, input: Self::Input, _cx: &mut C) -> Result<(Self::Output, Update)> {
+        ensure!(
+            input.iter().all(|value| value.is_finite()),
+            "non-finite recurrent input"
+        );
         <Self as Mind<C>>::validate(self)?;
         let weights = &self.genome.weights;
         let hidden = self.genome.hidden_units;
-        let recurrent_offset = 3 * hidden;
+        let recurrent_offset = INPUTS * hidden;
         let hidden_bias_offset = recurrent_offset + hidden * hidden;
         let output_offset = hidden_bias_offset + hidden;
-        let output_bias_offset = output_offset + 3 * hidden;
+        let output_bias_offset = output_offset + OUTPUTS * hidden;
         // Every recurrent unit reads the previous tick's memory. The C++ dot
         // product aliased its input and output, overwriting components mid-update.
         let memory: Vec<_> = (0..hidden)
             .map(|i| {
-                let sensed = dot(&weights[3 * i..3 * (i + 1)], &input);
+                let sensed = dot(&weights[INPUTS * i..INPUTS * (i + 1)], &input);
                 let begin = recurrent_offset + hidden * i;
                 let recalled = dot(&weights[begin..begin + hidden], &self.memory);
                 (recalled + sensed + weights[hidden_bias_offset + i]).tanh()
@@ -88,13 +95,17 @@ impl<C: Context + ?Sized> Mind<C> for Rnn {
             memory.iter().all(|value| value.is_finite()),
             "non-finite prepared recurrent memory"
         );
-        let mut output: [f32; 3] = array::from_fn(|i| {
+        let mut output: [f32; OUTPUTS] = array::from_fn(|i| {
             let begin = output_offset + hidden * i;
             dot(&weights[begin..begin + hidden], &memory)
         });
         for (value, bias) in output.iter_mut().zip(&weights[output_bias_offset..]) {
             *value += bias;
         }
+        ensure!(
+            output.iter().all(|value| value.is_finite()),
+            "non-finite recurrent output"
+        );
 
         Ok((output, Update { memory }))
     }

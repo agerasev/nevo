@@ -1,5 +1,7 @@
-# Restore the baseline energy budget after any other cost preset.
+# Reference maintenance budget with actuation charges disabled.
 [ecosystem.animal.body]
 upkeep = 0.005
-movement_cost = 0.0
-movement_energy_power = 0.0
+energy_scale = 0.0
+motor_efficiency = 0.25
+force_loss = 0.01
+torque_loss = 0.01

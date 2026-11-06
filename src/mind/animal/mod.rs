@@ -1,15 +1,14 @@
-//! Map food perception and movement to a replaceable brain's scalar signals.
+//! Map body-relative perception and motor control to a replaceable brain.
 
-use anyhow::Result;
-use glam::DVec2;
+use anyhow::{Result, ensure};
 
 use super::{
     Mind,
-    rnn::{Rnn, RnnGenome},
+    rnn::{INPUTS, OUTPUTS, Rnn, RnnGenome},
 };
 use crate::{
     context::Context,
-    ecosystem::{FoodObservation, MoveAction},
+    ecosystem::{AnimalObservation, MotorAction},
 };
 
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -56,10 +55,10 @@ where
 impl<C, M> Mind<C> for AnimalMind<M>
 where
     C: Context + ?Sized,
-    M: Mind<C, Input = [f32; 3], Output = [f32; 3]>,
+    M: Mind<C, Input = [f32; INPUTS], Output = [f32; OUTPUTS]>,
 {
-    type Input = FoodObservation;
-    type Output = MoveAction;
+    type Input = AnimalObservation;
+    type Output = MotorAction;
     type Update = M::Update;
     type Config = Config<M::Config>;
 
@@ -69,21 +68,30 @@ where
 
     fn compute_update(
         &self,
-        observation: FoodObservation,
+        observation: AnimalObservation,
         cx: &mut C,
-    ) -> Result<(MoveAction, Self::Update)> {
-        let (output, update) = self.brain.compute_update(
-            [
-                observation.gradient.x as f32,
-                observation.gradient.y as f32,
-                observation.strength as f32,
-            ],
-            cx,
-        )?;
+    ) -> Result<(MotorAction, Self::Update)> {
+        let input = [
+            observation.gradient.x as f32,
+            observation.gradient.y as f32,
+            observation.strength as f32,
+            observation.velocity.x as f32,
+            observation.velocity.y as f32,
+            observation.angular_velocity as f32,
+        ];
+        ensure!(
+            input.iter().all(|value| value.is_finite()),
+            "non-finite animal signal"
+        );
+        let (output, update) = self.brain.compute_update(input, cx)?;
+        ensure!(
+            output.iter().all(|value| value.is_finite()),
+            "non-finite brain motor output"
+        );
         Ok((
-            MoveAction {
-                direction: DVec2::new(output[0].into(), output[1].into()),
-                speed_fraction: f64::from(output[2]).tanh().abs(),
+            MotorAction {
+                thrust: f64::from(output[0]).tanh().max(0.0),
+                turn: f64::from(output[1]).tanh(),
             },
             update,
         ))

@@ -1,7 +1,7 @@
 use super::*;
 use crate::genome::{Genome, Mutate, RandomInit};
 
-// Reference defaults in normalized energy units; spatial units are unchanged.
+// Explicit fixture economics, independent of the current experiment defaults.
 const HALF_SIZE: DVec2 = DVec2::new(630.0, 350.0);
 const START_ENERGY: f64 = 0.25;
 const RIPE_ENERGY: f64 = 1.0;
@@ -23,7 +23,9 @@ impl Default for Admission {
 // Fixtures may inject particular bodies without changing the world's ongoing policy.
 impl<M, G, P> Ecosystem<M, G, P>
 where
-    M: Mind<GeneticContext, Input = FoodObservation, Output = MoveAction> + AsRef<G> + TryFrom<G>,
+    M: Mind<GeneticContext, Input = AnimalObservation, Output = MotorAction>
+        + AsRef<G>
+        + TryFrom<G>,
     M::Error: Into<anyhow::Error>,
     G: RandomInit<GeneticContext> + Mutate<GeneticContext, P>,
     G::Config: PartialEq,
@@ -40,6 +42,11 @@ where
         };
         let result = self.admit(count);
         self.parameters.immigration = previous;
+        if let Ok(ids) = &result {
+            for id in ids {
+                self.animals.get_mut(id).unwrap().body.heading = 0.0;
+            }
+        }
         result
     }
     fn seed_plants_at(&mut self, position: Option<DVec2>) -> Result<()> {
@@ -54,7 +61,7 @@ where
 
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 struct FixedGenome<const FAIL_INIT: bool = false> {
-    action: MoveAction,
+    action: MotorAction,
     allele: u64,
     fail_mind: bool,
     reject_mind: bool,
@@ -116,16 +123,16 @@ impl<const FAIL_INIT: bool> TryFrom<FixedGenome<FAIL_INIT>> for FixedMind<FAIL_I
 }
 
 impl<const FAIL_INIT: bool> Mind<GeneticContext> for FixedMind<FAIL_INIT> {
-    type Input = FoodObservation;
-    type Output = MoveAction;
+    type Input = AnimalObservation;
+    type Output = MotorAction;
     type Update = usize;
     type Config = ();
 
     fn compute_update(
         &self,
-        _: FoodObservation,
+        _: AnimalObservation,
         cx: &mut GeneticContext,
-    ) -> Result<(MoveAction, usize)> {
+    ) -> Result<(MotorAction, usize)> {
         if self.genome.fail_mind {
             // Even a failed inference that consumes scratch randomness cannot publish it.
             cx.rng.next_u64();
@@ -147,6 +154,8 @@ struct Fixture {
 impl Fixture {
     fn debug(seed: u64) -> Self {
         let mut world = Ecosystem::empty(1, 0, seed, seed, None, FixedMutation::default());
+        world.parameters.body.upkeep = UPKEEP;
+        world.parameters.body.energy_scale = 0.0;
         world
             .admit_with(
                 1,
@@ -165,10 +174,14 @@ impl Fixture {
         self.world.advance(self.number).unwrap()
     }
 
-    fn action(&mut self, action: MoveAction) {
+    fn action(&mut self, action: MotorAction) {
         for animal in self.world.animals.values_mut() {
             animal.mind.genome.action = action;
         }
+    }
+
+    fn sense(&self) -> AnimalObservation {
+        self.world.sense(&self.world.animals[&id(1)].body)
     }
 }
 
@@ -246,18 +259,18 @@ fn upkeep_defers_death_and_replacement_first_acts_on_the_following_tick() {
 }
 
 #[test]
-fn field_uses_maturity_distance_and_the_world_axes() {
+fn field_uses_maturity_distance_and_body_axes() {
     let mut fixture = Fixture::debug(3);
     fixture.world.plants[0].position = DVec2::new(70.0, 0.0);
     fixture
         .world
         .add_plant(DVec2::new(-70.0, 0.0), RIPE_ENERGY)
         .unwrap();
-    let balanced = fixture.world.sense(DVec2::ZERO);
+    let balanced = fixture.sense();
     assert_eq!(balanced.gradient, DVec2::ZERO);
     assert!((balanced.strength - 0.004 / 0.11).abs() < 1e-12);
     fixture.world.plants[1].energy *= 0.5;
-    let unbalanced = fixture.world.sense(DVec2::ZERO);
+    let unbalanced = fixture.sense();
     assert!((unbalanced.gradient - DVec2::X).length() < 1e-12);
     assert!((unbalanced.strength - 0.003 / 0.11).abs() < 1e-12);
 }
@@ -266,22 +279,22 @@ fn field_uses_maturity_distance_and_the_world_axes() {
 fn sensing_is_independent_of_arena_dimensions() {
     let mut fixture = Fixture::debug(3);
     fixture.world.plants[0].position = DVec2::new(70.0, 35.0);
-    let sensed = fixture.world.sense(DVec2::ZERO);
+    let sensed = fixture.sense();
     fixture.world.parameters.world.width *= 2.0;
     fixture.world.parameters.world.height *= 4.0;
-    assert_eq!(fixture.world.sense(DVec2::ZERO), sensed);
+    assert_eq!(fixture.sense(), sensed);
 }
 
 #[test]
 fn zero_energy_plants_do_not_dilute_sensing() {
     let mut fixture = Fixture::debug(3);
     fixture.world.plants[0].position = DVec2::new(70.0, 35.0);
-    let sensed = fixture.world.sense(DVec2::ZERO);
+    let sensed = fixture.sense();
     fixture
         .world
         .add_plant(DVec2::new(-70.0, 0.0), 0.0)
         .unwrap();
-    assert_eq!(fixture.world.sense(DVec2::ZERO), sensed);
+    assert_eq!(fixture.sense(), sensed);
 }
 
 #[test]
@@ -518,9 +531,9 @@ fn plants_grow_faster_near_patches_without_drifting_as_they_mature() {
 #[test]
 fn body_stops_at_the_edge_and_cannot_eat_across_it() {
     let mut fixture = Fixture::debug(4);
-    fixture.action(MoveAction {
-        direction: DVec2::X,
-        speed_fraction: 1.0,
+    fixture.action(MotorAction {
+        thrust: 1.0,
+        turn: 0.0,
     });
     let body = &mut fixture.world.animals.get_mut(&id(1)).unwrap().body;
     body.position.x = HALF_SIZE.x - 5.0;
@@ -536,7 +549,7 @@ fn body_stops_at_the_edge_and_cannot_eat_across_it() {
 #[test]
 fn sensing_observes_food_before_it_is_eaten() {
     let mut fixture = Fixture::debug(7);
-    let sensed = fixture.world.sense(DVec2::ZERO);
+    let sensed = fixture.sense();
     let report = fixture.tick();
     assert_eq!(report.decisions[0].observation, sensed);
     assert_eq!(report.decisions[0].energy, 0.975);
@@ -546,9 +559,13 @@ fn sensing_observes_food_before_it_is_eaten() {
 #[test]
 fn movement_enters_contact_before_feeding_and_birth() {
     let mut fixture = Fixture::debug(8);
-    fixture.action(MoveAction {
-        direction: DVec2::X,
-        speed_fraction: 1.0,
+    fixture.world.parameters.body.max_acceleration = 20.0;
+    fixture.world.parameters.body.linear_drag = 0.0;
+    fixture.world.parameters.body.time_step = 1.0;
+    fixture.world.parameters.body.substeps = 1;
+    fixture.action(MotorAction {
+        thrust: 1.0,
+        turn: 0.0,
     });
     fixture.world.plants[0].position = DVec2::new(20.0, 0.0);
     let body = &fixture.world.animals[&id(1)].body;
@@ -638,9 +655,9 @@ fn failures_in_processing_mutation_or_construction_leave_the_published_universe_
                     .genome
                     .fail_mind = true
             }
-            1 => fixture.action(MoveAction {
-                direction: DVec2::new(f64::INFINITY, 0.0),
-                speed_fraction: 0.0,
+            1 => fixture.action(MotorAction {
+                thrust: f64::INFINITY,
+                turn: 0.0,
             }),
             2 => fixture.world.mutation.fail = true,
             3 => fixture.world.mutation.reject_child = true,
@@ -777,7 +794,7 @@ fn exhausted_allocators_cannot_publish_partial_ticks() {
 }
 
 fn measured_config<MC: Default>() -> Config<MC, (), FixedMutation> {
-    Config {
+    let mut config = Config {
         initial_animals: 1,
         plants: 1,
         minimum_population: 0,
@@ -786,7 +803,10 @@ fn measured_config<MC: Default>() -> Config<MC, (), FixedMutation> {
             window_ticks: 3,
         },
         ..Config::default()
-    }
+    };
+    config.animal.body.upkeep = UPKEEP;
+    config.animal.body.energy_scale = 0.0;
+    config
 }
 
 #[test]
@@ -803,8 +823,8 @@ fn template_validation_does_not_require_runtime_settings() {
         }
     }
     impl Mind<GeneticContext> for ConfiguredMind {
-        type Input = FoodObservation;
-        type Output = MoveAction;
+        type Input = AnimalObservation;
+        type Output = MotorAction;
         type Update = ();
         type Config = u8;
         fn configure(&mut self, config: &u8) -> Result<()> {
@@ -813,9 +833,9 @@ fn template_validation_does_not_require_runtime_settings() {
         }
         fn compute_update(
             &self,
-            _: FoodObservation,
+            _: AnimalObservation,
             _: &mut GeneticContext,
-        ) -> Result<(MoveAction, ())> {
+        ) -> Result<(MotorAction, ())> {
             unreachable!("validation must not run inference")
         }
         fn apply_update(&mut self, _: ()) {}
@@ -858,9 +878,9 @@ fn configured_immigration_is_identical_for_initial_and_later_arrivals() {
     assert!(report.decisions.is_empty());
     let first = &initial.animals[&id(1)];
     let next = &later.animals[&id(1)];
-    assert_eq!(first.body.position, next.body.position);
-    assert_eq!(first.body.energy - 0.0075, next.body.energy);
-    assert_eq!(first.body.radius_scale, next.body.radius_scale);
+    let mut expected_body = first.body.clone();
+    expected_body.energy -= 0.0075;
+    assert_eq!(expected_body, next.body);
     assert_eq!(first.mind, next.mind);
     assert_eq!(next.mind.brain.memory.len(), 7);
     assert_eq!(initial.rng, later.rng);
@@ -903,22 +923,6 @@ fn replacement_growth_stops_at_the_configured_cap() {
 }
 
 #[test]
-fn movement_uses_configured_speed_timestep_and_dead_zone() {
-    let mut body = BodyParameters {
-        max_speed: 12.0,
-        movement_time_step: 0.25,
-        ..BodyParameters::default()
-    };
-    let action = MoveAction {
-        direction: DVec2::X,
-        speed_fraction: 0.75,
-    };
-    assert_eq!(action.displacement(body), DVec2::new(2.25, 0.0));
-    body.movement_dead_zone = 2.0;
-    assert_eq!(action.displacement(body), DVec2::ZERO);
-}
-
-#[test]
 fn sensing_applies_configured_scales_before_the_gradient_dead_zone() {
     let mut fixture = Fixture::debug(73);
     fixture.world.plants[0].position = DVec2::new(8.0, 0.0);
@@ -927,12 +931,13 @@ fn sensing_applies_configured_scales_before_the_gradient_dead_zone() {
         signal_scale: 2.0,
         softening: 1.0,
         gradient_dead_zone: 0.3,
+        ..SensingConfig::default()
     };
-    let sensed = fixture.world.sense(DVec2::ZERO);
+    let sensed = fixture.sense();
     assert_eq!(sensed.strength, 1.0);
     assert_eq!(sensed.gradient, DVec2::ZERO);
     fixture.world.parameters.sensing.signal_scale = 4.0;
-    let amplified = fixture.world.sense(DVec2::ZERO);
+    let amplified = fixture.sense();
     assert_eq!(amplified.strength, 2.0);
     assert_eq!(amplified.gradient, DVec2::X);
 }
@@ -946,123 +951,156 @@ fn sensing_scales_must_be_finite_and_positive() {
         parameters.sensing = SensingConfig::default();
         parameters.sensing.signal_scale = invalid;
         assert!(parameters.validate().is_err());
+        parameters.sensing = SensingConfig::default();
+        parameters.sensing.velocity_scale = invalid;
+        assert!(parameters.validate().is_err());
+        parameters.sensing = SensingConfig::default();
+        parameters.sensing.angular_velocity_scale = invalid;
+        assert!(parameters.validate().is_err());
     }
 }
 
 #[test]
-fn movement_fee_uses_distance_after_wall_clamping() {
+fn sensing_preserves_body_relative_signals_when_the_scene_rotates() {
+    let mut fixture = Fixture::debug(73);
+    fixture.world.parameters.sensing.velocity_scale = 0.25;
+    fixture.world.parameters.sensing.angular_velocity_scale = 0.5;
+    fixture.world.plants[0].position = DVec2::new(70.0, 35.0);
+    let body = &mut fixture.world.animals.get_mut(&id(1)).unwrap().body;
+    body.velocity = DVec2::new(3.0, -4.0);
+    body.angular_velocity = 1.5;
+    let before = fixture.sense();
+    assert_eq!(before.velocity, DVec2::new(0.75, -1.0));
+    assert_eq!(before.angular_velocity, 0.75);
+
+    fixture.world.plants[0].position = DVec2::new(-35.0, 70.0);
+    let body = &mut fixture.world.animals.get_mut(&id(1)).unwrap().body;
+    body.heading = std::f64::consts::FRAC_PI_2;
+    body.velocity = DVec2::new(4.0, 3.0);
+    let rotated = fixture.sense();
+    assert!(rotated.gradient.distance(before.gradient) < 1e-12);
+    assert!(rotated.velocity.distance(before.velocity) < 1e-12);
+    assert_eq!(rotated.strength, before.strength);
+    assert_eq!(rotated.angular_velocity, before.angular_velocity);
+}
+
+#[test]
+fn physics_substeps_do_not_repeat_thinking_upkeep_or_plant_growth() {
+    for substeps in [1, 8, 32] {
+        let mut fixture = Fixture::debug(74);
+        fixture.world.parameters.body.substeps = substeps;
+        fixture.world.plants[0].position = DVec2::new(100.0, 0.0);
+        fixture.world.plants[0].energy = 0.25;
+        fixture.action(MotorAction {
+            thrust: 0.5,
+            turn: 0.25,
+        });
+        let report = fixture.tick();
+        assert!(report.events.is_empty());
+        assert_eq!(report.decisions.len(), 1);
+        assert_eq!(fixture.world.animals[&id(1)].mind.calls, 1);
+        assert_eq!(fixture.world.animals[&id(1)].body.energy, 0.975 - UPKEEP);
+        assert_eq!(fixture.world.plants[0].energy, 0.2525);
+    }
+}
+
+#[test]
+fn motor_cost_is_paid_at_a_wall_before_reproduction() {
     let mut fixture = Fixture::debug(75);
     fixture.world.plants[0].position = DVec2::ZERO;
     let body = &mut fixture.world.animals.get_mut(&id(1)).unwrap().body;
-    body.energy = 0.25;
-    body.position.x = 623.0; // Radius 5 leaves two units before the wall.
+    body.energy = 1.001;
+    body.position.x = HALF_SIZE.x - body.radius();
     fixture.world.parameters.body.upkeep = 0.0;
-    fixture.world.parameters.body.movement_cost = 0.1;
-    fixture.world.parameters.body.movement_energy_power = 1.0;
-    fixture.action(MoveAction {
-        direction: DVec2::X,
-        speed_fraction: 1.0,
+    fixture.world.parameters.body.max_acceleration = 10.0;
+    fixture.world.parameters.body.energy_scale = 0.001;
+    fixture.world.parameters.body.force_loss = 1.0;
+    fixture.action(MotorAction {
+        thrust: 1.0,
+        turn: 0.0,
     });
     let report = fixture.tick();
-    assert_eq!(report.decisions[0].position_after.x, 625.0);
-    assert!((fixture.world.animals[&id(1)].body.energy - 0.2).abs() < 1e-12);
+    let decision = &report.decisions[0];
+    assert_eq!(decision.distance, 0.0);
+    assert!(decision.movement_energy > 0.001);
+    assert!(
+        report.events.is_empty(),
+        "motor energy must be paid before splitting"
+    );
+    assert_eq!(
+        fixture.world.animals[&id(1)].body.energy,
+        1.001 - decision.movement_energy
+    );
 }
 
 #[test]
-fn movement_cost_is_paid_before_birth_and_excludes_birth_offsets() {
-    for energy in [1.0025, 1.0125] {
+fn coasting_does_not_spend_motor_energy() {
+    let mut fixture = Fixture::debug(76);
+    fixture.world.plants[0].position = DVec2::new(100.0, 100.0);
+    fixture.world.animals.get_mut(&id(1)).unwrap().body.velocity = DVec2::new(5.0, 0.0);
+    fixture.world.parameters.body.upkeep = 0.0;
+    fixture.world.parameters.body.energy_scale = 0.001;
+    let report = fixture.tick();
+    assert!(report.decisions[0].distance > 0.0);
+    assert_eq!(report.decisions[0].movement_energy, 0.0);
+    assert_eq!(fixture.world.animals[&id(1)].body.energy, 0.975);
+}
+
+#[test]
+fn work_conversion_scales_before_dividing_by_tiny_efficiency() {
+    for energy_scale in [0.0, 1e-310] {
         let mut fixture = Fixture::debug(76);
         fixture.world.plants[0].position = DVec2::new(100.0, 100.0);
-        fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = energy;
-        fixture.world.parameters.body.upkeep = 0.0005;
-        fixture.world.parameters.body.movement_energy_power = 1.0;
-        fixture.world.parameters.body.movement_cost = 0.0009;
-        fixture.action(MoveAction {
-            direction: DVec2::X,
-            speed_fraction: 1.0,
+        fixture.world.parameters.body.energy_scale = energy_scale;
+        fixture.world.parameters.body.motor_efficiency = 1e-308;
+        fixture.action(MotorAction {
+            thrust: 1.0,
+            turn: 0.0,
         });
+        fixture.world.validate().unwrap();
         let report = fixture.tick();
-        if energy == 1.0025 {
-            assert!(
-                report.events.is_empty(),
-                "travel must be affordable before reproducing"
-            );
-            assert!((fixture.world.animals[&id(1)].body.energy - 0.9929775).abs() < 1e-12);
-        } else {
-            assert_eq!(
-                report.events,
-                [Event::Birth {
-                    parent: id(1),
-                    child: id(2)
-                }]
-            );
-            assert_eq!(report.decisions.len(), 1);
-            for animal in fixture.world.animals.values() {
-                assert!((animal.body.energy - 0.50119375).abs() < 1e-12);
-                assert_ne!(animal.body.position, report.decisions[0].position_after);
-            }
-        }
+        let cost = report.decisions[0].movement_energy;
+        assert!(cost.is_finite());
+        assert_eq!(cost == 0.0, energy_scale == 0.0);
     }
 }
 
 #[test]
-fn a_meal_does_not_retroactively_increase_the_movement_fee() {
-    let mut fixture = Fixture::debug(79);
-    fixture.world.parameters.body.upkeep = 0.0005;
-    fixture.world.parameters.body.movement_energy_power = 1.0;
-    fixture.world.parameters.body.movement_cost = 0.0009;
-    fixture.action(MoveAction {
-        direction: DVec2::X,
-        speed_fraction: 1.0,
-    });
+fn splitting_preserves_both_bodies_motion_without_an_extra_energy_fee() {
+    let mut fixture = Fixture::debug(77);
+    fixture.world.plants[0].position = DVec2::new(100.0, 100.0);
+    fixture.world.parameters.body.upkeep = 0.0;
+    fixture.world.parameters.body.energy_scale = 1.0;
+    fixture.world.parameters.body.linear_drag = 0.0;
+    fixture.world.parameters.body.angular_drag = 0.0;
+    fixture.world.parameters.body.time_step = 0.5;
+    fixture.world.parameters.body.substeps = 1;
+    let body = &mut fixture.world.animals.get_mut(&id(1)).unwrap().body;
+    body.energy = 1.2;
+    body.heading = 0.3;
+    body.velocity = DVec2::new(3.0, -2.0);
+    body.angular_velocity = 0.4;
     let report = fixture.tick();
-    assert_eq!(report.decisions[0].energy, 0.975);
-    assert_eq!(report.decisions[0].position_after, DVec2::new(10.0, 0.0));
     assert_eq!(
         report.events,
-        [
-            Event::Meal {
-                id: id(1),
-                plant: 1,
-                gain: 0.1
-            },
-            Event::Birth {
-                parent: id(1),
-                child: id(2)
-            },
-        ]
+        [Event::Birth {
+            parent: id(1),
+            child: id(2)
+        }]
     );
-    // 0.975 + 0.1 food - 0.008775 travel, split equally before 0.0005 upkeep each.
+    assert_eq!(report.decisions[0].movement_energy, 0.0);
+    let first = &fixture.world.animals[&id(1)].body;
+    let second = &fixture.world.animals[&id(2)].body;
+    assert!(first.position.distance(second.position) > 0.0);
+    assert!(
+        ((first.position + second.position) * 0.5).distance(report.decisions[0].position_after)
+            < 1e-12
+    );
     for animal in fixture.world.animals.values() {
-        assert!((animal.body.energy - 0.5326125).abs() < 1e-12);
-    }
-}
-
-#[test]
-fn movement_energy_power_supports_flat_fractional_and_nonlinear_costs() {
-    for (energy, power, movement_cost, expected_fee) in [
-        (0.0, 0.0, 0.00045, 0.0045),
-        (0.0, 1.0, 0.0009, 0.0),
-        (0.25, 0.0, 0.00045, 0.0045),
-        (0.25, 0.5, 0.0009, 0.0045),
-        (0.25, 1.0, 0.0009, 0.00225),
-        (0.25, 2.0, 0.0009, 0.0005625),
-    ] {
-        let mut fixture = Fixture::debug(80);
-        fixture.world.plants[0].position = DVec2::new(100.0, 100.0);
-        fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = energy;
-        fixture.world.parameters.body.upkeep = 0.0005;
-        fixture.world.parameters.body.movement_cost = movement_cost;
-        fixture.world.parameters.body.movement_energy_power = power;
-        fixture.action(MoveAction {
-            direction: DVec2::X,
-            speed_fraction: 1.0,
-        });
-        fixture.tick();
-        assert!(
-            (fixture.world.animals[&id(1)].body.energy - (energy - expected_fee - 0.0005)).abs()
-                < 1e-12
-        );
+        assert_eq!(animal.body.heading, report.decisions[0].heading_after);
+        assert_eq!(animal.body.velocity, DVec2::new(3.0, -2.0));
+        assert_eq!(animal.body.angular_velocity, 0.4);
+        assert_eq!(animal.body.energy, 0.6);
     }
 }
 
@@ -1084,13 +1122,20 @@ fn invalid_physics_and_conflicting_restore_parameters_are_rejected() {
         |c| c.animal.reproduction.child_energy_fraction = 1.0,
         |c| c.animal.reproduction.child_energy_fraction = 0.0,
         |c| c.animal.body.upkeep = -0.0025,
-        |c| c.animal.body.movement_cost = -0.1,
-        |c| c.animal.body.movement_cost = f64::NAN,
-        |c| c.animal.body.movement_cost = f64::MAX,
-        |c| c.animal.body.movement_energy_power = -1.0,
-        |c| c.animal.body.movement_energy_power = f64::NAN,
-        |c| c.animal.body.movement_energy_power = f64::INFINITY,
-        |c| c.animal.body.max_speed = f64::INFINITY,
+        |c| c.animal.body.mass = 0.0,
+        |c| c.animal.body.moment_of_inertia = f64::NAN,
+        |c| c.animal.body.max_acceleration = f64::INFINITY,
+        |c| c.animal.body.max_angular_acceleration = -1.0,
+        |c| c.animal.body.linear_drag = -1.0,
+        |c| c.animal.body.angular_drag = f64::INFINITY,
+        |c| c.animal.body.time_step = 0.0,
+        |c| c.animal.body.substeps = 0,
+        |c| c.animal.body.energy_scale = -0.1,
+        |c| c.animal.body.energy_scale = f64::MAX,
+        |c| c.animal.body.motor_efficiency = 0.0,
+        |c| c.animal.body.motor_efficiency = 1.01,
+        |c| c.animal.body.force_loss = -1.0,
+        |c| c.animal.body.torque_loss = f64::NAN,
         |c| c.plant.max_energy = 0.0,
         |c| c.plant.initial_energy = 1.0025,
         |c| c.sensing.softening = 0.0,
@@ -1104,7 +1149,7 @@ fn invalid_physics_and_conflicting_restore_parameters_are_rejected() {
     }
     let universe = Universe::new(config.clone(), 74).unwrap();
     let mut changed = config.clone();
-    changed.animal.body.movement_cost = 0.1;
+    changed.animal.body.energy_scale = 0.1;
     assert!(universe.restore(changed).is_err());
     let mut world = Ecosystem::new(config, 74).unwrap();
     world.parameters.world.height = 0.0;
@@ -1116,8 +1161,7 @@ fn metrics_are_pure_and_do_not_change_reports_or_checkpoint_bytes() {
     use crate::metrics::Metrics;
     let mut config: Config = crate::test_support::ecosystem("world/debug");
     config.metrics.enabled = false;
-    config.animal.body.movement_cost = 0.003;
-    config.animal.body.movement_energy_power = 1.0;
+    config.animal.body.energy_scale = 1e-5;
     config.plant.replenishment = Some(ReplenishmentConfig::default());
     let mut measured_config = config.clone();
     measured_config.metrics = MetricsConfig {
@@ -1186,24 +1230,42 @@ fn complete_and_partial_windows_preserve_rate_units() {
         let mut fixture = Fixture::debug(43);
         let mut config = measured_config();
         config.metrics.window_ticks = window_ticks;
+        config.animal.body.energy_scale = 1e-6;
+        fixture.world.parameters.body.energy_scale = config.animal.body.energy_scale;
         fixture.world.configure(&config).unwrap();
-        fixture.action(MoveAction {
-            direction: DVec2::X,
-            speed_fraction: 1.0,
+        fixture.action(MotorAction {
+            thrust: 1.0,
+            turn: 0.0,
         });
-        let (mut births, mut distance) = (0.0, 0.0);
+        let (mut births, mut distance, mut reported_distance) = (0.0, 0.0, 0.0);
+        let (mut movement_energy, mut reported_energy) = (0.0, 0.0);
         for tick in 1..=3 {
-            fixture.tick();
+            let report = fixture.tick();
+            reported_distance += report
+                .decisions
+                .iter()
+                .map(|decision| decision.distance)
+                .sum::<f64>();
+            reported_energy += report
+                .decisions
+                .iter()
+                .map(|decision| decision.movement_energy)
+                .sum::<f64>();
             let summary = fixture.world.metrics();
             let window = summary.window.unwrap();
             if window.complete || tick == 3 {
                 births += summary.births_per_tick.unwrap() * window.samples as f64;
                 distance +=
                     summary.distance_per_animal_tick.unwrap() * window.active_animal_ticks as f64;
+                movement_energy +=
+                    summary.movement_energy_per_tick.unwrap() * window.samples as f64;
             }
         }
         assert_eq!(births, 1.0);
-        assert!((distance - 50.0).abs() < 1e-12);
+        assert!(reported_distance > 0.0);
+        assert!((distance - reported_distance).abs() < 1e-12);
+        assert!(reported_energy > 0.0);
+        assert!((movement_energy - reported_energy).abs() < 1e-12);
     }
 }
 

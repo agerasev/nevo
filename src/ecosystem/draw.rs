@@ -6,6 +6,7 @@ use crate::viewer::{Bounds, Draw, Drawing, Label};
 
 const PLANT: Rgb<f32> = Rgb::new(0.20, 0.74, 0.32);
 const ANIMAL: Rgb<f32> = Rgb::new(1.0, 0.85, 0.25);
+const HEADING: Rgb<f32> = Rgb::new(0.18, 0.14, 0.04);
 
 impl Draw for Plant {
     fn draw(&self, drawing: &mut Drawing<'_>) {
@@ -54,6 +55,13 @@ impl Draw for Body {
                 .scale(radius)
                 .move_to(position)
                 .order(2),
+        );
+        drawing.scene.add(
+            &circle
+                .fill_color(HEADING)
+                .scale(radius * 0.2)
+                .move_to(position + self.forward().as_vec2() * (radius * 0.6))
+                .order(3),
         );
         drawing.include_bounds(Bounds {
             min: position - Vec2::splat(outer_radius),

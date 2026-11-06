@@ -217,6 +217,10 @@ pub struct SensingConfig {
     pub signal_scale: f64,
     pub softening: f64,
     pub gradient_dead_zone: f64,
+    /// Gain on body-relative linear velocity before neural encoding.
+    pub velocity_scale: f64,
+    /// Gain on angular velocity before neural encoding.
+    pub angular_velocity_scale: f64,
 }
 impl Default for SensingConfig {
     fn default() -> Self {
@@ -225,6 +229,8 @@ impl Default for SensingConfig {
             signal_scale: 1.0 / 500.0,
             softening: 0.01,
             gradient_dead_zone: 0.01,
+            velocity_scale: 0.01,
+            angular_velocity_scale: 0.2,
         }
     }
 }
@@ -302,6 +308,11 @@ impl Parameters {
         self.immigration.position.validate(self.world)?;
         positive(self.sensing.distance_scale, "sensing distance_scale")?;
         positive(self.sensing.signal_scale, "sensing signal_scale")?;
+        positive(self.sensing.velocity_scale, "sensing velocity_scale")?;
+        positive(
+            self.sensing.angular_velocity_scale,
+            "sensing angular_velocity_scale",
+        )?;
         positive(self.sensing.softening, "sensing softening")?;
         positive(self.sensing.softening.powi(3), "cubed sensing softening")?;
         nonnegative(
@@ -309,22 +320,68 @@ impl Parameters {
             "sensing gradient_dead_zone",
         )?;
         nonnegative(self.body.upkeep, "animal upkeep")?;
-        nonnegative(self.body.movement_cost, "animal movement_cost")?;
+        positive(self.body.mass, "animal mass")?;
+        positive(self.body.moment_of_inertia, "animal moment_of_inertia")?;
+        nonnegative(self.body.max_acceleration, "animal max_acceleration")?;
         nonnegative(
-            self.body.movement_energy_power,
-            "animal movement_energy_power",
+            self.body.max_angular_acceleration,
+            "animal max_angular_acceleration",
         )?;
-        nonnegative(self.body.max_speed, "animal max_speed")?;
-        nonnegative(self.body.movement_time_step, "animal movement_time_step")?;
+        nonnegative(self.body.linear_drag, "animal linear_drag")?;
+        nonnegative(self.body.angular_drag, "animal angular_drag")?;
+        positive(self.body.time_step, "animal time_step")?;
+        ensure!(self.body.substeps > 0, "animal substeps must be positive");
+        positive(
+            self.body.time_step / f64::from(self.body.substeps),
+            "physics substep duration",
+        )?;
+        for coefficient in [
+            self.body.linear_drag,
+            self.body.angular_drag,
+            self.body.max_acceleration,
+            self.body.max_angular_acceleration,
+        ] {
+            nonnegative(
+                coefficient * self.body.time_step,
+                "integrated motion coefficient",
+            )?;
+        }
+        nonnegative(self.body.energy_scale, "animal energy_scale")?;
+        ensure!(
+            self.body.motor_efficiency.is_finite()
+                && self.body.motor_efficiency > 0.0
+                && self.body.motor_efficiency <= 1.0,
+            "animal motor_efficiency must be in (0, 1]"
+        );
         nonnegative(
-            self.body.max_speed * self.body.movement_time_step,
-            "maximum movement",
+            self.body.energy_scale / self.body.motor_efficiency,
+            "work energy conversion",
         )?;
-        nonnegative(
-            self.body.movement_cost * (self.body.max_speed * self.body.movement_time_step),
-            "maximum movement coefficient",
-        )?;
-        nonnegative(self.body.movement_dead_zone, "animal movement_dead_zone")?;
+        nonnegative(self.body.force_loss, "animal force_loss")?;
+        nonnegative(self.body.torque_loss, "animal torque_loss")?;
+        for (inertia, acceleration, loss) in [
+            (
+                self.body.mass,
+                self.body.max_acceleration,
+                self.body.force_loss,
+            ),
+            (
+                self.body.moment_of_inertia,
+                self.body.max_angular_acceleration,
+                self.body.torque_loss,
+            ),
+        ] {
+            let effort = inertia * acceleration;
+            nonnegative(effort, "maximum motor effort")?;
+            nonnegative(
+                effort * effort * self.body.time_step,
+                "integrated squared motor effort",
+            )?;
+            nonnegative(
+                loss * (effort * effort * self.body.time_step) * self.body.energy_scale,
+                "motor loss energy",
+            )?;
+        }
         nonnegative(self.body.radius_scale, "animal radius_scale")?;
         positive(self.reproduction.threshold, "reproduction threshold")?;
         let fraction = self.reproduction.child_energy_fraction;
@@ -417,14 +474,30 @@ pub struct AnimalConfig<MC = animal::Config<rnn::Config>> {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BodyConfig {
+    /// Reserve energy spent once per ecological tick.
     pub upkeep: f64,
-    /// Fee = movement_cost × controlled distance × pre-movement energy^power.
-    pub movement_cost: f64,
-    pub movement_energy_power: f64,
-    pub max_speed: f64,
-    /// Scales movement only; energy rates are per tick.
-    pub movement_time_step: f64,
-    pub movement_dead_zone: f64,
+    /// Fixed inertial mass, independent of reserve energy.
+    pub mass: f64,
+    /// Fixed angular inertia, independent of reserve energy.
+    pub moment_of_inertia: f64,
+    pub max_acceleration: f64,
+    pub max_angular_acceleration: f64,
+    /// Linear velocity decay rate (inverse physical time).
+    pub linear_drag: f64,
+    /// Angular velocity decay rate (inverse physical time).
+    pub angular_drag: f64,
+    /// Physical time per ecological tick; viewer pacing does not change it.
+    pub time_step: f64,
+    /// Motion integration steps; sensing and ecology still run once per tick.
+    pub substeps: u32,
+    /// Reserve-energy units per mechanical-energy unit; zero disables motor costs.
+    pub energy_scale: f64,
+    /// Fraction of supplied work converted to positive mechanical work.
+    pub motor_efficiency: f64,
+    /// Resistive power coefficient multiplying squared applied force.
+    pub force_loss: f64,
+    /// Resistive power coefficient multiplying squared applied torque.
+    pub torque_loss: f64,
     pub radius_scale: f64,
 }
 impl Default for BodyConfig {
@@ -432,11 +505,18 @@ impl Default for BodyConfig {
         let parameters = BodyParameters::default();
         Self {
             upkeep: parameters.upkeep,
-            movement_cost: parameters.movement_cost,
-            movement_energy_power: parameters.movement_energy_power,
-            max_speed: parameters.max_speed,
-            movement_time_step: parameters.movement_time_step,
-            movement_dead_zone: parameters.movement_dead_zone,
+            mass: parameters.mass,
+            moment_of_inertia: parameters.moment_of_inertia,
+            max_acceleration: parameters.max_acceleration,
+            max_angular_acceleration: parameters.max_angular_acceleration,
+            linear_drag: parameters.linear_drag,
+            angular_drag: parameters.angular_drag,
+            time_step: parameters.time_step,
+            substeps: parameters.substeps,
+            energy_scale: parameters.energy_scale,
+            motor_efficiency: parameters.motor_efficiency,
+            force_loss: parameters.force_loss,
+            torque_loss: parameters.torque_loss,
             radius_scale: parameters.radius_scale,
         }
     }
@@ -445,11 +525,18 @@ impl BodyConfig {
     pub(super) fn parameters(self) -> BodyParameters {
         BodyParameters {
             upkeep: self.upkeep,
-            movement_cost: self.movement_cost,
-            movement_energy_power: self.movement_energy_power,
-            max_speed: self.max_speed,
-            movement_time_step: self.movement_time_step,
-            movement_dead_zone: self.movement_dead_zone,
+            mass: self.mass,
+            moment_of_inertia: self.moment_of_inertia,
+            max_acceleration: self.max_acceleration,
+            max_angular_acceleration: self.max_angular_acceleration,
+            linear_drag: self.linear_drag,
+            angular_drag: self.angular_drag,
+            time_step: self.time_step,
+            substeps: self.substeps,
+            energy_scale: self.energy_scale,
+            motor_efficiency: self.motor_efficiency,
+            force_loss: self.force_loss,
+            torque_loss: self.torque_loss,
             radius_scale: self.radius_scale,
         }
     }
@@ -458,23 +545,36 @@ impl BodyConfig {
 #[serde(deny_unknown_fields)]
 pub(super) struct BodyParameters {
     pub upkeep: f64,
-    pub movement_cost: f64,
-    pub movement_energy_power: f64,
-    pub max_speed: f64,
-    /// Scales movement only; energy rates are per tick.
-    pub movement_time_step: f64,
-    pub movement_dead_zone: f64,
+    pub mass: f64,
+    pub moment_of_inertia: f64,
+    pub max_acceleration: f64,
+    pub max_angular_acceleration: f64,
+    pub linear_drag: f64,
+    pub angular_drag: f64,
+    pub time_step: f64,
+    pub substeps: u32,
+    pub energy_scale: f64,
+    pub motor_efficiency: f64,
+    pub force_loss: f64,
+    pub torque_loss: f64,
     pub radius_scale: f64,
 }
 impl Default for BodyParameters {
     fn default() -> Self {
         Self {
-            upkeep: 0.005,
-            movement_cost: 0.0,
-            movement_energy_power: 0.0,
-            max_speed: 100.0,
-            movement_time_step: 0.1,
-            movement_dead_zone: 0.01,
+            upkeep: 0.0005,
+            mass: 1.0,
+            moment_of_inertia: 1.0,
+            max_acceleration: 100.0,
+            max_angular_acceleration: 10.0,
+            linear_drag: 1.0,
+            angular_drag: 2.0,
+            time_step: 0.1,
+            substeps: 4,
+            energy_scale: 1e-6,
+            motor_efficiency: 0.25,
+            force_loss: 0.01,
+            torque_loss: 0.01,
             radius_scale: 10.0,
         }
     }

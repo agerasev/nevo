@@ -20,7 +20,8 @@ directories configure separate aspects of the experiment.
 | Choice | Presets |
 | --- | --- |
 | World | [Small uniform](../configs/world/small-uniform.toml), [small non-uniform](../configs/world/small-nonuniform.toml), [large uniform](../configs/world/large-uniform.toml), [large non-uniform](../configs/world/large-nonuniform.toml), [debug](../configs/world/debug.toml) |
-| Movement energy budget | [Upkeep only](../configs/movement/upkeep-only.toml), [flat cost](../configs/movement/flat.toml), [energy-proportional cost](../configs/movement/cost.toml) |
+| Locomotion | [Damped acceleration](../configs/locomotion/damped.toml) |
+| Movement energy budget | [Work and motor losses](../configs/movement/work-and-loss.toml), [upkeep only](../configs/movement/upkeep-only.toml) |
 | Plant growth | [Uniform](../configs/plant-growth/uniform.toml), [patch-dependent](../configs/plant-growth/patches.toml) |
 | Viewer | [Window](../configs/viewer/window.toml) |
 | Metrics | [Long window](../configs/metrics/long-window.toml) |
@@ -66,15 +67,29 @@ as well as collected food. For a bounded run combining a world and movement choi
 ```sh
 cargo run --locked -- \
   --config configs/world/large-nonuniform.toml \
-  --config configs/movement/cost.toml \
+  --config configs/locomotion/damped.toml \
+  --config configs/movement/work-and-loss.toml \
   --seed 1 --ticks 1000
 ```
 
 Energy units use a reference reproduction threshold of `1.0`, consistently for
 animals, plants, food gains, and costs. Changing the configured threshold changes
 the experiment, not its units. Earlier logs keep their original units.
-Spatial units are unchanged. Movement time scales displacement; upkeep and plant
-growth remain per-tick quantities. `tick_hz` changes wall-clock pacing only.
+Locomotion settings define fixed mass and moment of inertia, acceleration limits,
+drag, and integration timing. Energy reserves change body radius, not inertial
+mass. The movement budget charges positive translational and rotational work
+separately, plus resistive motor losses. Braking earns no energy credit and
+blocked thrust still incurs losses. Coasting with no actuation has no motor
+charge; maintaining speed against drag requires paid actuation.
+Work is divided by `motor_efficiency`; force and torque losses scale with their
+squared magnitudes. `energy_scale` converts mechanical units to resource energy.
+See the
+[ecosystem settings](../src/ecosystem/config.rs) for the schema and
+[simulation contract](simulation.md) for timing and state semantics.
+
+Physical `time_step` advances locomotion and its energy expenditure. Upkeep,
+plant growth, replenishment, and reproduction remain per ecological tick;
+`substeps` subdivides physics only. `tick_hz` changes wall-clock pacing only.
 
 Seed and model settings are immutable on [resume](persistence.md). Runtime
 settings such as viewing, pacing, tracing, tick budget, checkpoint policy, and

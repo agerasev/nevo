@@ -27,6 +27,7 @@ pub(super) struct Cache {
     plant_recruitment_attempts: u64,
     plant_recruits: u64,
     distance: f64,
+    movement_energy: f64,
 }
 
 impl Default for Cache {
@@ -45,6 +46,7 @@ impl Default for Cache {
             plant_recruitment_attempts: 0,
             plant_recruits: 0,
             distance: 0.0,
+            movement_energy: 0.0,
         }
     }
 }
@@ -101,7 +103,8 @@ impl Cache {
         window.active_animal_ticks += report.decisions.len() as u64;
         for decision in &report.decisions {
             // Includes actors that subsequently die; excludes birth/growth displacement.
-            self.distance += decision.position_before.distance(decision.position_after);
+            self.distance += decision.distance;
+            self.movement_energy += decision.movement_energy;
         }
         for event in &report.events {
             match event {
@@ -143,6 +146,8 @@ pub struct Summary {
     pub immigrants_per_tick: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub distance_per_animal_tick: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub movement_energy_per_tick: Option<f64>,
 }
 
 impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
@@ -174,6 +179,7 @@ impl<M, G, P, MC, IC> Metrics for Ecosystem<M, G, P, MC, IC> {
         if let Some(window) = cache.window {
             let ticks = window.samples as f64;
             summary.food_per_tick = Some(cache.food / ticks);
+            summary.movement_energy_per_tick = Some(cache.movement_energy / ticks);
             summary.plant_growth_per_tick = Some(cache.plant_growth / ticks);
             if self.parameters.plant.replenishment.is_some() {
                 summary.plant_recruitment_attempts_per_tick =

@@ -162,7 +162,7 @@ fn checkpoint_tick(path: &Path) -> u64 {
 #[test]
 fn a_new_process_resumes_the_complete_seeded_state() {
     let directory = Directory::new();
-    let settings = directory.overlay("model.toml", "[ecosystem.genetics.initialization]\nhidden_units = 6\n[ecosystem.animal.body]\nmovement_cost = 0.003\nmovement_energy_power = 1.0\n");
+    let settings = directory.overlay("model.toml", "[ecosystem.genetics.initialization]\nhidden_units = 6\n[ecosystem.animal.body]\nenergy_scale = 0.000003\nmotor_efficiency = 0.5\n");
     for (name, ticks) in [("full", "6"), ("split", "3")] {
         directory.success(&[
             name,

@@ -1,6 +1,0 @@
-# Low maintenance plus movement cost proportional to pre-movement energy (mass).
-# At energy 0.5 and default movement scale: full speed costs 0.0155 per tick.
-[ecosystem.animal.body]
-upkeep = 0.0005
-movement_cost = 0.003
-movement_energy_power = 1.0

@@ -1,0 +1,7 @@
+# Positive actuator work and resistive motor losses, plus maintenance.
+[ecosystem.animal.body]
+upkeep = 0.0005
+energy_scale = 0.000001
+motor_efficiency = 0.25
+force_loss = 0.01
+torque_loss = 0.01
