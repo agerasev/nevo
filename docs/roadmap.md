@@ -14,8 +14,7 @@ Steps 1–4 establish navigation; 5–6 extend ecology. Step 7 can happen earlie
 
 1. **Completed: larger worlds and camera navigation.** [Camera controls](viewer.md)
    and fixed [sensing scales](configuration.md) support a
-   [large uniform world](../configs/world/large-uniform.toml) with unchanged
-   initial densities.
+   [large uniform world](../configs/world/large-uniform.toml).
 2. **Completed: persistent resource patches.** Fixed Gaussian landscapes set local
    capacity; smooth crowding limits seedling recruitment with bounded sampling and
    configurable recovery. [Composable presets](configuration.md) separate

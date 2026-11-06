@@ -181,7 +181,7 @@ fn preset_categories_own_disjoint_fields_and_compose_independently_of_order() {
             ],
         ),
         ("locomotion", &["damped"]),
-        ("obstacles", &["none", "scattered"]),
+        ("obstacles", &["none", "scattered", "scattered-small"]),
         ("movement", &["upkeep-only", "work-and-loss"]),
         ("plant-growth", &["uniform", "patches"]),
         ("viewer", &["window"]),

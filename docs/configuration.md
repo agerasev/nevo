@@ -20,7 +20,7 @@ directories configure separate aspects of the experiment.
 | Choice | Presets |
 | --- | --- |
 | World | [Small uniform](../configs/world/small-uniform.toml), [small non-uniform](../configs/world/small-nonuniform.toml), [large uniform](../configs/world/large-uniform.toml), [large non-uniform](../configs/world/large-nonuniform.toml), [debug](../configs/world/debug.toml) |
-| Obstacles | [None](../configs/obstacles/none.toml), [scattered circles](../configs/obstacles/scattered.toml) |
+| Obstacles | [None](../configs/obstacles/none.toml), [large-world circles](../configs/obstacles/scattered.toml), [small-world circles](../configs/obstacles/scattered-small.toml) |
 | Locomotion | [Damped acceleration](../configs/locomotion/damped.toml) |
 | Movement energy budget | [Work and motor losses](../configs/movement/work-and-loss.toml), [upkeep only](../configs/movement/upkeep-only.toml) |
 | Plant growth | [Uniform](../configs/plant-growth/uniform.toml), [patch-dependent](../configs/plant-growth/patches.toml) |
@@ -28,8 +28,8 @@ directories configure separate aspects of the experiment.
 | Metrics | [Long window](../configs/metrics/long-window.toml) |
 | Diagnostics | [Tick trace](../configs/diagnostics/trace.toml) |
 
-Large worlds preserve the corresponding small world's initial plant and animal
-densities. Local sensing uses fixed `sensing.distance_scale` and
+Large-world presets use a sparser plant population across the larger arena.
+Local sensing uses fixed `sensing.distance_scale` and
 `sensing.signal_scale`, independent of arena dimensions
 and plant count. Their defaults retain the original 500-plant baseline's signal
 scale; sparse worlds no longer amplify each source by averaging over fewer plants.
@@ -62,8 +62,9 @@ the requested `ecosystem.plants` within its separate attempt limit or fail clear
 Explicit initial positions override that sampling; fixed replacement positions
 are incompatible with density-based replenishment.
 
-Obstacle presets provide explicit fixed circles. Admission avoids them with a
-bounded number of proposals; explicit positions must also clear them. Overlapping
+Obstacle presets provide explicit fixed circles; choose the layout for your arena
+size. Admission avoids them with bounded proposals; explicit positions must also
+clear them. Overlapping
 obstacle circles form their union.
 Crowding correction accounts for the arena edge, but does not renormalize density
 around obstacle boundaries. Plants can subsequently move under the shared

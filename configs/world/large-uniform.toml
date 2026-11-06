@@ -1,8 +1,8 @@
-# Twice the baseline width/height, with the same plant and animal densities.
+# Large arena with a sparse plant population.
 [ecosystem]
 world.width = 2520.0
 world.height = 1400.0
-plants = 2000
+plants = 500
 initial_animals = 80
 minimum_population = 80
 immigration.energy = 0.25

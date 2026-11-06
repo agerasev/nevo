@@ -1,4 +1,4 @@
-# Half the large arena's width, height, and patch spread; one quarter of its population.
+# Small arena with smooth local plant capacity and recovery.
 [ecosystem]
 world.width = 1260.0
 world.height = 700.0
