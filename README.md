@@ -7,9 +7,9 @@ evidence of adaptation.
 
 Animals steer by forward acceleration and turning, with persistent heading and
 velocity under viscous drag. Movement consumes energy through mechanical work
-and motor losses.
+and motor losses. Animals and plants share collision physics with fixed obstacles.
 
-Initialize the drawing dependency with `git submodule update --init`, then:
+Initialize the submodules with `git submodule update --init`, then:
 
 ```sh
 # Start a seeded, bounded experiment.
@@ -18,9 +18,10 @@ cargo run --locked -- runs/baseline --config configs/world/small-uniform.toml --
 cargo run --locked -- runs/baseline --config configs/viewer/window.toml
 # Inspect a small deterministic scene.
 cargo run --locked -- --config configs/world/debug.toml --config configs/diagnostics/trace.toml --viewer --paused
-# Explore resource patches with damped locomotion and camera navigation.
-cargo run --locked -- \
+# Explore resource patches, physical contacts, and fixed obstacles.
+cargo run --release --locked -- \
   --config configs/world/large-nonuniform.toml \
+  --config configs/obstacles/scattered.toml \
   --config configs/locomotion/damped.toml \
   --config configs/movement/work-and-loss.toml --viewer --paused
 ```

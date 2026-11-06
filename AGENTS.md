@@ -53,5 +53,6 @@
   contract. Each object supplies one default drawing; keep ecosystem presentation
   separate from generic window controls.
 - Commit each completed editing milestone after its relevant checks pass.
-- `wgame/` is a separate Git submodule with its own [instructions](wgame/AGENTS.md).
-  Follow those when working there; keep NEvo-specific knowledge in this repository.
+- `wgame/`, `phy/`, and `geom2/` are separate Git submodules. Follow instructions
+  within each when working there, including [wgame's instructions](wgame/AGENTS.md).
+  Keep NEvo-specific knowledge in this repository.

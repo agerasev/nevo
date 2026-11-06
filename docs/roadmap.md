@@ -24,17 +24,16 @@ Steps 1–4 establish navigation; 5–6 extend ecology. Step 7 can happen earlie
 3. **Completed: body heading and damped locomotion.** Bodies
    retain heading and velocities, with forward and angular acceleration controlled
    in body coordinates. [Locomotion and movement presets](configuration.md)
-   separate drag and inertia from positive mechanical work and motor losses.
+   separate physical dynamics from positive mechanical work and motor losses.
    [Physics substeps](simulation.md) preserve one mind update and one set of
-   ecological events per tick. Heading is visible in the viewer; obstacles and
-   animal collisions remain in milestone 4.
-4. **Local perception and obstacles.** Start with finite-range body-relative rays
-   reporting nearest surfaces and an explicit miss, plus optional food-gradient
-   smell. Static obstacles occlude vision; contacts and spawning respect geometry.
-   **Open:** field of view, ray count, categories, smell rules, contact method,
-   animal collisions, and wrapping-boundary rollout. Integration alone does not
-   prevent tunneling. Compare modalities on held-out maps; masking an input and
-   evolving without it answer different questions.
+   ecological events per tick. Heading is visible in the viewer.
+4. **Local perception and obstacles.** Contact physics completed and validated:
+   animals and plants share disk dynamics with fixed obstacles and geometry-aware
+   admission. **Next:** finite-range body-relative rays reporting nearest surfaces
+   and an explicit miss, with obstacle occlusion and optional food-gradient smell.
+   **Open:** field of view, ray count, categories, smell rules, and wrapping-boundary
+   rollout. Compare modalities on held-out maps; masking an input and evolving
+   without it answer different questions.
 5. **Nonlinear plant growth.** Compare fast recovery with slow seedling / fast
    intermediate / slow mature growth. Restraint in harvesting is a hypothesis.
    **Open:** curve, timescale, and regeneration. Logistic growth cannot restart

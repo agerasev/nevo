@@ -1,10 +1,20 @@
 # Forward and angular acceleration with viscous damping.
+[ecosystem.physics]
+time_step = 0.1
+substeps = 4
+mass_per_energy = 1.0
+contact_frequency = 20.0
+contact_damping = 1.0
+max_substeps = 256
+max_displacement_fraction = 0.25
+max_placement_attempts = 1024
+
 [ecosystem.animal.body]
-mass = 1.0
-moment_of_inertia = 1.0
 max_acceleration = 100.0
 max_angular_acceleration = 10.0
 linear_drag = 1.0
 angular_drag = 2.0
-time_step = 0.1
-substeps = 4
+
+[ecosystem.plant]
+linear_drag = 1.0
+angular_drag = 2.0

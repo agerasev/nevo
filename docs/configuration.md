@@ -20,6 +20,7 @@ directories configure separate aspects of the experiment.
 | Choice | Presets |
 | --- | --- |
 | World | [Small uniform](../configs/world/small-uniform.toml), [small non-uniform](../configs/world/small-nonuniform.toml), [large uniform](../configs/world/large-uniform.toml), [large non-uniform](../configs/world/large-nonuniform.toml), [debug](../configs/world/debug.toml) |
+| Obstacles | [None](../configs/obstacles/none.toml), [scattered circles](../configs/obstacles/scattered.toml) |
 | Locomotion | [Damped acceleration](../configs/locomotion/damped.toml) |
 | Movement energy budget | [Work and motor losses](../configs/movement/work-and-loss.toml), [upkeep only](../configs/movement/upkeep-only.toml) |
 | Plant growth | [Uniform](../configs/plant-growth/uniform.toml), [patch-dependent](../configs/plant-growth/patches.toml) |
@@ -32,7 +33,8 @@ densities. Local sensing uses fixed `sensing.distance_scale` and
 `sensing.signal_scale`, independent of arena dimensions
 and plant count. Their defaults retain the original 500-plant baseline's signal
 scale; sparse worlds no longer amplify each source by averaging over fewer plants.
-Sources still contribute at all distances; finite-range sensing is a later milestone.
+Sources still contribute at all distances and through obstacles; finite-range
+sensing and occlusion are later work.
 This changes the world model, so earlier checkpoints require their original build.
 
 Non-uniform worlds give fixed, seeded Gaussian patches a local plant capacity.
@@ -43,7 +45,7 @@ the baseline's immediate replacement to a fixed plant count.
 Replenishment samples fresh continuous positions according to unused capacity.
 Crowding sums a Gaussian contribution from every plant, including zero-energy
 seedlings, with correction for arena boundaries. Its radius is independent of
-patch spread. Plants retain room to mature inside the arena, and there is no grid
+patch spread. Proposed sites leave room to mature inside the arena, and there is no grid
 or fixed planting site. Capacity is a soft local limit: adding one plant raises
 density throughout its neighborhood and can cause a local overshoot. Total plant
 count varies with consumption and recovery.
@@ -51,13 +53,22 @@ count varies with consumption and recovery.
 The [replenishment contract](../src/ecosystem/replenishment/mod.rs) defines density
 units, recovery, and sampling limits. Importance sampling concentrates proposals
 near patches when useful, with acceptance adjusted to the proposal distribution.
-Successful and rejected proposals, including draws outside the usable arena,
-consume the tick budget; a full landscape need not admit any seedlings. Settings
+Successful and rejected proposals, including draws outside the usable arena or
+inside obstacles, consume the tick budget; a full landscape need not admit any
+seedlings. Settings
 that exceed the configured attempt limit are rejected rather than silently
 slowing recovery. Initial planting uses the same crowding rule and must establish
 the requested `ecosystem.plants` within its separate attempt limit or fail clearly.
 Explicit initial positions override that sampling; fixed replacement positions
 are incompatible with density-based replenishment.
+
+Obstacle presets provide explicit fixed circles. Admission avoids them with a
+bounded number of proposals; explicit positions must also clear them. Overlapping
+obstacle circles form their union.
+Crowding correction accounts for the arena edge, but does not renormalize density
+around obstacle boundaries. Plants can subsequently move under the shared
+[physics rules](simulation.md); patch capacity remains fixed and growth uses
+each plant's current position.
 
 Patch-dependent growth requires a non-uniform world and varies individual plant
 growth across its landscape. Growth is uniform by default, but plant count and
@@ -65,8 +76,9 @@ food production can still change. Compare [measured plant production](metrics.md
 as well as collected food. For a bounded run combining a world and movement choice:
 
 ```sh
-cargo run --locked -- \
+cargo run --release --locked -- \
   --config configs/world/large-nonuniform.toml \
+  --config configs/obstacles/scattered.toml \
   --config configs/locomotion/damped.toml \
   --config configs/movement/work-and-loss.toml \
   --seed 1 --ticks 1000
@@ -75,9 +87,10 @@ cargo run --locked -- \
 Energy units use a reference reproduction threshold of `1.0`, consistently for
 animals, plants, food gains, and costs. Changing the configured threshold changes
 the experiment, not its units. Earlier logs keep their original units.
-Locomotion settings define fixed mass and moment of inertia, acceleration limits,
-drag, and integration timing. Energy reserves change body radius, not inertial
-mass. The movement budget charges positive translational and rotational work
+The locomotion preset groups common `ecosystem.physics` settings with animal
+motor limits and animal/plant drag. Energy-derived mass and contact behavior are
+defined in the [simulation contract](simulation.md). The movement budget charges
+positive translational and rotational work
 separately, plus resistive motor losses. Braking earns no energy credit and
 blocked thrust still incurs losses. Coasting with no actuation has no motor
 charge; maintaining speed against drag requires paid actuation.
@@ -87,9 +100,11 @@ See the
 [ecosystem settings](../src/ecosystem/config.rs) for the schema and
 [simulation contract](simulation.md) for timing and state semantics.
 
-Physical `time_step` advances locomotion and its energy expenditure. Upkeep,
+Physical `time_step` advances shared dynamics and motor energy expenditure. Upkeep,
 plant growth, replenishment, and reproduction remain per ecological tick;
-`substeps` subdivides physics only. `tick_hz` changes wall-clock pacing only.
+adaptive substeps subdivide physics only. `max_substeps` bounds integration work;
+an unresolved step fails instead of silently relaxing that bound. `tick_hz`
+changes wall-clock pacing only.
 
 Seed and model settings are immutable on [resume](persistence.md). Runtime
 settings such as viewing, pacing, tracing, tick budget, checkpoint policy, and

@@ -9,7 +9,7 @@ use std::{sync::mpsc, time::Duration};
 
 use glam::{DVec2, Vec2};
 use nevo::{
-    ecosystem::{Animal, Body, Ecosystem, Plant},
+    ecosystem::{Animal, Body, Ecosystem, Obstacle, Plant},
     universe::Universe,
     viewer::{Bounds, Camera, Draw, Drawing},
 };
@@ -122,6 +122,11 @@ fn entities_collect_owned_geometry_without_mind_traits() {
         animal.body.heading = std::f64::consts::FRAC_PI_2;
         plant.draw(&mut drawing);
         animal.draw(&mut drawing);
+        Obstacle {
+            position: DVec2::new(0.0, 0.5),
+            radius: 0.2,
+        }
+        .draw(&mut drawing);
     }
     drawing.bounds = Some(Bounds {
         min: -Vec2::ONE,
@@ -133,6 +138,7 @@ fn entities_collect_owned_geometry_without_mind_traits() {
     assert_pixel(&image, 26, 50, [51, 189, 82, 255]);
     assert_pixel(&image, 74, 50, [255, 217, 64, 255]);
     assert_pixel(&image, 74, 44, [46, 36, 10, 255]);
+    assert_pixel(&image, 50, 26, [110, 99, 82, 255]);
     assert_pixel(&image, 50, 50, [14, 18, 19, 255]);
     // Navigation uses the same drawing path, with zoom anchored at the animal.
     let mut camera = Camera::default();

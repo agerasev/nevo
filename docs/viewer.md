@@ -12,7 +12,8 @@ paused does not advance the world. Toolbar changes apply only to this invocation
 the saved pacing setting remains the startup value.
 
 **World** shows plants in green and animals in yellow, with a marker indicating
-each animal's heading. **Metrics** shows recorded
+each animal's heading. Fixed obstacles are brown-gray circles. **Metrics** shows
+recorded
 [history and plots](metrics.md#viewing). Completion leaves the final state visible;
 closing the window stops the worker. `viewer.vsync` controls presentation without
 changing simulation time or pacing.

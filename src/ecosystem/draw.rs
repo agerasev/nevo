@@ -90,6 +90,9 @@ impl<M, G, P, MC, IC> Draw for Ecosystem<M, G, P, MC, IC> {
         for plant in self.plants() {
             plant.draw(drawing);
         }
+        for obstacle in self.obstacles() {
+            obstacle.draw(drawing);
+        }
         for animal in self.animals().values() {
             animal.draw(drawing);
         }

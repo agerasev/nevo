@@ -20,19 +20,33 @@ Bodies retain heading, linear velocity, and angular velocity. The current mind
 observes the food field and its own motion in body coordinates, then requests
 bounded forward and angular acceleration. Drag damps both velocities. This keeps
 the controller's observations and actions independent of the world's compass
-axes. Fixed mass and moment of inertia are separate from energy reserves.
+axes. Animals and plants are physical disks: positive reserve energy sets mass
+through the common `mass_per_energy` scale, and inertia is `0.5 * mass * radius²`.
+Plants have passive linear and angular drag. Zero-energy plants remain physically
+inactive until they grow; animals with nonpositive reserves are culled next tick.
+
+The [shared dynamics](../src/ecosystem/physics/mod.rs) use `phy`'s `f64` RK4
+integrator and `geom2`'s disk contact geometry. Contacts between moving disks,
+arena walls, and fixed infinite-mass obstacles use non-attractive normal spring
+and damping forces. Contacts are compliant and allow temporary overlap. Reduced
+mass scales disk-pair response. Adaptive bounded
+substeps resolve motion and contacts, while minds and ecological events run once
+per tick. Spatial bins accelerate pair lookup without discretizing positions or
+contact geometry. Movement budgets and integration limits are described in
+[configuration](configuration.md).
+
+[Assimilation](../src/ecosystem/feeding.rs) joins the edible fraction of a plant
+to the animal's center of mass, linear momentum, and angular momentum, including
+orbital momentum. The discarded fraction leaves with its own momentum; this
+transfer adds no metabolic fee. Plant growth adds biomass with zero momentum,
+diluting velocity and spin. Upkeep and motor reserve expenditure preserve the
+body's velocities as its mass changes.
+
 At a split, both resulting bodies retain the parent's heading and linear and
 angular velocities, without an extra birth motion charge. They separate in
 opposite directions along a uniformly sampled angle around the former position.
-Each mind chooses its own commands on the next tick.
-
-The [body integrator](../src/ecosystem/body/mod.rs) advances physics in `f64`
-substeps, with one mind update and one set of ecological events per tick. Arena
-walls clamp position and remove outward normal velocity. Animal collisions and
-obstacle contacts belong to the next milestone. `phy` was evaluated but its
-current `f32` state would require a precision adapter; the current integrator
-remains local to the ecosystem. Movement budgets and time units are described in
-[configuration](configuration.md).
+This preserves linear momentum, while the smaller disk inertias reduce total
+spin angular momentum. Each mind chooses its own commands on the next tick.
 
 The [runner](../src/run/mod.rs) is the sole state writer. Readers see complete
 published ticks; a failed or discarded computation must leave that state intact.
@@ -40,7 +54,7 @@ Rendering, metrics, and wall-clock pacing must not affect simulation trajectorie
 or random streams. Reproducibility targets the same build and platform.
 
 Checkpoint state must include everything that affects continuation, including
-body heading and velocities, recurrent memory, and RNG positions. Derived caches
+animal and plant motion, recurrent memory, and RNG positions. Derived caches
 may be rebuilt, but rebuilding must preserve the trajectory. See
 [persistence](persistence.md), the focused
 [continuation invariant](../src/universe/tests.rs), and

@@ -1,0 +1,16 @@
+# Fixed infinite-mass circles, compatible with the standard small and large worlds.
+[[ecosystem.obstacles]]
+position = [-210.0, -110.0]
+radius = 45.0
+
+[[ecosystem.obstacles]]
+position = [190.0, 100.0]
+radius = 55.0
+
+[[ecosystem.obstacles]]
+position = [-70.0, 170.0]
+radius = 35.0
+
+[[ecosystem.obstacles]]
+position = [80.0, -150.0]
+radius = 40.0

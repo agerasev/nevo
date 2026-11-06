@@ -85,7 +85,7 @@ impl<'de> Deserialize<'de> for Placement {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     default,
     deny_unknown_fields,
@@ -105,6 +105,8 @@ pub struct Config<
     /// Population floor maintained by later immigration; zero disables it.
     pub minimum_population: usize,
     pub world: WorldConfig,
+    pub physics: PhysicsConfig,
+    pub obstacles: Vec<super::Obstacle>,
     pub immigration: ImmigrationConfig,
     pub sensing: SensingConfig,
     pub genetics: GeneticsConfig<IC, P>,
@@ -120,6 +122,8 @@ impl<MC: Default, IC: Default, P: Default> Default for Config<MC, IC, P> {
             plants: 500,
             minimum_population: 20,
             world: WorldConfig::default(),
+            physics: PhysicsConfig::default(),
+            obstacles: Vec::new(),
             immigration: ImmigrationConfig::default(),
             sensing: SensingConfig::default(),
             genetics: GeneticsConfig::default(),
@@ -144,12 +148,14 @@ impl<MC, IC, P> Config<MC, IC, P> {
                 "initial plant count exceeds max_initial_attempts"
             );
         }
-        self.parameters().validate()
+        self.parameters().validate()?;
+        super::obstacle::validate(&self.obstacles, self.world)
     }
 
     pub(super) fn parameters(&self) -> Parameters {
         Parameters {
             world: self.world,
+            physics: self.physics,
             immigration: self.immigration,
             sensing: self.sensing,
             body: self.animal.body.parameters(),
@@ -169,6 +175,7 @@ impl<MC, IC, P> Config<MC, IC, P> {
             && self.plants == other.plants
             && self.minimum_population == other.minimum_population
             && self.parameters() == other.parameters()
+            && self.obstacles == other.obstacles
             && self.genetics == other.genetics
     }
 }
@@ -190,6 +197,41 @@ impl Default for WorldConfig {
 impl WorldConfig {
     pub fn half_size(self) -> DVec2 {
         DVec2::new(self.width, self.height) * 0.5
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PhysicsConfig {
+    /// Physical time per ecological tick; viewer pacing does not change it.
+    pub time_step: f64,
+    /// Minimum integration steps; adaptive contact resolution may subdivide further.
+    pub substeps: u32,
+    /// Common inertial mass per unit of stored animal or plant energy.
+    pub mass_per_energy: f64,
+    /// Natural angular frequency of normal contact repulsion.
+    pub contact_frequency: f64,
+    /// Contact damping ratio; one is critical damping for an isolated pair.
+    pub contact_damping: f64,
+    /// Hard bound on accepted and rejected integration attempts per ecological tick.
+    pub max_substeps: u32,
+    /// Maximum relative travel near possible contacts, as a fraction of pair size/separation.
+    pub max_displacement_fraction: f64,
+    /// Bounded random placement attempts for each immigrant or fixed-count plant.
+    pub max_placement_attempts: u32,
+}
+impl Default for PhysicsConfig {
+    fn default() -> Self {
+        Self {
+            time_step: 0.1,
+            substeps: 4,
+            mass_per_energy: 1.0,
+            contact_frequency: 20.0,
+            contact_damping: 1.0,
+            max_substeps: 256,
+            max_displacement_fraction: 0.25,
+            max_placement_attempts: 1024,
+        }
     }
 }
 
@@ -263,14 +305,10 @@ impl Default for ReproductionConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct FeedingConfig {
     pub efficiency: f64,
-    pub contact_scale: f64,
 }
 impl Default for FeedingConfig {
     fn default() -> Self {
-        Self {
-            efficiency: 0.1,
-            contact_scale: 0.8,
-        }
+        Self { efficiency: 0.1 }
     }
 }
 
@@ -279,6 +317,7 @@ impl Default for FeedingConfig {
 #[serde(deny_unknown_fields)]
 pub(super) struct Parameters {
     pub world: WorldConfig,
+    pub physics: PhysicsConfig,
     pub immigration: ImmigrationConfig,
     pub sensing: SensingConfig,
     pub body: BodyParameters,
@@ -304,6 +343,42 @@ impl Parameters {
         }
         positive(self.world.half_size().x, "world width")?;
         positive(self.world.half_size().y, "world height")?;
+        positive(self.physics.time_step, "physics time_step")?;
+        positive(self.physics.mass_per_energy, "physics mass_per_energy")?;
+        positive(self.physics.contact_frequency, "physics contact_frequency")?;
+        positive(
+            self.physics.contact_frequency.powi(2),
+            "squared contact_frequency",
+        )?;
+        nonnegative(self.physics.contact_damping, "physics contact_damping")?;
+        nonnegative(
+            2.0 * self.physics.contact_damping * self.physics.contact_frequency,
+            "contact damping rate",
+        )?;
+        positive(
+            self.physics.max_displacement_fraction,
+            "physics max_displacement_fraction",
+        )?;
+        ensure!(
+            self.physics.max_displacement_fraction <= 0.5,
+            "max_displacement_fraction must not exceed 0.5"
+        );
+        ensure!(
+            self.physics.max_substeps >= self.physics.substeps,
+            "max_substeps must be at least substeps"
+        );
+        ensure!(
+            self.physics.max_placement_attempts > 0,
+            "max_placement_attempts must be positive"
+        );
+        ensure!(
+            self.physics.substeps > 0,
+            "physics substeps must be positive"
+        );
+        positive(
+            self.physics.time_step / f64::from(self.physics.substeps),
+            "physics substep duration",
+        )?;
         nonnegative(self.immigration.energy, "immigration energy")?;
         self.immigration.position.validate(self.world)?;
         positive(self.sensing.distance_scale, "sensing distance_scale")?;
@@ -320,8 +395,6 @@ impl Parameters {
             "sensing gradient_dead_zone",
         )?;
         nonnegative(self.body.upkeep, "animal upkeep")?;
-        positive(self.body.mass, "animal mass")?;
-        positive(self.body.moment_of_inertia, "animal moment_of_inertia")?;
         nonnegative(self.body.max_acceleration, "animal max_acceleration")?;
         nonnegative(
             self.body.max_angular_acceleration,
@@ -329,20 +402,18 @@ impl Parameters {
         )?;
         nonnegative(self.body.linear_drag, "animal linear_drag")?;
         nonnegative(self.body.angular_drag, "animal angular_drag")?;
-        positive(self.body.time_step, "animal time_step")?;
-        ensure!(self.body.substeps > 0, "animal substeps must be positive");
-        positive(
-            self.body.time_step / f64::from(self.body.substeps),
-            "physics substep duration",
-        )?;
+        nonnegative(self.plant.linear_drag, "plant linear_drag")?;
+        nonnegative(self.plant.angular_drag, "plant angular_drag")?;
         for coefficient in [
             self.body.linear_drag,
             self.body.angular_drag,
             self.body.max_acceleration,
             self.body.max_angular_acceleration,
+            self.plant.linear_drag,
+            self.plant.angular_drag,
         ] {
             nonnegative(
-                coefficient * self.body.time_step,
+                coefficient * self.physics.time_step,
                 "integrated motion coefficient",
             )?;
         }
@@ -359,30 +430,7 @@ impl Parameters {
         )?;
         nonnegative(self.body.force_loss, "animal force_loss")?;
         nonnegative(self.body.torque_loss, "animal torque_loss")?;
-        for (inertia, acceleration, loss) in [
-            (
-                self.body.mass,
-                self.body.max_acceleration,
-                self.body.force_loss,
-            ),
-            (
-                self.body.moment_of_inertia,
-                self.body.max_angular_acceleration,
-                self.body.torque_loss,
-            ),
-        ] {
-            let effort = inertia * acceleration;
-            nonnegative(effort, "maximum motor effort")?;
-            nonnegative(
-                effort * effort * self.body.time_step,
-                "integrated squared motor effort",
-            )?;
-            nonnegative(
-                loss * (effort * effort * self.body.time_step) * self.body.energy_scale,
-                "motor loss energy",
-            )?;
-        }
-        nonnegative(self.body.radius_scale, "animal radius_scale")?;
+        positive(self.body.radius_scale, "animal radius_scale")?;
         positive(self.reproduction.threshold, "reproduction threshold")?;
         let fraction = self.reproduction.child_energy_fraction;
         ensure!(
@@ -397,7 +445,6 @@ impl Parameters {
             self.feeding.efficiency.is_finite() && (0.0..=1.0).contains(&self.feeding.efficiency),
             "feeding efficiency must be between zero and one"
         );
-        nonnegative(self.feeding.contact_scale, "feeding contact_scale")?;
         positive(self.plant.max_energy, "plant max_energy")?;
         for energy in [self.plant.initial_energy, self.plant.replacement_energy] {
             ensure!(
@@ -410,7 +457,7 @@ impl Parameters {
             self.plant.max_energy + self.plant.growth * self.plant.patches.growth_peak,
             "plant energy after growth",
         )?;
-        nonnegative(self.plant.radius_scale, "plant radius_scale")?;
+        positive(self.plant.radius_scale, "plant radius_scale")?;
         nonnegative(
             self.plant.radius_scale * self.plant.max_energy.sqrt(),
             "maximum plant radius",
@@ -476,20 +523,12 @@ pub struct AnimalConfig<MC = animal::Config<rnn::Config>> {
 pub struct BodyConfig {
     /// Reserve energy spent once per ecological tick.
     pub upkeep: f64,
-    /// Fixed inertial mass, independent of reserve energy.
-    pub mass: f64,
-    /// Fixed angular inertia, independent of reserve energy.
-    pub moment_of_inertia: f64,
     pub max_acceleration: f64,
     pub max_angular_acceleration: f64,
     /// Linear velocity decay rate (inverse physical time).
     pub linear_drag: f64,
     /// Angular velocity decay rate (inverse physical time).
     pub angular_drag: f64,
-    /// Physical time per ecological tick; viewer pacing does not change it.
-    pub time_step: f64,
-    /// Motion integration steps; sensing and ecology still run once per tick.
-    pub substeps: u32,
     /// Reserve-energy units per mechanical-energy unit; zero disables motor costs.
     pub energy_scale: f64,
     /// Fraction of supplied work converted to positive mechanical work.
@@ -505,14 +544,10 @@ impl Default for BodyConfig {
         let parameters = BodyParameters::default();
         Self {
             upkeep: parameters.upkeep,
-            mass: parameters.mass,
-            moment_of_inertia: parameters.moment_of_inertia,
             max_acceleration: parameters.max_acceleration,
             max_angular_acceleration: parameters.max_angular_acceleration,
             linear_drag: parameters.linear_drag,
             angular_drag: parameters.angular_drag,
-            time_step: parameters.time_step,
-            substeps: parameters.substeps,
             energy_scale: parameters.energy_scale,
             motor_efficiency: parameters.motor_efficiency,
             force_loss: parameters.force_loss,
@@ -525,14 +560,10 @@ impl BodyConfig {
     pub(super) fn parameters(self) -> BodyParameters {
         BodyParameters {
             upkeep: self.upkeep,
-            mass: self.mass,
-            moment_of_inertia: self.moment_of_inertia,
             max_acceleration: self.max_acceleration,
             max_angular_acceleration: self.max_angular_acceleration,
             linear_drag: self.linear_drag,
             angular_drag: self.angular_drag,
-            time_step: self.time_step,
-            substeps: self.substeps,
             energy_scale: self.energy_scale,
             motor_efficiency: self.motor_efficiency,
             force_loss: self.force_loss,
@@ -545,14 +576,10 @@ impl BodyConfig {
 #[serde(deny_unknown_fields)]
 pub(super) struct BodyParameters {
     pub upkeep: f64,
-    pub mass: f64,
-    pub moment_of_inertia: f64,
     pub max_acceleration: f64,
     pub max_angular_acceleration: f64,
     pub linear_drag: f64,
     pub angular_drag: f64,
-    pub time_step: f64,
-    pub substeps: u32,
     pub energy_scale: f64,
     pub motor_efficiency: f64,
     pub force_loss: f64,
@@ -563,14 +590,10 @@ impl Default for BodyParameters {
     fn default() -> Self {
         Self {
             upkeep: 0.0005,
-            mass: 1.0,
-            moment_of_inertia: 1.0,
             max_acceleration: 100.0,
             max_angular_acceleration: 10.0,
             linear_drag: 1.0,
             angular_drag: 2.0,
-            time_step: 0.1,
-            substeps: 4,
             energy_scale: 1e-6,
             motor_efficiency: 0.25,
             force_loss: 0.01,
@@ -587,6 +610,10 @@ pub struct PlantConfig {
     pub growth: f64,
     pub max_energy: f64,
     pub radius_scale: f64,
+    /// Linear velocity decay rate (inverse physical time).
+    pub linear_drag: f64,
+    /// Angular velocity decay rate (inverse physical time).
+    pub angular_drag: f64,
     pub initial_position: Placement,
     pub replacement_position: Placement,
     pub patches: super::patches::Config,
@@ -603,6 +630,8 @@ impl Default for PlantConfig {
             growth: parameters.growth,
             max_energy: parameters.max_energy,
             radius_scale: parameters.radius_scale,
+            linear_drag: parameters.linear_drag,
+            angular_drag: parameters.angular_drag,
             initial_position: parameters.initial_position,
             replacement_position: parameters.replacement_position,
             patches: parameters.patches,
@@ -618,6 +647,8 @@ impl PlantConfig {
             growth: self.growth,
             max_energy: self.max_energy,
             radius_scale: self.radius_scale,
+            linear_drag: self.linear_drag,
+            angular_drag: self.angular_drag,
             initial_position: self.initial_position,
             replacement_position: self.replacement_position,
             patches: self.patches,
@@ -633,6 +664,8 @@ pub(super) struct PlantParameters {
     pub growth: f64,
     pub max_energy: f64,
     pub radius_scale: f64,
+    pub linear_drag: f64,
+    pub angular_drag: f64,
     pub initial_position: Placement,
     pub replacement_position: Placement,
     pub patches: super::patches::Config,
@@ -646,6 +679,8 @@ impl Default for PlantParameters {
             growth: 0.0025,
             max_energy: 1.0,
             radius_scale: 10.0,
+            linear_drag: 1.0,
+            angular_drag: 2.0,
             initial_position: Placement::Random,
             replacement_position: Placement::Random,
             patches: super::patches::Config::default(),

@@ -165,7 +165,10 @@ impl Fixture {
                 },
             )
             .unwrap();
-        world.seed_plants_at(Some(DVec2::ZERO)).unwrap();
+        let contact = world.animals[&id(1)].body.radius() + world.parameters.plant.max_radius();
+        world
+            .seed_plants_at(Some(DVec2::new(contact, 0.0)))
+            .unwrap();
         Self { world, number: 0 }
     }
 
@@ -199,13 +202,16 @@ fn id(serial: u64) -> AnimalId {
 fn first_claimant_gets_the_only_meal_and_replacement_starts_small() {
     let mut fixture = Fixture::debug(1);
     let first = id(1);
-    fixture.world.animals.get_mut(&first).unwrap().body.energy = START_ENERGY;
+    let body = &mut fixture.world.animals.get_mut(&first).unwrap().body;
+    body.energy = START_ENERGY;
+    body.position = DVec2::new(-15.0, 0.0);
+    fixture.world.plants[0].position = DVec2::ZERO;
     let second = fixture
         .world
         .admit_with(
             1,
             Admission {
-                position: Some(DVec2::ZERO),
+                position: Some(DVec2::new(15.0, 0.0)),
                 energy: START_ENERGY,
             },
         )
@@ -231,12 +237,12 @@ fn upkeep_defers_death_and_replacement_first_acts_on_the_following_tick() {
     let mut fixture = Fixture::debug(2);
     fixture.world.minimum_population = 1;
     fixture.world.plants[0].position = DVec2::new(100.0, 0.0);
-    fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = 0.0025;
+    fixture.world.animals.get_mut(&id(1)).unwrap().body.energy = UPKEEP;
 
     let starving = fixture.tick();
     assert!(starving.events.is_empty());
-    assert_eq!(starving.decisions[0].energy, 0.0025);
-    assert_eq!(fixture.world.animals[&id(1)].body.energy, -0.0025);
+    assert_eq!(starving.decisions[0].energy, UPKEEP);
+    assert_eq!(fixture.world.animals[&id(1)].body.energy, 0.0);
     assert!(starving.decisions[0].position_after.is_finite());
 
     fixture.world.plants[0].position = starving.decisions[0].position_after;
@@ -314,7 +320,7 @@ fn patch_layout_is_seeded_independently_of_animal_admission() {
 }
 
 #[test]
-fn spatial_resources_reject_fixed_or_stored_plants_without_room_to_mature() {
+fn plant_admission_reserves_mature_clearance_but_moving_plants_use_their_current_radius() {
     for replenishment in [None, Some(ReplenishmentConfig::default())] {
         let mut config = Config {
             initial_animals: 0,
@@ -324,12 +330,16 @@ fn spatial_resources_reject_fixed_or_stored_plants_without_room_to_mature() {
         };
         config.plant.patches.count = usize::from(replenishment.is_none());
         config.plant.replenishment = replenishment;
+        config.plant.initial_energy = 0.25;
         let edge = config.world.half_size();
         config.plant.initial_position = Placement::Fixed(edge);
         assert!(config.validate().is_err());
         config.plant.initial_position = Placement::Random;
         let mut world = Ecosystem::new(config, 3).unwrap();
-        world.plants[0].position = edge;
+        let radius = world.plants[0].radius();
+        world.plants[0].position = DVec2::new(edge.x - radius, 0.0);
+        world.validate().unwrap();
+        world.plants[0].position.x = edge.x + 1.0;
         assert!(world.validate().is_err());
     }
 }
@@ -362,6 +372,86 @@ fn initial_replenishment_reports_exhaustion_when_capacity_cannot_fit_the_count()
 }
 
 #[test]
+fn obstacles_bound_random_admission_attempts_for_animals_and_plants() {
+    for (animals, plants, density_based) in [(1, 0, false), (0, 1, false), (0, 1, true)] {
+        let mut config = Config {
+            initial_animals: animals,
+            plants,
+            minimum_population: 0,
+            world: WorldConfig {
+                width: 100.0,
+                height: 100.0,
+            },
+            ..Config::default()
+        };
+        // The circles fit the arena but their union leaves no room for a radius-10 body.
+        config.obstacles = [(-20.0, -20.0), (-20.0, 20.0), (20.0, -20.0), (20.0, 20.0)]
+            .into_iter()
+            .map(|(x, y)| Obstacle {
+                position: DVec2::new(x, y),
+                radius: 30.0,
+            })
+            .collect();
+        config.animal.body.radius_scale = 20.0;
+        config.physics.max_placement_attempts = 3;
+        if density_based {
+            config.plant.replenishment = Some(ReplenishmentConfig {
+                max_initial_attempts: 3,
+                ..ReplenishmentConfig::default()
+            });
+        }
+        config.validate().unwrap();
+        let error = Ecosystem::new(config, 3).unwrap_err().to_string();
+        let budget = if density_based {
+            "max_initial_attempts=3"
+        } else {
+            "within 3 attempts"
+        };
+        assert!(error.contains(budget), "{error}");
+    }
+}
+
+#[test]
+fn admission_rejects_bodies_larger_than_the_arena() {
+    for (initial_animals, plants) in [(1, 0), (0, 1)] {
+        let config = Config {
+            initial_animals,
+            plants,
+            minimum_population: 0,
+            world: WorldConfig {
+                width: 5.0,
+                height: 5.0,
+            },
+            ..Config::default()
+        };
+        assert!(
+            Ecosystem::new(config, 3)
+                .unwrap_err()
+                .to_string()
+                .contains("fit inside the arena")
+        );
+    }
+}
+
+#[test]
+fn checkpoint_rejects_changed_obstacle_geometry() {
+    use crate::universe::Universe;
+    let mut config = Config {
+        initial_animals: 0,
+        plants: 0,
+        minimum_population: 0,
+        obstacles: vec![Obstacle {
+            position: DVec2::ZERO,
+            radius: 20.0,
+        }],
+        ..Config::default()
+    };
+    let universe = Universe::new(config.clone(), 3).unwrap();
+    config.obstacles[0].radius = 21.0;
+    assert!(universe.restore(config).is_err());
+}
+
+#[test]
 fn zero_recovery_leaves_harvested_plants_absent_instead_of_topping_up() {
     let mut config = Config {
         initial_animals: 1,
@@ -370,7 +460,7 @@ fn zero_recovery_leaves_harvested_plants_absent_instead_of_topping_up() {
         ..Config::default()
     };
     config.immigration.position = Placement::Fixed(DVec2::ZERO);
-    config.plant.initial_position = Placement::Fixed(DVec2::ZERO);
+    config.plant.initial_position = Placement::Fixed(DVec2::new(15.0, 0.0));
     config.plant.replenishment = Some(ReplenishmentConfig {
         recovery_rate: 0.0,
         ..ReplenishmentConfig::default()
@@ -428,7 +518,7 @@ fn replenishment_can_grow_an_empty_population_within_its_tick_attempt_budget() {
 }
 
 #[test]
-fn replenishment_without_patches_keeps_plants_fixed_as_they_mature() {
+fn newly_seeded_plants_grow_once_before_their_first_physical_motion() {
     let mut config = Config {
         initial_animals: 0,
         plants: 8,
@@ -466,7 +556,7 @@ fn capped_growth_and_replacement_energy_balance_the_plant_stock() {
         ..Config::default()
     };
     config.immigration.position = Placement::Fixed(DVec2::ZERO);
-    config.plant.initial_position = Placement::Fixed(DVec2::ZERO);
+    config.plant.initial_position = Placement::Fixed(DVec2::new(15.0, 0.0));
     config.plant.replacement_position = Placement::Fixed(DVec2::new(100.0, 0.0));
     config.plant.replacement_energy = 0.9;
     config.plant.growth = 0.1;
@@ -478,7 +568,7 @@ fn capped_growth_and_replacement_energy_balance_the_plant_stock() {
     };
     let mut world: Ecosystem =
         Ecosystem::with_genetics(config.clone(), 7, Some(RnnGenome::default())).unwrap();
-    assert_eq!(world.plants[0].position, DVec2::ZERO);
+    assert_eq!(world.plants[0].position, DVec2::new(15.0, 0.0));
     assert_eq!(world.metrics().plant_growth_per_tick, None);
     let stock_before = world.plants[0].energy;
     let report = world.advance(1).unwrap();
@@ -496,7 +586,7 @@ fn capped_growth_and_replacement_energy_balance_the_plant_stock() {
 }
 
 #[test]
-fn plants_grow_faster_near_patches_without_drifting_as_they_mature() {
+fn separated_resting_plants_grow_faster_near_patches() {
     let mut config = Config {
         initial_animals: 0,
         plants: 2,
@@ -538,12 +628,12 @@ fn body_stops_at_the_edge_and_cannot_eat_across_it() {
     let body = &mut fixture.world.animals.get_mut(&id(1)).unwrap().body;
     body.position.x = HALF_SIZE.x - 5.0;
     body.energy = START_ENERGY;
-    fixture.world.plants[0].position.x = -HALF_SIZE.x;
+    fixture.world.plants[0].position.x = -HALF_SIZE.x + fixture.world.plants[0].radius();
     let tick = fixture.tick();
     assert!(tick.events.is_empty());
     let body = &fixture.world.animals[&id(1)].body;
-    assert_eq!(body.position, DVec2::new(HALF_SIZE.x - 5.0, 0.0));
     assert!(body.position.x + body.radius() <= HALF_SIZE.x);
+    assert!(body.position.x > 0.0);
 }
 
 #[test]
@@ -561,8 +651,7 @@ fn movement_enters_contact_before_feeding_and_birth() {
     let mut fixture = Fixture::debug(8);
     fixture.world.parameters.body.max_acceleration = 20.0;
     fixture.world.parameters.body.linear_drag = 0.0;
-    fixture.world.parameters.body.time_step = 1.0;
-    fixture.world.parameters.body.substeps = 1;
+    fixture.world.parameters.physics.time_step = 0.5;
     fixture.action(MotorAction {
         thrust: 1.0,
         turn: 0.0,
@@ -571,12 +660,12 @@ fn movement_enters_contact_before_feeding_and_birth() {
     let body = &fixture.world.animals[&id(1)].body;
     assert!(
         body.position.distance(fixture.world.plants[0].position)
-            >= 0.8 * (body.radius() + fixture.world.plants[0].radius())
+            > body.radius() + fixture.world.plants[0].radius()
     );
     let report = fixture.tick();
     assert_eq!(report.decisions.len(), 1);
     assert_eq!(report.decisions[0].position_before, DVec2::ZERO);
-    assert_eq!(report.decisions[0].position_after, DVec2::new(10.0, 0.0));
+    assert!(report.decisions[0].position_after.x > 0.0);
     assert_eq!(
         report.events,
         [
@@ -591,10 +680,12 @@ fn movement_enters_contact_before_feeding_and_birth() {
             },
         ]
     );
-    assert_eq!(
-        (fixture.world.animals[&id(1)].body.position + fixture.world.animals[&id(2)].body.position)
-            * 0.5,
-        report.decisions[0].position_after
+    assert!(
+        fixture
+            .world
+            .animals
+            .values()
+            .all(|animal| animal.body.position.is_finite())
     );
 }
 
@@ -604,12 +695,12 @@ fn feeding_growth_cannot_leave_a_body_outside_the_arena() {
     let body = &mut fixture.world.animals.get_mut(&id(1)).unwrap().body;
     body.energy = START_ENERGY;
     body.position = DVec2::new(HALF_SIZE.x - body.radius(), 0.0);
-    fixture.world.plants[0].position = body.position;
-    let report = fixture.tick();
+    // Put food against the inner side of the animal, with both disks inside the wall.
+    fixture.world.plants[0].position = body.position - DVec2::new(body.radius() + 10.0, 0.0);
+    fixture.tick();
     let body = &fixture.world.animals[&id(1)].body;
     assert_eq!(body.energy, 0.345);
-    assert_eq!(body.position, DVec2::new(HALF_SIZE.x - body.radius(), 0.0));
-    assert!(body.position.x < report.decisions[0].position_after.x);
+    assert!(body.position.x + body.radius() <= HALF_SIZE.x);
 }
 
 #[test]
@@ -901,10 +992,38 @@ fn unequal_reproduction_conserves_energy() {
 }
 
 #[test]
+fn plant_growth_preserves_momentum_when_new_biomass_is_at_rest() {
+    let mut config = Config {
+        initial_animals: 0,
+        minimum_population: 0,
+        plants: 1,
+        ..Config::default()
+    };
+    config.plant.initial_position = Placement::Fixed(DVec2::ZERO);
+    config.plant.initial_energy = 0.25;
+    config.plant.growth = 0.75;
+    config.plant.linear_drag = 0.0;
+    config.plant.angular_drag = 0.0;
+    let mut world = Ecosystem::new(config, 72).unwrap();
+    let plant = &mut world.plants[0];
+    plant.velocity = DVec2::new(4.0, -2.0);
+    plant.angular_velocity = 3.0;
+    let mass_scale = world.parameters.physics.mass_per_energy;
+    let momentum = plant.mass(mass_scale) * plant.velocity;
+    let spin = plant.inertia(mass_scale) * plant.angular_velocity;
+    world.advance(1).unwrap();
+    let grown = &world.plants[0];
+    assert_eq!(grown.energy, 1.0);
+    assert!((grown.mass(mass_scale) * grown.velocity).distance(momentum) < 1e-12);
+    assert!((grown.inertia(mass_scale) * grown.angular_velocity - spin).abs() < 1e-12);
+    assert!(grown.position.length() > 0.0);
+}
+
+#[test]
 fn replacement_growth_stops_at_the_configured_cap() {
     let mut config = measured_config::<()>();
     config.immigration.position = Placement::Fixed(DVec2::ZERO);
-    config.plant.initial_position = Placement::Fixed(DVec2::ZERO);
+    config.plant.initial_position = Placement::Fixed(DVec2::new(10.0, 0.0));
     config.plant.replacement_position = Placement::Fixed(DVec2::new(100.0, 0.0));
     config.plant.initial_energy = 0.25;
     config.plant.replacement_energy = 0.125;
@@ -988,7 +1107,7 @@ fn sensing_preserves_body_relative_signals_when_the_scene_rotates() {
 fn physics_substeps_do_not_repeat_thinking_upkeep_or_plant_growth() {
     for substeps in [1, 8, 32] {
         let mut fixture = Fixture::debug(74);
-        fixture.world.parameters.body.substeps = substeps;
+        fixture.world.parameters.physics.substeps = substeps;
         fixture.world.plants[0].position = DVec2::new(100.0, 0.0);
         fixture.world.plants[0].energy = 0.25;
         fixture.action(MotorAction {
@@ -1021,7 +1140,6 @@ fn motor_cost_is_paid_at_a_wall_before_reproduction() {
     });
     let report = fixture.tick();
     let decision = &report.decisions[0];
-    assert_eq!(decision.distance, 0.0);
     assert!(decision.movement_energy > 0.001);
     assert!(
         report.events.is_empty(),
@@ -1053,6 +1171,9 @@ fn work_conversion_scales_before_dividing_by_tiny_efficiency() {
         fixture.world.plants[0].position = DVec2::new(100.0, 100.0);
         fixture.world.parameters.body.energy_scale = energy_scale;
         fixture.world.parameters.body.motor_efficiency = 1e-308;
+        if energy_scale == 0.0 {
+            fixture.world.parameters.body.force_loss = f64::MAX;
+        }
         fixture.action(MotorAction {
             thrust: 1.0,
             turn: 0.0,
@@ -1073,8 +1194,8 @@ fn splitting_preserves_both_bodies_motion_without_an_extra_energy_fee() {
     fixture.world.parameters.body.energy_scale = 1.0;
     fixture.world.parameters.body.linear_drag = 0.0;
     fixture.world.parameters.body.angular_drag = 0.0;
-    fixture.world.parameters.body.time_step = 0.5;
-    fixture.world.parameters.body.substeps = 1;
+    fixture.world.parameters.physics.time_step = 0.5;
+    fixture.world.parameters.physics.substeps = 1;
     let body = &mut fixture.world.animals.get_mut(&id(1)).unwrap().body;
     body.energy = 1.2;
     body.heading = 0.3;
@@ -1122,14 +1243,19 @@ fn invalid_physics_and_conflicting_restore_parameters_are_rejected() {
         |c| c.animal.reproduction.child_energy_fraction = 1.0,
         |c| c.animal.reproduction.child_energy_fraction = 0.0,
         |c| c.animal.body.upkeep = -0.0025,
-        |c| c.animal.body.mass = 0.0,
-        |c| c.animal.body.moment_of_inertia = f64::NAN,
+        |c| c.physics.mass_per_energy = 0.0,
+        |c| c.physics.mass_per_energy = f64::NAN,
+        |c| c.physics.contact_frequency = 0.0,
+        |c| c.physics.contact_damping = -1.0,
+        |c| c.physics.max_substeps = 0,
+        |c| c.physics.max_displacement_fraction = 0.0,
+        |c| c.physics.max_placement_attempts = 0,
         |c| c.animal.body.max_acceleration = f64::INFINITY,
         |c| c.animal.body.max_angular_acceleration = -1.0,
         |c| c.animal.body.linear_drag = -1.0,
         |c| c.animal.body.angular_drag = f64::INFINITY,
-        |c| c.animal.body.time_step = 0.0,
-        |c| c.animal.body.substeps = 0,
+        |c| c.physics.time_step = 0.0,
+        |c| c.physics.substeps = 0,
         |c| c.animal.body.energy_scale = -0.1,
         |c| c.animal.body.energy_scale = f64::MAX,
         |c| c.animal.body.motor_efficiency = 0.0,
@@ -1138,6 +1264,10 @@ fn invalid_physics_and_conflicting_restore_parameters_are_rejected() {
         |c| c.animal.body.torque_loss = f64::NAN,
         |c| c.plant.max_energy = 0.0,
         |c| c.plant.initial_energy = 1.0025,
+        |c| c.plant.radius_scale = 0.0,
+        |c| c.plant.linear_drag = -1.0,
+        |c| c.plant.angular_drag = f64::NAN,
+        |c| c.animal.body.radius_scale = 0.0,
         |c| c.sensing.softening = 0.0,
         |c| c.genetics.initialization.hidden_units = 0,
         |c| c.genetics.mutation.max_delta = f32::NAN,

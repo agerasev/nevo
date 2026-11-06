@@ -2,8 +2,11 @@
 
 mod body;
 mod config;
+mod feeding;
 mod metrics;
+mod obstacle;
 mod patches;
+mod physics;
 mod replenishment;
 mod update;
 
@@ -13,9 +16,11 @@ mod draw;
 pub use body::{Body, MotorAction};
 pub use config::{
     AnimalConfig, BodyConfig, Config, FeedingConfig, GeneticsConfig, ImmigrationConfig,
-    MetricsConfig, Placement, PlantConfig, ReproductionConfig, SensingConfig, WorldConfig,
+    MetricsConfig, PhysicsConfig, Placement, PlantConfig, ReproductionConfig, SensingConfig,
+    WorldConfig,
 };
 pub use metrics::{Summary, Window};
+pub use obstacle::Obstacle;
 pub use patches::Config as PatchConfig;
 pub use replenishment::Config as ReplenishmentConfig;
 pub use update::EcosystemUpdate;
@@ -72,6 +77,8 @@ pub struct Plant {
     pub id: u64,
     pub position: DVec2,
     pub energy: f64,
+    pub velocity: DVec2,
+    pub angular_velocity: f64,
     radius_scale: f64,
 }
 impl Plant {
@@ -83,11 +90,19 @@ impl Plant {
             id,
             position,
             energy,
+            velocity: DVec2::ZERO,
+            angular_velocity: 0.0,
             radius_scale,
         }
     }
     pub fn radius(&self) -> f64 {
         radius(self.energy, self.radius_scale)
+    }
+    pub fn mass(&self, mass_per_energy: f64) -> f64 {
+        self.energy.max(0.0) * mass_per_energy
+    }
+    pub fn inertia(&self, mass_per_energy: f64) -> f64 {
+        0.5 * self.mass(mass_per_energy) * self.radius().powi(2)
     }
 }
 
@@ -140,23 +155,48 @@ pub struct TickReport {
     pub decisions: Vec<Decision>,
 }
 
-fn random_position<R: Rng + ?Sized>(rng: &mut R, world: WorldConfig) -> DVec2 {
-    DVec2::new(rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0)) * world.half_size()
-}
-
 fn plant_position(
     placement: Placement,
     parameters: Parameters,
+    obstacles: &[Obstacle],
     rng: &mut Xoshiro256PlusPlus,
 ) -> Result<DVec2> {
-    match placement.position() {
-        Some(position) => Ok(position),
-        None if parameters.plant.patches.count > 0 || parameters.plant.replenishment.is_some() => {
-            let limit = patches::inset(parameters.world, parameters.plant.max_radius())?;
-            Ok(patches::uniform_position(rng, limit))
+    placement_position(
+        placement,
+        parameters.plant.max_radius(),
+        parameters,
+        obstacles,
+        rng,
+    )
+}
+
+fn placement_position(
+    placement: Placement,
+    radius: f64,
+    parameters: Parameters,
+    obstacles: &[Obstacle],
+    rng: &mut Xoshiro256PlusPlus,
+) -> Result<DVec2> {
+    let limit = parameters.world.half_size() - radius;
+    ensure!(
+        limit.is_finite() && limit.cmpge(DVec2::ZERO).all(),
+        "admitted body must fit inside the arena"
+    );
+    let attempts = if placement.position().is_some() {
+        1
+    } else {
+        parameters.physics.max_placement_attempts
+    };
+    for _ in 0..attempts {
+        let position = match placement.position() {
+            Some(position) => position.clamp(-limit, limit),
+            None => patches::uniform_position(rng, limit),
+        };
+        if obstacle::clear(position, radius, obstacles) {
+            return Ok(position);
         }
-        None => Ok(random_position(rng, parameters.world)),
     }
+    anyhow::bail!("could not place a body clear of obstacles within {attempts} attempts")
 }
 
 fn allocate_animal(next_animal: &mut u64) -> Result<AnimalId> {
@@ -189,6 +229,14 @@ fn add_plant(
 }
 
 fn validate_body(body: &Body, parameters: Parameters) -> Result<()> {
+    let mass = body.mass(parameters.physics.mass_per_energy);
+    let inertia = body.inertia(parameters.physics.mass_per_energy);
+    ensure!(
+        mass.is_finite()
+            && inertia.is_finite()
+            && (body.energy <= 0.0 || (mass > 0.0 && inertia > 0.0)),
+        "invalid animal mass or inertia"
+    );
     body.validate(parameters.world, parameters.body)
 }
 
@@ -201,12 +249,7 @@ fn validate_plants(
     if parameters.plant.replenishment.is_none() {
         ensure!(plants.len() == target, "plant count differs from target");
     }
-    let position_limit =
-        if parameters.plant.patches.count > 0 || parameters.plant.replenishment.is_some() {
-            parameters.world.half_size() - DVec2::splat(parameters.plant.max_radius())
-        } else {
-            parameters.world.half_size()
-        };
+    let position_limit = parameters.world.half_size();
     let mut ids = BTreeSet::new();
     for plant in plants {
         ensure!(
@@ -224,6 +267,18 @@ fn validate_plants(
         ensure!(
             plant.radius_scale == parameters.plant.radius_scale && plant.radius().is_finite(),
             "invalid plant radius"
+        );
+        ensure!(
+            plant.velocity.is_finite() && plant.angular_velocity.is_finite(),
+            "non-finite plant velocity"
+        );
+        let mass = plant.mass(parameters.physics.mass_per_energy);
+        let inertia = plant.inertia(parameters.physics.mass_per_energy);
+        ensure!(
+            mass.is_finite()
+                && inertia.is_finite()
+                && (plant.energy == 0.0 || (mass > 0.0 && inertia > 0.0)),
+            "invalid plant mass or inertia"
         );
     }
     Ok(())
@@ -246,6 +301,7 @@ pub struct Ecosystem<
     next_plant: u64,
     animals: BTreeMap<AnimalId, Animal<Body, M>>,
     plants: Vec<Plant>,
+    obstacles: Vec<Obstacle>,
     patches: patches::Landscape,
     plant_target: usize,
     minimum_population: usize,
@@ -288,6 +344,7 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
             next_plant: 1,
             animals: BTreeMap::new(),
             plants: Vec::with_capacity(plant_target),
+            obstacles: Vec::new(),
             patches: patches::Landscape::default(),
             plant_target,
             minimum_population,
@@ -310,6 +367,9 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
     pub fn plants(&self) -> &[Plant] {
         &self.plants
     }
+    pub fn obstacles(&self) -> &[Obstacle] {
+        &self.obstacles
+    }
     /// Fill an empty plant layout using its configured initial admission settings.
     fn seed_plants(&mut self) -> Result<()> {
         ensure!(self.plants.is_empty(), "plants are already initialized");
@@ -327,6 +387,11 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
                     break;
                 }
                 if let Some(position) = sampler.propose(&self.plants, &self.patches, &mut self.rng)
+                    && obstacle::clear(
+                        position,
+                        self.parameters.plant.max_radius(),
+                        &self.obstacles,
+                    )
                 {
                     self.add_plant(position, self.parameters.plant.initial_energy)?;
                 }
@@ -344,6 +409,7 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
             let position = plant_position(
                 self.parameters.plant.initial_position,
                 self.parameters,
+                &self.obstacles,
                 &mut self.rng,
             )?;
             self.add_plant(position, self.parameters.plant.initial_energy)?;
@@ -414,6 +480,7 @@ where
             config.genetics.mutation.clone(),
         );
         world.parameters = config.parameters();
+        world.obstacles = config.obstacles.clone();
         // Layout generation must not depend on animal initialization or consume
         // the spatial/genetic streams used by the running ecosystem.
         world.patches = patches::Landscape::generate(
@@ -437,6 +504,7 @@ where
             let animal = Self::make_immigrant(
                 self.immigrant_genome.as_ref(),
                 self.parameters,
+                &self.obstacles,
                 &self.initialization,
                 &mut self.rng,
                 &mut self.context,
@@ -457,6 +525,7 @@ where
         Self::make_immigrant(
             self.immigrant_genome.as_ref(),
             self.parameters,
+            &self.obstacles,
             &self.initialization,
             rng,
             context,
@@ -467,16 +536,19 @@ where
     fn make_immigrant(
         template: Option<&G>,
         parameters: Parameters,
+        obstacles: &[Obstacle],
         initialization: &G::Config,
         rng: &mut Xoshiro256PlusPlus,
         context: &mut GeneticContext,
         mind_config: Option<&M::Config>,
     ) -> Result<Animal<Body, M>> {
-        let position = parameters
-            .immigration
-            .position
-            .position()
-            .unwrap_or_else(|| random_position(rng, parameters.world));
+        let position = placement_position(
+            parameters.immigration.position,
+            radius(parameters.immigration.energy, parameters.body.radius_scale),
+            parameters,
+            obstacles,
+            rng,
+        )?;
         let genome = match template {
             Some(template) => template.clone(),
             None => G::random(initialization, context)?,
@@ -523,6 +595,7 @@ where
         config.validate()?;
         ensure!(
             self.parameters == config.parameters()
+                && self.obstacles == config.obstacles
                 && self.initialization == config.genetics.initialization
                 && self.mutation == config.genetics.mutation
                 && self.plant_target == config.plants
@@ -547,6 +620,7 @@ where
 
     fn validate(&self) -> Result<()> {
         self.parameters.validate()?;
+        obstacle::validate(&self.obstacles, self.parameters.world)?;
         self.patches.validate(
             self.parameters.plant.patches,
             self.parameters.world,
@@ -593,6 +667,7 @@ impl<M: PartialEq, G: PartialEq, P: PartialEq, MC, IC: PartialEq> PartialEq
             && self.next_plant == other.next_plant
             && self.animals == other.animals
             && self.plants == other.plants
+            && self.obstacles == other.obstacles
             && self.patches == other.patches
             && self.plant_target == other.plant_target
             && self.minimum_population == other.minimum_population

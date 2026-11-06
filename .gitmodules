@@ -1,3 +1,9 @@
 [submodule "wgame"]
 	path = wgame
 	url = ../wgame
+[submodule "phy"]
+	path = phy
+	url = ../phy
+[submodule "geom2"]
+	path = geom2
+	url = ../geom2

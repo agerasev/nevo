@@ -28,6 +28,8 @@ rand = { version = "0.10.2", default-features = false, features = ["std", "sys_r
 libm = "0.2.16"
 rand_xoshiro = { version = "0.8.1", features = ["serde"] }
 glam = { version = "0.33.7", features = ["rand", "serde"] }
+phy = { path = "phy" }
+geom2 = { path = "geom2" }
 
 [dev-dependencies]
 futures = { version = "0.3.34", features = ["executor"] }

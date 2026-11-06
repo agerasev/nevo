@@ -72,7 +72,7 @@ where
         };
         let mut actions = Vec::with_capacity(self.animals.len());
         for (&id, animal) in &self.animals {
-            if animal.body.energy < 0.0 {
+            if animal.body.energy <= 0.0 {
                 continue;
             }
             let observation = self.sense(&animal.body);
@@ -97,21 +97,31 @@ where
                 },
             );
         }
+        let mut driven: Vec<_> = update
+            .animals
+            .values_mut()
+            .zip(&actions)
+            .map(|(animal, (_, _, action))| (&mut animal.body, *action))
+            .collect();
+        let physical = physics::advance(
+            &mut driven,
+            &mut update.plants,
+            &self.obstacles,
+            self.parameters,
+        )?;
         let mut decisions = Vec::with_capacity(actions.len());
-        for (id, observation, action) in actions {
-            let body = &mut update
-                .animals
-                .get_mut(&id)
-                .expect("acting animal exists")
-                .body;
-            let position_before = body.position;
-            let heading_before = body.heading;
-            let motion = body.advance(action, self.parameters.body, self.parameters.world)?;
+        for (&(id, observation, action), motion) in actions.iter().zip(&physical.motions) {
+            let before = &self.animals[&id].body;
+            let body = &update.animals[&id].body;
             let parameters = self.parameters.body;
-            let movement_energy = (parameters.energy_scale / parameters.motor_efficiency)
-                * motion.mechanical_work
-                + parameters.energy_scale * (parameters.force_loss * motion.force_squared_time)
-                + parameters.energy_scale * (parameters.torque_loss * motion.torque_squared_time);
+            let movement_energy = if parameters.energy_scale == 0.0 {
+                0.0
+            } else {
+                (parameters.energy_scale / parameters.motor_efficiency) * motion.mechanical_work
+                    + (parameters.energy_scale * parameters.force_loss) * motion.force_squared_time
+                    + (parameters.energy_scale * parameters.torque_loss)
+                        * motion.torque_squared_time
+            };
             ensure!(
                 movement_energy.is_finite() && movement_energy >= 0.0,
                 "non-finite motor energy cost"
@@ -121,9 +131,9 @@ where
                 observation,
                 action,
                 energy: body.energy,
-                position_before,
+                position_before: before.position,
                 position_after: body.position,
-                heading_before,
+                heading_before: before.heading,
                 heading_after: body.heading,
                 distance: motion.distance,
                 movement_energy,
@@ -131,29 +141,36 @@ where
         }
 
         let mut events = Vec::new();
-        // Lower IDs get first claim. A meal enlarges the next contact radius.
-        for (&id, animal) in &mut update.animals {
+        // Lower IDs get first claim. Edible contacts merge only the assimilated mass.
+        let mut eaten = BTreeSet::new();
+        for (animal_index, (&id, animal)) in update.animals.iter_mut().enumerate() {
             let body = &mut animal.body;
-            update.plants.retain(|plant| {
+            for (plant_index, plant) in update.plants.iter().enumerate() {
+                if eaten.contains(&plant.id) {
+                    continue;
+                }
                 let distance = body.position.distance(plant.position);
-                if distance
-                    < self.parameters.feeding.contact_scale * (body.radius() + plant.radius())
+                if physical.contacts.contains(&(animal_index, plant_index))
+                    || distance <= body.radius() + plant.radius()
                 {
-                    let gain = plant.energy * self.parameters.feeding.efficiency;
-                    body.energy += gain;
+                    let gain = feeding::assimilate(
+                        body,
+                        plant,
+                        self.parameters.feeding.efficiency,
+                        self.parameters.physics.mass_per_energy,
+                    )?;
                     events.push(Event::Meal {
                         id,
                         plant: plant.id,
                         gain,
                     });
-                    false
-                } else {
-                    true
+                    eaten.insert(plant.id);
                 }
-            });
+            }
         }
+        update.plants.retain(|plant| !eaten.contains(&plant.id));
         for (&id, animal) in &self.animals {
-            if animal.body.energy < 0.0 {
+            if animal.body.energy <= 0.0 {
                 events.push(Event::Death { id });
             }
         }
@@ -169,6 +186,11 @@ where
             for _ in 0..attempts {
                 if let Some(position) =
                     sampler.propose(&update.plants, &self.patches, &mut update.rng)
+                    && obstacle::clear(
+                        position,
+                        self.parameters.plant.max_radius(),
+                        &self.obstacles,
+                    )
                 {
                     add_plant(
                         &mut update.plants,
@@ -187,6 +209,7 @@ where
                 let position = plant_position(
                     self.parameters.plant.replacement_position,
                     self.parameters,
+                    &self.obstacles,
                     &mut update.rng,
                 )?;
                 add_plant(
@@ -293,8 +316,22 @@ where
                     .growth_multiplier(plant.position, self.parameters.plant.patches);
             let energy = (plant.energy + growth).min(self.parameters.plant.max_energy);
             plant_growth += energy - plant.energy;
+            // New biomass is at rest in the environmental frame.
+            if energy > 0.0 {
+                let fraction = plant.energy / energy;
+                plant.velocity *= fraction;
+                plant.angular_velocity *= fraction * fraction;
+            }
             plant.energy = energy;
             plant.position = clamp_position(plant.position, plant.radius(), self.parameters.world);
+            let limit = (self.parameters.world.half_size() - plant.radius()).max(DVec2::ZERO);
+            for axis in 0..2 {
+                if (plant.position[axis] >= limit[axis] && plant.velocity[axis] > 0.0)
+                    || (plant.position[axis] <= -limit[axis] && plant.velocity[axis] < 0.0)
+                {
+                    plant.velocity[axis] = 0.0;
+                }
+            }
         }
         update.metrics.observe_plant_growth(plant_growth);
         ensure!(update.rng.state() != [0; 32], "world RNG state is all zero");
