@@ -20,7 +20,8 @@ directories configure separate aspects of the experiment.
 | Choice | Presets |
 | --- | --- |
 | World | [Small uniform](../configs/world/small-uniform.toml), [small non-uniform](../configs/world/small-nonuniform.toml), [large uniform](../configs/world/large-uniform.toml), [large non-uniform](../configs/world/large-nonuniform.toml), [debug](../configs/world/debug.toml) |
-| Obstacles | [None](../configs/obstacles/none.toml), [large-world circles](../configs/obstacles/scattered.toml), [small-world circles](../configs/obstacles/scattered-small.toml) |
+| Obstacles | [None](../configs/obstacles/none.toml), [32 random circles](../configs/obstacles/scattered.toml), [16 random circles](../configs/obstacles/scattered-small.toml) |
+| Brain | [Small: 4 hidden units](../configs/brain/small.toml), [Large: 16 hidden units](../configs/brain/large.toml) |
 | Locomotion | [Damped acceleration](../configs/locomotion/damped.toml) |
 | Movement energy budget | [Work and motor losses](../configs/movement/work-and-loss.toml), [upkeep only](../configs/movement/upkeep-only.toml) |
 | Plant growth | [Uniform](../configs/plant-growth/uniform.toml), [patch-dependent](../configs/plant-growth/patches.toml) |
@@ -38,7 +39,8 @@ sensing and occlusion are later work.
 This changes the world model, so earlier checkpoints require their original build.
 
 Non-uniform worlds give fixed, seeded Gaussian patches a local plant capacity.
-Patch centers persist in checkpoints, independently of animal initialization.
+Patch centers are sampled uniformly across the usable arena and persist in
+checkpoints, independently of animal initialization and brain size.
 The optional `plant.replenishment` table enables density-based replenishment; omitting it keeps
 the baseline's immediate replacement to a fixed plant count.
 
@@ -62,10 +64,12 @@ the requested `ecosystem.plants` within its separate attempt limit or fail clear
 Explicit initial positions override that sampling; fixed replacement positions
 are incompatible with density-based replenishment.
 
-Obstacle presets provide explicit fixed circles; choose the layout for your arena
-size. Admission avoids them with bounded proposals; explicit positions must also
-clear them. Overlapping
-obstacle circles form their union.
+Obstacle presets sample radii and centers uniformly from the run seed, keeping
+each circle inside the arena. Their random stream is independent of the plant
+patches and brain initialization. The generated circles persist in checkpoints;
+resuming does not resample them. Explicit obstacle arrays are also supported.
+Admission avoids obstacles with bounded proposals; explicit positions must also
+clear them. Overlapping obstacle circles form their union.
 Crowding correction accounts for the arena edge, but does not renormalize density
 around obstacle boundaries. Plants can subsequently move under the shared
 [physics rules](simulation.md); patch capacity remains fixed and growth uses
@@ -80,6 +84,7 @@ as well as collected food. For a bounded run combining a world and movement choi
 cargo run --release --locked -- \
   --config configs/world/large-nonuniform.toml \
   --config configs/obstacles/scattered.toml \
+  --config configs/brain/large.toml \
   --config configs/locomotion/damped.toml \
   --config configs/movement/work-and-loss.toml \
   --seed 1 --ticks 1000

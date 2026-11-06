@@ -22,6 +22,7 @@ cargo run --locked -- --config configs/world/debug.toml --config configs/diagnos
 cargo run --release --locked -- \
   --config configs/world/large-nonuniform.toml \
   --config configs/obstacles/scattered.toml \
+  --config configs/brain/small.toml \
   --config configs/locomotion/damped.toml \
   --config configs/movement/work-and-loss.toml --viewer --paused
 ```

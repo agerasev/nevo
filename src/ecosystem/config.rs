@@ -103,7 +103,7 @@ pub struct Config<
     pub minimum_population: usize,
     pub world: WorldConfig,
     pub physics: PhysicsConfig,
-    pub obstacles: Vec<super::Obstacle>,
+    pub obstacles: super::ObstacleConfig,
     pub immigration: ImmigrationConfig,
     pub sensing: SensingConfig,
     pub genetics: GeneticsConfig<IC, P>,
@@ -120,7 +120,7 @@ impl<MC: Default, IC: Default, P: Default> Default for Config<MC, IC, P> {
             minimum_population: 20,
             world: WorldConfig::default(),
             physics: PhysicsConfig::default(),
-            obstacles: Vec::new(),
+            obstacles: super::ObstacleConfig::default(),
             immigration: ImmigrationConfig::default(),
             sensing: SensingConfig::default(),
             genetics: GeneticsConfig::default(),
@@ -146,7 +146,7 @@ impl<MC, IC, P> Config<MC, IC, P> {
             );
         }
         self.parameters().validate()?;
-        super::obstacle::validate(&self.obstacles, self.world)
+        self.obstacles.validate(self.world)
     }
 
     pub(super) fn parameters(&self) -> Parameters {

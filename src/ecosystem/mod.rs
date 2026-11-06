@@ -20,7 +20,7 @@ pub use config::{
     WorldConfig,
 };
 pub use metrics::{Summary, Window};
-pub use obstacle::Obstacle;
+pub use obstacle::{Config as ObstacleConfig, Obstacle, RandomConfig as RandomObstacles};
 pub use patches::Config as PatchConfig;
 pub use replenishment::Config as ReplenishmentConfig;
 pub use update::EcosystemUpdate;
@@ -302,6 +302,7 @@ pub struct Ecosystem<
     animals: BTreeMap<AnimalId, Animal<Body, M>>,
     plants: Vec<Plant>,
     obstacles: Vec<Obstacle>,
+    obstacle_config: ObstacleConfig,
     patches: patches::Landscape,
     plant_target: usize,
     minimum_population: usize,
@@ -345,6 +346,7 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
             animals: BTreeMap::new(),
             plants: Vec::with_capacity(plant_target),
             obstacles: Vec::new(),
+            obstacle_config: ObstacleConfig::default(),
             patches: patches::Landscape::default(),
             plant_target,
             minimum_population,
@@ -480,7 +482,6 @@ where
             config.genetics.mutation.clone(),
         );
         world.parameters = config.parameters();
-        world.obstacles = config.obstacles.clone();
         // Layout generation must not depend on animal initialization or consume
         // the spatial/genetic streams used by the running ecosystem.
         world.patches = patches::Landscape::generate(
@@ -489,6 +490,11 @@ where
             world.parameters.plant.max_radius(),
             &mut Xoshiro256PlusPlus::seed_from_u64(seeds.next_u64()),
         )?;
+        world.obstacles = config.obstacles.generate(
+            config.world,
+            &mut Xoshiro256PlusPlus::seed_from_u64(seeds.next_u64()),
+        )?;
+        world.obstacle_config = config.obstacles.clone();
         world.initialization = config.genetics.initialization.clone();
         world.configure(&config)?;
         world.admit(config.initial_animals)?;
@@ -595,7 +601,7 @@ where
         config.validate()?;
         ensure!(
             self.parameters == config.parameters()
-                && self.obstacles == config.obstacles
+                && self.obstacle_config == config.obstacles
                 && self.initialization == config.genetics.initialization
                 && self.mutation == config.genetics.mutation
                 && self.plant_target == config.plants
@@ -620,7 +626,8 @@ where
 
     fn validate(&self) -> Result<()> {
         self.parameters.validate()?;
-        obstacle::validate(&self.obstacles, self.parameters.world)?;
+        self.obstacle_config
+            .validate_layout(&self.obstacles, self.parameters.world)?;
         self.patches.validate(
             self.parameters.plant.patches,
             self.parameters.world,
@@ -668,6 +675,7 @@ impl<M: PartialEq, G: PartialEq, P: PartialEq, MC, IC: PartialEq> PartialEq
             && self.animals == other.animals
             && self.plants == other.plants
             && self.obstacles == other.obstacles
+            && self.obstacle_config == other.obstacle_config
             && self.patches == other.patches
             && self.plant_target == other.plant_target
             && self.minimum_population == other.minimum_population

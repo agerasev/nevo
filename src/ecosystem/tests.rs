@@ -299,7 +299,7 @@ fn zero_energy_plants_do_not_dilute_sensing() {
 }
 
 #[test]
-fn patch_layout_is_seeded_independently_of_animal_admission() {
+fn landscapes_are_seeded_independently_of_population_and_brain_size() {
     let mut config = Config {
         initial_animals: 0,
         plants: 0,
@@ -307,11 +307,29 @@ fn patch_layout_is_seeded_independently_of_animal_admission() {
         ..Config::default()
     };
     config.plant.patches.count = 3;
+    config.obstacles = ObstacleConfig::Random(RandomObstacles {
+        count: 8,
+        radius_min: 12.0,
+        radius_max: 24.0,
+    });
     let empty = Ecosystem::new(config.clone(), 17).unwrap();
     config.initial_animals = 8;
+    config.plants = 20;
+    config.genetics.initialization.hidden_units = 16;
     let populated = Ecosystem::new(config.clone(), 17).unwrap();
     assert_eq!(empty.patches, populated.patches);
-    assert_ne!(empty.patches, Ecosystem::new(config, 18).unwrap().patches);
+    assert_eq!(empty.obstacles, populated.obstacles);
+    let other_seed = Ecosystem::new(config.clone(), 18).unwrap();
+    assert_ne!(empty.patches, other_seed.patches);
+    assert_ne!(empty.obstacles, other_seed.obstacles);
+    config.plant.patches.count = 5;
+    assert_eq!(
+        empty.obstacles,
+        Ecosystem::new(config.clone(), 17).unwrap().obstacles
+    );
+    config.plant.patches.count = 3;
+    config.obstacles = ObstacleConfig::default();
+    assert_eq!(empty.patches, Ecosystem::new(config, 17).unwrap().patches);
 }
 
 #[test]
@@ -380,13 +398,15 @@ fn obstacles_bound_random_admission_attempts_for_animals_and_plants() {
             ..Config::default()
         };
         // The circles fit the arena but their union leaves no room for a radius-10 body.
-        config.obstacles = [(-20.0, -20.0), (-20.0, 20.0), (20.0, -20.0), (20.0, 20.0)]
-            .into_iter()
-            .map(|(x, y)| Obstacle {
-                position: Vec2::new(x, y),
-                radius: 30.0,
-            })
-            .collect();
+        config.obstacles = ObstacleConfig::Explicit(
+            [(-20.0, -20.0), (-20.0, 20.0), (20.0, -20.0), (20.0, 20.0)]
+                .into_iter()
+                .map(|(x, y)| Obstacle {
+                    position: Vec2::new(x, y),
+                    radius: 30.0,
+                })
+                .collect(),
+        );
         config.animal.body.radius_scale = 20.0;
         config.physics.max_placement_attempts = 3;
         if density_based {
@@ -435,14 +455,17 @@ fn checkpoint_rejects_changed_obstacle_geometry() {
         initial_animals: 0,
         plants: 0,
         minimum_population: 0,
-        obstacles: vec![Obstacle {
+        obstacles: ObstacleConfig::Explicit(vec![Obstacle {
             position: Vec2::ZERO,
             radius: 20.0,
-        }],
+        }]),
         ..Config::default()
     };
     let universe = Universe::new(config.clone(), 3).unwrap();
-    config.obstacles[0].radius = 21.0;
+    let ObstacleConfig::Explicit(obstacles) = &mut config.obstacles else {
+        unreachable!()
+    };
+    obstacles[0].radius = 21.0;
     assert!(universe.restore(config).is_err());
 }
 

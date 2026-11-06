@@ -181,6 +181,7 @@ fn preset_categories_own_disjoint_fields_and_compose_independently_of_order() {
             ],
         ),
         ("locomotion", &["damped"]),
+        ("brain", &["small", "large"]),
         ("obstacles", &["none", "scattered", "scattered-small"]),
         ("movement", &["upkeep-only", "work-and-loss"]),
         ("plant-growth", &["uniform", "patches"]),
@@ -209,6 +210,7 @@ fn preset_categories_own_disjoint_fields_and_compose_independently_of_order() {
 
     let mut paths = [
         "world/large-nonuniform.toml",
+        "brain/large.toml",
         "locomotion/damped.toml",
         "obstacles/scattered.toml",
         "movement/work-and-loss.toml",
