@@ -1,4 +1,4 @@
-//! Inexpensive observations from existing tick reports and population snapshots.
+//! Inexpensive observations from tick updates and population snapshots.
 
 use serde::Serialize;
 
@@ -23,6 +23,7 @@ pub(super) struct Cache {
     deaths: u64,
     immigrants: u64,
     food: f64,
+    plant_growth: f64,
     distance: f64,
 }
 
@@ -38,6 +39,7 @@ impl Default for Cache {
             deaths: 0,
             immigrants: 0,
             food: 0.0,
+            plant_growth: 0.0,
             distance: 0.0,
         }
     }
@@ -74,6 +76,13 @@ impl Cache {
         next
     }
 
+    /// Actual plant energy gained after capping, excluding admission energy.
+    pub(super) fn observe_plant_growth(&mut self, energy: f64) {
+        if self.window.is_some() {
+            self.plant_growth += energy;
+        }
+    }
+
     pub fn observe(&mut self, report: &TickReport) {
         let Some(window) = &mut self.window else {
             return;
@@ -107,6 +116,8 @@ pub struct Summary {
     pub mean_plant_energy: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub food_per_tick: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plant_growth_per_tick: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub births_per_tick: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -145,6 +156,7 @@ impl<M, G, P, MC, IC> Metrics for Ecosystem<M, G, P, MC, IC> {
         if let Some(window) = cache.window {
             let ticks = window.samples as f64;
             summary.food_per_tick = Some(cache.food / ticks);
+            summary.plant_growth_per_tick = Some(cache.plant_growth / ticks);
             summary.births_per_tick = Some(cache.births as f64 / ticks);
             summary.deaths_per_tick = Some(cache.deaths as f64 / ticks);
             summary.immigrants_per_tick = Some(cache.immigrants as f64 / ticks);

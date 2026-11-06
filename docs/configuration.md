@@ -26,6 +26,28 @@ scale; sparse worlds no longer amplify each source by averaging over fewer plant
 Sources still contribute at all distances; finite-range sensing is a later milestone.
 This changes the world model, so earlier checkpoints require their original build.
 
+Layer [resource patches](../configs/resource-patches.toml) on the larger world to
+cluster plants around fixed, seeded Gaussian patches. Both initial and replacement
+plants sample the same landscape; harvesting can still change the standing
+distribution. Patch centers persist in checkpoints, independently of animal
+initialization. Explicit plant positions override random placement.
+
+`plant.patches.density_fraction` mixes clustered and uniform placement. The optional
+[patch-growth overlay](../configs/patch-growth.toml) independently varies growth
+between a floor in poor areas and a peak at patch centers. Overlapping patches
+blend smoothly without exceeding the peak. See the [patch contract](../src/ecosystem/patches/mod.rs)
+for settings and sampling bounds. Plants need room to mature inside the arena;
+Gaussian samples are truncated, not clamped onto its edges.
+
+The density-only preset keeps the original per-plant growth rate. When varying
+growth, compare [measured plant production](metrics.md) as well as collected food:
+clustering plants in fertile regions can increase supply even with unchanged
+plant count. Patches are disabled by default. For a bounded patchy-world run:
+
+```sh
+cargo run --locked -- --config configs/large-world.toml --config configs/resource-patches.toml --seed 1
+```
+
 Energy units use a reference reproduction threshold of `1.0`, consistently for
 animals, plants, food gains, and costs. Changing the configured threshold changes
 the experiment, not its units. Earlier logs keep their original units.

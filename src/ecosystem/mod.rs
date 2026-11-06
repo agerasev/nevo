@@ -2,6 +2,7 @@
 
 mod config;
 mod metrics;
+mod patches;
 mod update;
 
 #[cfg(feature = "viewer")]
@@ -12,6 +13,7 @@ pub use config::{
     MetricsConfig, Placement, PlantConfig, ReproductionConfig, SensingConfig, WorldConfig,
 };
 pub use metrics::{Summary, Window};
+pub use patches::Config as PatchConfig;
 pub use update::EcosystemUpdate;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -162,8 +164,25 @@ pub struct TickReport {
     pub decisions: Vec<Decision>,
 }
 
-fn random_position(rng: &mut Xoshiro256PlusPlus, world: WorldConfig) -> DVec2 {
+fn random_position<R: Rng + ?Sized>(rng: &mut R, world: WorldConfig) -> DVec2 {
     DVec2::new(rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0)) * world.half_size()
+}
+
+fn plant_position(
+    placement: Placement,
+    patches: &patches::Landscape,
+    parameters: Parameters,
+    rng: &mut Xoshiro256PlusPlus,
+) -> Result<DVec2> {
+    match placement.position() {
+        Some(position) => Ok(position),
+        None => patches.position(
+            parameters.plant.patches,
+            parameters.world,
+            parameters.plant.max_radius(),
+            rng,
+        ),
+    }
 }
 
 fn allocate_animal(next_animal: &mut u64) -> Result<AnimalId> {
@@ -221,6 +240,11 @@ fn validate_plants(
     parameters: Parameters,
 ) -> Result<()> {
     ensure!(plants.len() == target, "plant count differs from target");
+    let position_limit = if parameters.plant.patches.count > 0 {
+        parameters.world.half_size() - DVec2::splat(parameters.plant.max_radius())
+    } else {
+        parameters.world.half_size()
+    };
     let mut ids = BTreeSet::new();
     for plant in plants {
         ensure!(
@@ -232,12 +256,7 @@ fn validate_plants(
             "invalid plant energy"
         );
         ensure!(
-            plant.position.is_finite()
-                && plant
-                    .position
-                    .abs()
-                    .cmple(parameters.world.half_size())
-                    .all(),
+            plant.position.is_finite() && plant.position.abs().cmple(position_limit).all(),
             "invalid plant position"
         );
         ensure!(
@@ -265,6 +284,7 @@ pub struct Ecosystem<
     next_plant: u64,
     animals: BTreeMap<AnimalId, Animal<Body, M>>,
     plants: Vec<Plant>,
+    patches: patches::Landscape,
     plant_target: usize,
     minimum_population: usize,
     immigrant_genome: Option<G>,
@@ -306,6 +326,7 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
             next_plant: 1,
             animals: BTreeMap::new(),
             plants: Vec::with_capacity(plant_target),
+            patches: patches::Landscape::default(),
             plant_target,
             minimum_population,
             immigrant_genome,
@@ -331,12 +352,12 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
     fn seed_plants(&mut self) -> Result<()> {
         ensure!(self.plants.is_empty(), "plants are already initialized");
         for _ in 0..self.plant_target {
-            let position = self
-                .parameters
-                .plant
-                .initial_position
-                .position()
-                .unwrap_or_else(|| random_position(&mut self.rng, self.parameters.world));
+            let position = plant_position(
+                self.parameters.plant.initial_position,
+                &self.patches,
+                self.parameters,
+                &mut self.rng,
+            )?;
             self.add_plant(position, self.parameters.plant.initial_energy)?;
         }
         Ok(())
@@ -399,6 +420,14 @@ where
             config.genetics.mutation.clone(),
         );
         world.parameters = config.parameters();
+        // Layout generation must not depend on animal initialization or consume
+        // the spatial/genetic streams used by the running ecosystem.
+        world.patches = patches::Landscape::generate(
+            config.plant.patches,
+            config.world,
+            world.parameters.plant.max_radius(),
+            &mut Xoshiro256PlusPlus::seed_from_u64(seeds.next_u64()),
+        )?;
         world.initialization = config.genetics.initialization.clone();
         world.configure(&config)?;
         world.admit(config.initial_animals)?;
@@ -520,6 +549,11 @@ where
 
     fn validate(&self) -> Result<()> {
         self.parameters.validate()?;
+        self.patches.validate(
+            self.parameters.plant.patches,
+            self.parameters.world,
+            self.parameters.plant.max_radius(),
+        )?;
         ensure!(self.rng.state() != [0; 32], "world RNG state is all zero");
         ensure!(
             self.context.rng.state() != [0; 32],
@@ -561,6 +595,7 @@ impl<M: PartialEq, G: PartialEq, P: PartialEq, MC, IC: PartialEq> PartialEq
             && self.next_plant == other.next_plant
             && self.animals == other.animals
             && self.plants == other.plants
+            && self.patches == other.patches
             && self.plant_target == other.plant_target
             && self.minimum_population == other.minimum_population
             && self.immigrant_genome == other.immigrant_genome

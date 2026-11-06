@@ -18,11 +18,18 @@ fn field<'a>(value: &'a mut Value, path: &[&str]) -> &'a mut Value {
 
 #[test]
 fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover() {
-    let config = Config {
+    let mut config = Config {
         initial_animals: 2,
-        plants: 0,
+        plants: 2,
         minimum_population: 2,
         ..Config::default()
+    };
+    config.plant.patches = crate::ecosystem::PatchConfig {
+        count: 3,
+        density_fraction: 0.8,
+        growth_floor: 0.25,
+        growth_peak: 1.75,
+        ..Default::default()
     };
     let world: Ecosystem =
         Ecosystem::with_genetics(config.clone(), 23, Some(RnnGenome::default())).unwrap();
@@ -34,6 +41,11 @@ fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover()
     *field(&mut animals[1].1, &["body", "energy"]) = Value::Float(1.2);
     *field(&mut animals[1].1, &["mind", "brain", "memory"]) =
         Value::Array(vec![Value::Float(0.25); 4]);
+    let meal_position = field(&mut animals[1].1, &["body", "position"]).clone();
+    let first_plant = &mut field(&mut value, &["world", "plants"])
+        .as_array_mut()
+        .unwrap()[0];
+    *field(first_plant, &["position"]) = meal_position;
     let state: Universe = value.deserialized().unwrap();
     let mut bytes = Vec::new();
     ciborium::into_writer(&state, &mut bytes).unwrap();
@@ -44,6 +56,12 @@ fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover()
     for tick in 1..=3 {
         let report = original.tick().unwrap();
         if tick == 1 {
+            assert!(
+                report
+                    .events
+                    .iter()
+                    .any(|e| matches!(e, Event::Meal { .. }))
+            );
             assert!(
                 report
                     .events

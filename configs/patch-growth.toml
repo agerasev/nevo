@@ -1,0 +1,5 @@
+# Optional overlay after resource-patches.toml: slower gaps and faster patch centres.
+# This changes food production; compare measured growth, not population alone.
+[ecosystem.plant.patches]
+growth_floor = 0.25
+growth_peak = 1.75

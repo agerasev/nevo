@@ -142,12 +142,12 @@ where
             }
         }
         while update.plants.len() < self.plant_target {
-            let position = self
-                .parameters
-                .plant
-                .replacement_position
-                .position()
-                .unwrap_or_else(|| random_position(&mut update.rng, self.parameters.world));
+            let position = plant_position(
+                self.parameters.plant.replacement_position,
+                &self.patches,
+                self.parameters,
+                &mut update.rng,
+            )?;
             add_plant(
                 &mut update.plants,
                 &mut update.next_plant,
@@ -256,11 +256,18 @@ where
             ensure!(id.0 > 0 && id.0 < update.next_animal, "invalid animal ID");
             validate_body(body, self.parameters)?;
         }
+        let mut plant_growth = 0.0;
         for plant in &mut update.plants {
-            plant.energy =
-                (plant.energy + self.parameters.plant.growth).min(self.parameters.plant.max_energy);
+            let growth = self.parameters.plant.growth
+                * self
+                    .patches
+                    .growth_multiplier(plant.position, self.parameters.plant.patches);
+            let energy = (plant.energy + growth).min(self.parameters.plant.max_energy);
+            plant_growth += energy - plant.energy;
+            plant.energy = energy;
             plant.position = clamp_position(plant.position, plant.radius(), self.parameters.world);
         }
+        update.metrics.observe_plant_growth(plant_growth);
         ensure!(update.rng.state() != [0; 32], "world RNG state is all zero");
         ensure!(
             update.context.rng.state() != [0; 32],

@@ -285,6 +285,158 @@ fn zero_energy_plants_do_not_dilute_sensing() {
 }
 
 #[test]
+fn patch_layout_is_seeded_independently_of_animal_admission() {
+    let mut config = Config {
+        initial_animals: 0,
+        plants: 0,
+        minimum_population: 0,
+        ..Config::default()
+    };
+    config.plant.patches.count = 3;
+    let empty = Ecosystem::new(config.clone(), 17).unwrap();
+    config.initial_animals = 8;
+    let populated = Ecosystem::new(config.clone(), 17).unwrap();
+    assert_eq!(empty.patches, populated.patches);
+    assert_ne!(empty.patches, Ecosystem::new(config, 18).unwrap().patches);
+}
+
+#[test]
+fn patched_world_rejects_fixed_or_stored_plants_without_room_to_mature() {
+    let mut config = Config {
+        initial_animals: 0,
+        plants: 1,
+        minimum_population: 0,
+        ..Config::default()
+    };
+    config.plant.patches.count = 1;
+    let edge = config.world.half_size();
+    config.plant.initial_position = Placement::Fixed(edge);
+    assert!(config.validate().is_err());
+    config.plant.initial_position = Placement::Random;
+    let mut world = Ecosystem::new(config, 3).unwrap();
+    world.plants[0].position = edge;
+    assert!(world.validate().is_err());
+}
+
+#[test]
+fn initial_and_replacement_plants_remain_in_the_same_patch() {
+    let mut config = Config {
+        initial_animals: 1,
+        plants: 16,
+        minimum_population: 0,
+        ..Config::default()
+    };
+    config.plant.initial_energy = 0.0;
+    config.plant.growth = 0.0;
+    config.plant.patches = PatchConfig {
+        count: 1,
+        spread: 0.001,
+        density_fraction: 1.0,
+        ..PatchConfig::default()
+    };
+    let mut world: Ecosystem =
+        Ecosystem::with_genetics(config, 3, Some(RnnGenome::default())).unwrap();
+    let anchor = world.plants[0].position;
+    world.animals.get_mut(&id(1)).unwrap().body.position = anchor;
+    let landscape = world.patches.clone();
+    assert!(
+        world
+            .plants
+            .iter()
+            .all(|p| p.position.distance(anchor) < 0.1)
+    );
+    let report = world.advance(1).unwrap();
+    assert_eq!(
+        report
+            .events
+            .iter()
+            .filter(|e| matches!(e, Event::Meal { .. }))
+            .count(),
+        16
+    );
+    assert!(
+        world
+            .plants
+            .iter()
+            .all(|p| p.id > 16 && p.position.distance(anchor) < 0.1)
+    );
+    assert_eq!(world.patches, landscape);
+}
+
+#[test]
+fn capped_growth_and_replacement_energy_balance_the_plant_stock() {
+    use crate::metrics::Metrics;
+
+    let mut config = Config {
+        initial_animals: 1,
+        plants: 1,
+        minimum_population: 0,
+        ..Config::default()
+    };
+    config.immigration.position = Placement::Fixed(DVec2::ZERO);
+    config.plant.initial_position = Placement::Fixed(DVec2::ZERO);
+    config.plant.replacement_position = Placement::Fixed(DVec2::new(100.0, 0.0));
+    config.plant.replacement_energy = 0.9;
+    config.plant.growth = 0.1;
+    config.plant.patches = PatchConfig {
+        count: 2,
+        density_fraction: 1.0,
+        growth_floor: 2.0,
+        growth_peak: 2.0,
+        ..PatchConfig::default()
+    };
+    let mut world: Ecosystem =
+        Ecosystem::with_genetics(config.clone(), 7, Some(RnnGenome::default())).unwrap();
+    assert_eq!(world.plants[0].position, DVec2::ZERO);
+    assert_eq!(world.metrics().plant_growth_per_tick, None);
+    let stock_before = world.plants[0].energy;
+    let report = world.advance(1).unwrap();
+    assert!(matches!(report.events[0], Event::Meal { gain: 0.1, .. }));
+    assert_eq!(world.plants[0].position, DVec2::new(100.0, 0.0));
+    let growth = world.metrics().plant_growth_per_tick.unwrap();
+    assert!(
+        (growth - 0.1).abs() < 1e-12,
+        "only growth below the cap counts"
+    );
+    assert_eq!(
+        stock_before - 1.0 + config.plant.replacement_energy + growth,
+        world.plants[0].energy
+    );
+}
+
+#[test]
+fn plants_grow_faster_near_patches_without_drifting_as_they_mature() {
+    let mut config = Config {
+        initial_animals: 0,
+        plants: 2,
+        minimum_population: 0,
+        ..Config::default()
+    };
+    config.plant.initial_energy = 0.0;
+    config.plant.growth = 0.1;
+    config.plant.patches = PatchConfig {
+        count: 1,
+        spread: 10.0,
+        density_fraction: 1.0,
+        growth_floor: 0.1,
+        growth_peak: 2.0,
+    };
+    let mut world = Ecosystem::new(config, 3).unwrap();
+    world.plants[1].position = -world.plants[0].position;
+    let positions: Vec<_> = world.plants.iter().map(|plant| plant.position).collect();
+    world.advance(1).unwrap();
+    assert!(world.plants[0].energy > world.plants[1].energy);
+    for tick in 2..=150 {
+        world.advance(tick).unwrap();
+    }
+    assert!(world.plants.iter().all(|p| p.energy == 1.0));
+    assert_eq!(
+        world.plants.iter().map(|p| p.position).collect::<Vec<_>>(),
+        positions
+    );
+}
+
+#[test]
 fn body_stops_at_the_edge_and_cannot_eat_across_it() {
     let mut fixture = Fixture::debug(4);
     fixture.action(MoveAction {

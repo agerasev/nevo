@@ -14,10 +14,10 @@ Steps 1–4 establish navigation; 5–6 extend ecology. Step 7 can happen earlie
 1. **Completed: larger worlds and camera navigation.** [Camera controls](viewer.md)
    and fixed [sensing scales](configuration.md) support a bounded
    [larger-world preset](../configs/large-world.toml) with unchanged initial densities.
-2. **Persistent resource patches.** Introduce seeded fertility, with placement
-   density and growth multipliers controlled separately. Replacements must retain
-   the spatial distribution. **Open:** patch scale/representation and weighted
-   respawning versus persistent sites. Compare layouts with comparable food supply.
+2. **Completed: persistent resource patches.** Fixed Gaussian landscapes govern
+   initial and replacement placement, with independent density and growth settings.
+   [Composable presets](configuration.md) support density-only and variable-growth
+   comparisons; [metrics](metrics.md) distinguish plant production from food intake.
 3. **Body heading and damped locomotion.** Give bodies persistent heading, linear
    velocity, and angular velocity. Use body-relative sensing/control, initially
    bounded forward thrust and turning torque with drag. **Open:** sideways/reverse

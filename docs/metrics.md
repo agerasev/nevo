@@ -9,13 +9,14 @@ movement; it does not by itself establish adaptation.
 | `population` | Animals at the window endpoint. |
 | `mean_animal_energy`, `mean_plant_energy` | Energy means at that endpoint. |
 | `food_per_tick` | Assimilated energy per observed tick. |
+| `plant_growth_per_tick` | Plant energy added by growth per observed tick, after capping; excludes replacement energy. |
 | `births_per_tick`, `deaths_per_tick`, `immigrants_per_tick` | Events per observed tick. |
 | `distance_per_animal_tick` | Controlled travel per active animal-tick. |
 
 Set `ecosystem.metrics.enabled` and `window_ticks`, or layer the
 [metrics preset](../configs/metrics.toml). Windows cover `(start_tick, end_tick]`;
 orderly exit records any partial window. Rates use actual exposure, so changing
-window length changes smoothing, not units or scale. Combine event/food rates
+window length changes smoothing, not units or scale. Combine event/food/growth rates
 with tick weights and movement rates with active-animal-tick weights.
 
 An active animal-tick means an animal sensed and acted, including animals that

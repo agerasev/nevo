@@ -341,7 +341,7 @@ impl Parameters {
         }
         nonnegative(self.plant.growth, "plant growth")?;
         nonnegative(
-            self.plant.max_energy + self.plant.growth,
+            self.plant.max_energy + self.plant.growth * self.plant.patches.growth_peak,
             "plant energy after growth",
         )?;
         nonnegative(self.plant.radius_scale, "plant radius_scale")?;
@@ -354,7 +354,22 @@ impl Parameters {
             "immigrant radius",
         )?;
         self.plant.initial_position.validate(self.world)?;
-        self.plant.replacement_position.validate(self.world)
+        self.plant.replacement_position.validate(self.world)?;
+        self.plant
+            .patches
+            .validate(self.world, self.plant.max_radius(), self.plant.growth)?;
+        if self.plant.patches.count > 0 {
+            let limit = self.world.half_size() - DVec2::splat(self.plant.max_radius());
+            for placement in [self.plant.initial_position, self.plant.replacement_position] {
+                if let Some(position) = placement.position() {
+                    ensure!(
+                        position.abs().cmple(limit).all(),
+                        "fixed plant positions must leave room for mature plants when patches are enabled"
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -458,6 +473,7 @@ pub struct PlantConfig {
     pub radius_scale: f64,
     pub initial_position: Placement,
     pub replacement_position: Placement,
+    pub patches: super::patches::Config,
 }
 impl Default for PlantConfig {
     fn default() -> Self {
@@ -470,6 +486,7 @@ impl Default for PlantConfig {
             radius_scale: parameters.radius_scale,
             initial_position: parameters.initial_position,
             replacement_position: parameters.replacement_position,
+            patches: parameters.patches,
         }
     }
 }
@@ -483,6 +500,7 @@ impl PlantConfig {
             radius_scale: self.radius_scale,
             initial_position: self.initial_position,
             replacement_position: self.replacement_position,
+            patches: self.patches,
         }
     }
 }
@@ -496,6 +514,7 @@ pub(super) struct PlantParameters {
     pub radius_scale: f64,
     pub initial_position: Placement,
     pub replacement_position: Placement,
+    pub patches: super::patches::Config,
 }
 impl Default for PlantParameters {
     fn default() -> Self {
@@ -507,6 +526,13 @@ impl Default for PlantParameters {
             radius_scale: 10.0,
             initial_position: Placement::Random,
             replacement_position: Placement::Random,
+            patches: super::patches::Config::default(),
         }
+    }
+}
+
+impl PlantParameters {
+    pub fn max_radius(self) -> f64 {
+        self.radius_scale * self.max_energy.sqrt()
     }
 }
