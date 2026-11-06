@@ -30,7 +30,7 @@ impl MetricsLog {
             return Ok(None);
         }
         let (path, mut writer) = create_invocation(directory)?;
-        let session = writer.next_session_id()?;
+        let session = 1;
         writer.append(&Record::Session(Session {
             version: FORMAT_VERSION,
             id: session,

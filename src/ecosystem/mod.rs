@@ -286,7 +286,7 @@ impl Ecosystem {
 }
 
 impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
-    pub fn empty(
+    fn empty(
         plant_target: usize,
         minimum_population: usize,
         world_seed: u64,
@@ -327,18 +327,8 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
     pub fn plants(&self) -> &[Plant] {
         &self.plants
     }
-    pub fn context(&self) -> &GeneticContext {
-        &self.context
-    }
-    pub fn minimum_population(&self) -> usize {
-        self.minimum_population
-    }
-    pub fn set_minimum_population(&mut self, minimum: usize) {
-        self.minimum_population = minimum;
-    }
-
     /// Fill an empty plant layout using its configured initial admission settings.
-    pub fn seed_plants(&mut self) -> Result<()> {
+    fn seed_plants(&mut self) -> Result<()> {
         ensure!(self.plants.is_empty(), "plants are already initialized");
         for _ in 0..self.plant_target {
             let position = self
@@ -421,7 +411,7 @@ where
     }
 
     /// All arrivals use the same persisted admission settings and construction path.
-    pub fn admit(&mut self, count: usize) -> Result<Vec<AnimalId>> {
+    fn admit(&mut self, count: usize) -> Result<Vec<AnimalId>> {
         let mut arrivals = Vec::with_capacity(count);
         for _ in 0..count {
             let animal = Self::make_immigrant(

@@ -48,17 +48,14 @@ advantage. The resource ceiling limits this comparison's ability to expose
 controller differences. Results do not establish competition outcomes, lifetime
 differences, robustness beyond 20,000 ticks, or behavior with movement costs.
 
-## Reproduction and checks
+## Provenance
 
-Run [compare_controllers.py](../../scripts/compare_controllers.py) with the
-original checkpoint and a fresh output directory; it builds
-[the harness](../../scripts/compare_controllers.rs) against archived `b86d5bd`
-source. Use [analyze_controller_comparison.py](../../scripts/analyze_controller_comparison.py)
-for paired summaries and optional plots. Artifacts are in
-`runs/2026-11-05-controller-comparison/`, including the protocol and source hashes,
-initial/final states, window logs, aggregate results, and `comparison.png`.
+Artifacts and archived harness copies are in
+`runs/2026-11-05-controller-comparison/`. The three scripts are preserved in Git
+at `0972d51:scripts/`; they target simulation revision `b86d5bd`, not the current
+model. Artifacts include the protocol, source hashes, states, logs, summaries,
+and `comparison.png`.
 
-A held-out seed-0 pair repeated for 1,000 ticks produced identical initial/final
-state files and logs. All 64 measured trajectories passed population accounting,
-zero-immigration, log continuity, and aggregation checks; surviving RNN genomes
-remained exact copies of founders. No fresh-random-genome comparison was run.
+A held-out seed-0 pair reproduced identical states and logs over 1,000 ticks.
+All 64 trajectories passed population accounting and continuity checks; RNN
+genomes remained copies of founders. No fresh-random-genome comparison was run.

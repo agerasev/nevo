@@ -7,8 +7,8 @@ matched exactly; only the movement coefficient and energy power differed.
 Evolution and immigration remained enabled, with 500 plants and population floor 20.
 
 Energy uses the default reproduction threshold of 1. Both conditions pay upkeep
-0.0005 per tick. [Flat movement](../../configs/movement-flat.toml) adds
-`0.00045 × distance`; [energy-proportional movement](../../configs/movement-cost.toml)
+0.0005 per tick. Flat movement adds
+`0.00045 × distance`; energy-proportional movement
 adds `0.0009 × pre-movement energy × distance`. At energy 0.5 their costs match.
 
 ## Measured results

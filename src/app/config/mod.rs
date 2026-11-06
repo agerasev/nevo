@@ -62,7 +62,6 @@ pub struct Config {
     pub tick_hz: f64,
     pub viewer: ViewerConfig,
     pub paused: bool,
-    pub smoke: bool,
 }
 
 impl Default for Config {
@@ -77,7 +76,6 @@ impl Default for Config {
             tick_hz: 0.0,
             viewer: ViewerConfig::default(),
             paused: false,
-            smoke: false,
         }
     }
 }
@@ -116,9 +114,12 @@ impl Config {
         merged.try_into().context("parsing merged configuration")
     }
 
-    // Only saved configurations discard the removed diagnostic selectors.
+    // Only saved configurations discard obsolete runtime settings.
     // Explicit new overlays still reject unknown/obsolete keys.
     fn from_saved_value(mut value: serde_json::Value) -> Result<Self> {
+        if let Some(table) = value.as_object_mut() {
+            table.remove("smoke");
+        }
         for (parent, fields) in [
             (
                 "/ecosystem/metrics",
@@ -161,10 +162,6 @@ impl Config {
         ensure!(
             !self.viewer.enable || cfg!(feature = "viewer"),
             "this build does not include the viewer feature"
-        );
-        ensure!(
-            !self.smoke || self.viewer.enable,
-            "smoke requires the viewer"
         );
         Ok(LoopOptions {
             ticks: self.ticks,

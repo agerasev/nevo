@@ -52,20 +52,6 @@ impl<S: Simulation> Run<S> {
     }
 }
 
-/// Cloning a run makes an independent simulation, unlike cloning its view.
-impl<S: Simulation + Clone> Clone for Run<S> {
-    fn clone(&self) -> Self {
-        Self::from_universe(self.universe.read().clone())
-    }
-}
-
-// Compare canonical simulation state, excluding execution config and metric caches.
-impl<S: Simulation + PartialEq> PartialEq for Run<S> {
-    fn eq(&self, other: &Self) -> bool {
-        *self.universe.read() == *other.universe.read()
-    }
-}
-
 impl Run {
     pub fn new(config: Config, seed: u64) -> Result<Self> {
         Ok(Self::from_universe(Universe::new(config, seed)?))
@@ -122,28 +108,15 @@ pub struct LoopStatus {
     pub stop: Option<StopReason>,
 }
 
-struct Request {
-    command: Command,
-    receipt: Option<mpsc::Sender<()>>,
-}
-
-impl Request {
-    fn acknowledge(self) {
-        if let Some(receipt) = self.receipt {
-            let _ = receipt.send(());
-        }
-    }
-}
-
 /// Commands are applied between complete ticks. Readers cannot mutate the universe.
 #[derive(Clone)]
 pub struct Control {
-    sender: mpsc::Sender<Request>,
+    sender: mpsc::Sender<Command>,
     status: Arc<Mutex<LoopStatus>>,
 }
 
 pub struct Commands {
-    receiver: mpsc::Receiver<Request>,
+    receiver: mpsc::Receiver<Command>,
     status: Arc<Mutex<LoopStatus>>,
 }
 
@@ -171,26 +144,8 @@ impl Control {
 
     pub fn send(&self, command: Command) -> Result<(), String> {
         self.sender
-            .send(Request {
-                command,
-                receipt: None,
-            })
+            .send(command)
             .map_err(|_| "simulation loop has stopped".into())
-    }
-
-    /// Wait for a boundary acknowledgement; Step completes its tick first.
-    /// Call from a controller thread, never from the simulation's own callback.
-    pub fn request(&self, command: Command) -> Result<(), String> {
-        let (sender, receiver) = mpsc::channel();
-        self.sender
-            .send(Request {
-                command,
-                receipt: Some(sender),
-            })
-            .map_err(|_| "simulation loop has stopped".to_owned())?;
-        receiver
-            .recv()
-            .map_err(|_| "simulation stopped before acknowledging command".into())
     }
 }
 
@@ -237,8 +192,8 @@ where
                 publish(status);
                 return Ok(reason);
             }
-            let request = match commands.receiver.try_recv() {
-                Ok(request) => Some(request),
+            let command = match commands.receiver.try_recv() {
+                Ok(command) => Some(command),
                 Err(mpsc::TryRecvError::Disconnected) => {
                     status.stop = Some(StopReason::Disconnected);
                     publish(status);
@@ -258,7 +213,7 @@ where
                                 .map_err(|_| mpsc::RecvTimeoutError::Disconnected),
                         };
                         match received {
-                            Ok(request) => Some(request),
+                            Ok(command) => Some(command),
                             Err(mpsc::RecvTimeoutError::Timeout) => continue,
                             Err(mpsc::RecvTimeoutError::Disconnected) => {
                                 status.stop = Some(StopReason::Disconnected);
@@ -270,7 +225,7 @@ where
                 }
             };
 
-            if let Some(command) = request.as_ref().map(|request| request.command) {
+            if let Some(command) = command {
                 match command {
                     Command::Pause | Command::Step => status.paused = true,
                     Command::Resume => status.paused = false,
@@ -281,7 +236,6 @@ where
                 last_tick = Instant::now();
                 publish(status);
                 if command != Command::Step {
-                    request.expect("request is present").acknowledge();
                     if let Some(reason) = status.stop {
                         return Ok(reason);
                     }
@@ -305,9 +259,6 @@ where
                 limit(status.steps)
             };
             publish(status);
-            if let Some(request) = request {
-                request.acknowledge();
-            }
             if let Some(reason) = status.stop {
                 return Ok(reason);
             }

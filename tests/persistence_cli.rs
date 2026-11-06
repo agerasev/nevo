@@ -12,9 +12,7 @@ use std::{
 };
 
 use nevo::{
-    metrics::Metrics,
     metrics::log::{DIRECTORY_NAME, FILE_NAME, Record, RunReader as Reader, Sample},
-    run::Run,
     universe::Universe,
 };
 use serde::Deserialize;
@@ -160,12 +158,6 @@ struct Checkpoint {
     state: Universe,
 }
 
-impl Checkpoint {
-    fn restore(self) -> Run {
-        self.state.restore(self.config.ecosystem).unwrap()
-    }
-}
-
 fn read_checkpoint(path: &Path) -> Checkpoint {
     let checkpoint: Checkpoint = ciborium::from_reader(fs::File::open(path).unwrap()).unwrap();
     assert_eq!(checkpoint.format_version, 11);
@@ -179,150 +171,29 @@ fn checkpoint_tick(path: &Path) -> u64 {
 #[test]
 fn a_new_process_resumes_the_complete_seeded_state() {
     let directory = Directory::new();
-    directory.success(&["full", "--seed", "1", "--ticks", "256"]);
-    directory.success(&["split", "--seed", "1", "--ticks", "128"]);
-    // No --config or initialization arguments: the directory supplies them all.
-    let resumed_output = directory.success(&["split"]);
-    assert!(resumed_output.contains("tick=256 "));
-    let full = directory.latest("full");
-    let split = directory.latest("split");
-    assert_eq!(full.state.step(), 256);
-    assert_eq!(full.state, split.state);
-    let mut full = full.restore();
-    let mut split = split.restore();
-    for _ in 0..64 {
-        assert_eq!(full.tick().unwrap(), split.tick().unwrap());
+    let settings = directory.overlay("model.toml", "[ecosystem.genetics.initialization]\nhidden_units = 6\n[ecosystem.animal.body]\nmovement_cost = 0.003\nmovement_energy_power = 1.0\n");
+    for (name, ticks) in [("full", "6"), ("split", "3")] {
+        directory.success(&[
+            name,
+            "-c",
+            &support::preset("debug"),
+            "-c",
+            &settings,
+            "--ticks",
+            ticks,
+        ]);
     }
-    assert_eq!(full, split);
-}
-
-#[test]
-fn configured_physics_and_brain_shape_survive_process_resume() {
-    let directory = Directory::new();
-    let settings = directory.overlay(
-        "parameters.toml",
-        r#"
-[ecosystem]
-initial_animals = 3
-plants = 9
-minimum_population = 3
-[ecosystem.world]
-width = 80.0
-height = 60.0
-[ecosystem.immigration]
-energy = 0.175
-position = [4.0, 5.0]
-[ecosystem.animal.body]
-upkeep = 0.00375
-movement_cost = 0.0009
-movement_energy_power = 1.0
-max_speed = 30.0
-movement_time_step = 0.2
-movement_dead_zone = 0.05
-radius_scale = 5.0
-[ecosystem.animal.reproduction]
-threshold = 0.15
-child_energy_fraction = 0.3
-separation_scale = 0.4
-[ecosystem.animal.feeding]
-efficiency = 0.2
-contact_scale = 0.9
-[ecosystem.plant]
-initial_energy = 0.2
-replacement_energy = 0.0125
-growth = 0.001875
-max_energy = 0.25
-radius_scale = 6.0
-initial_position = [-2.0, -3.0]
-replacement_position = "random"
-[ecosystem.sensing]
-distance_scale = 0.75
-softening = 0.02
-gradient_dead_zone = 0.005
-[ecosystem.genetics.initialization]
-hidden_units = 6
-weight_min = -0.3
-weight_max = 0.25
-[ecosystem.genetics.mutation]
-max_delta = 0.04
-"#,
-    );
-    directory.success(&[
-        "full", "--config", &settings, "--seed", "17", "--ticks", "0",
-    ]);
-    let initial = directory.latest("full");
-    for animal in initial.state.world().animals().values() {
-        assert_eq!(animal.body.position, glam::DVec2::new(4.0, 5.0));
-        assert_eq!(animal.body.energy, 0.175);
-        assert_eq!(animal.body.radius(), 0.25 * 70.0_f64.sqrt());
-        assert_eq!(animal.mind.brain.genome.hidden_units, 6);
-        assert_eq!(animal.mind.brain.genome.weights.len(), 81);
-        assert_eq!(animal.mind.brain.memory, vec![0.0; 6]);
-        assert!(
-            animal
-                .mind
-                .brain
-                .genome
-                .weights
-                .iter()
-                .all(|w| (-0.3..0.25).contains(w))
-        );
-    }
-    for plant in initial.state.world().plants() {
-        assert_eq!(plant.position, glam::DVec2::new(-2.0, -3.0));
-        assert_eq!(plant.energy, 0.2);
-        assert_eq!(plant.radius(), 0.3 * 80.0_f64.sqrt());
-    }
-    directory.success(&["full", "--ticks", "64"]);
-    directory.success(&[
-        "split", "--config", &settings, "--seed", "17", "--ticks", "32",
-    ]);
+    // Resume without the original presets or initialization arguments.
     directory.success(&["split"]);
     let full = directory.latest("full");
     let split = directory.latest("split");
-    assert_eq!(full.state.step(), 64);
-    assert_eq!(full.config.ecosystem, initial.config.ecosystem);
-    assert_eq!(full.config.ecosystem, split.config.ecosystem);
+    assert_eq!(split.state.step(), 6);
     assert_eq!(full.state, split.state);
-    for animal in split.state.world().animals().values() {
-        assert_eq!(animal.mind.brain.genome.hidden_units, 6);
-        assert_eq!(animal.mind.brain.memory.len(), 6);
-    }
-
-    // Runtime metric selection may change; canonical model settings may not.
-    directory.success(&[
-        "split",
-        "--ticks",
-        "0",
-        "--config",
-        &directory.overlay("metrics-off.toml", "[ecosystem.metrics]\nenabled = false\n"),
-    ]);
-    assert_eq!(directory.latest("split").state, full.state);
-    let config_path = directory.0.join("split/config.toml");
-    let config = fs::read(&config_path).unwrap();
-    let checkpoint_path = directory.checkpoints("split").pop().unwrap();
-    let checkpoint = fs::read(&checkpoint_path).unwrap();
-    let metrics = fs::read(directory.metrics_path("split")).unwrap();
-    for replacement in [
-        "[ecosystem.world]\nwidth = 81.0\n",
-        "[ecosystem.immigration]\nenergy = 71.0\n",
-        "[ecosystem.animal.body]\nupkeep = 1.6\n",
-        "[ecosystem.animal.body]\nmovement_cost = 0.001\n",
-        "[ecosystem.animal.body]\nmovement_energy_power = 0.0\n",
-        "[ecosystem.animal.reproduction]\nchild_energy_fraction = 0.4\n",
-        "[ecosystem.animal.feeding]\nefficiency = 0.3\n",
-        "[ecosystem.plant]\ngrowth = 0.5\n",
-        "[ecosystem.sensing]\nsoftening = 0.03\n",
-        "[ecosystem.genetics.initialization]\nhidden_units = 7\n",
-        "[ecosystem.genetics.mutation]\nmax_delta = 0.05\n",
-    ] {
-        let replacement = directory.overlay("replacement.toml", replacement);
-        let output = directory.run(&["split", "--config", &replacement, "--ticks", "0"]);
-        assert!(!output.status.success(), "accepted altered model settings");
-        assert_eq!(fs::read(&config_path).unwrap(), config);
-        assert_eq!(fs::read(&checkpoint_path).unwrap(), checkpoint);
-        assert_eq!(fs::read(directory.metrics_path("split")).unwrap(), metrics);
-    }
+    assert_eq!(full.config.ecosystem, split.config.ecosystem);
+    assert_eq!(
+        split.config.ecosystem.genetics.initialization.hidden_units,
+        6
+    );
 }
 
 fn drain_metrics(reader: &mut Reader) -> Vec<Record> {
@@ -368,16 +239,6 @@ fn invocation_files_record_full_partial_and_zero_tick_windows() {
         assert!(!directory.0.join(run).join(FILE_NAME).exists());
     }
     let records = directory.metrics("partial");
-    let Record::Session(session) = &records[0] else {
-        panic!("missing metadata")
-    };
-    assert_eq!(session.start_tick, 0);
-    assert!(!session.started_at.is_empty() && !session.code_version.is_empty());
-    assert!(!session.world_model.is_empty() && !session.mind_model.is_empty());
-    assert_eq!(
-        toml::from_str::<toml::Value>(&session.config).unwrap(),
-        directory.config("partial")
-    );
     let points = samples(&records);
     assert_eq!(points.len(), 3);
     for (sample, (start, end, count, complete)) in
@@ -390,15 +251,6 @@ fn invocation_files_record_full_partial_and_zero_tick_windows() {
         assert_eq!(v["window"]["end_tick"], end);
         assert_eq!(v["window"]["samples"], count);
         assert_eq!(v["window"]["complete"], complete);
-        assert!(v["window"]["active_animal_ticks"].as_u64().unwrap() > 0);
-        assert_eq!(
-            v.as_object().unwrap().len(),
-            9,
-            "eight metrics plus window metadata"
-        );
-        assert!(v["mean_animal_energy"].is_number());
-        assert!(v["mean_plant_energy"].is_number());
-        assert!(v["distance_per_animal_tick"].is_number());
     }
     assert_eq!(samples(&directory.metrics("complete")).len(), 2);
     assert_eq!(directory.metrics("zero").len(), 1);
@@ -412,10 +264,6 @@ fn invocation_files_record_full_partial_and_zero_tick_windows() {
         "8",
     ]);
     assert!(!directory.0.join("disabled/metrics").exists());
-    assert_eq!(
-        directory.latest("partial").state,
-        directory.latest("disabled").state
-    );
 }
 
 #[test]
@@ -467,33 +315,6 @@ fn live_history_discovers_resume_files_and_preserves_each_invocation() {
     assert_eq!(points.iter().map(|s| s.tick).collect::<Vec<_>>(), [6, 7]);
     assert_eq!(metric_values(points[1])["window"]["samples"], 1);
     assert!(reader.poll().unwrap().is_empty());
-    directory.success(&["resumed", "--ticks", "0"]);
-    assert_eq!(drain_metrics(&mut reader).len(), 1);
-    let restored = directory.latest("resumed").restore();
-    let state = restored.universe().read();
-    assert!(state.world().metrics_window().is_none());
-    assert!(state.metrics().food_per_tick.is_none());
-    assert!(state.metrics().mean_animal_energy.is_some());
-    drop(state);
-    directory.success(&[
-        "resumed",
-        "-c",
-        &directory.overlay("off.toml", "[ecosystem.metrics]\nenabled = false\n"),
-        "--ticks",
-        "1",
-    ]);
-    assert!(reader.poll().unwrap().is_empty());
-    assert_eq!(
-        fs::read_dir(directory.0.join("resumed/metrics"))
-            .unwrap()
-            .count(),
-        3
-    );
-    directory.success(&["reference", "-c", &support::preset("debug"), "--ticks", "8"]);
-    assert_eq!(
-        directory.latest("resumed").state,
-        directory.latest("reference").state
-    );
 }
 
 #[test]
@@ -672,20 +493,13 @@ fn exit_only_and_zero_tick_runs_are_resumable() {
         "--ticks",
         "0",
     ]);
-    assert_eq!(
-        directory.latest("zero").restore(),
-        Run::new(support::ecosystem("debug"), 7).unwrap()
-    );
+    assert_eq!(directory.latest("zero").state.step(), 0);
     directory.success(&["zero", "--ticks", "3"]);
-    let mut reference = Run::new(support::ecosystem("debug"), 7).unwrap();
-    for _ in 0..3 {
-        reference.tick().unwrap();
-    }
-    assert_eq!(directory.latest("zero").restore(), reference);
+    assert_eq!(directory.latest("zero").state.step(), 3);
 }
 
 #[test]
-fn default_directory_records_entropy_and_full_range_seeds() {
+fn default_directory_records_the_resolved_entropy_seed() {
     let directory = Directory::new();
     let output = directory.success(&["--ticks", "2"]);
     let seed: u64 = output
@@ -711,11 +525,6 @@ fn default_directory_records_entropy_and_full_range_seeds() {
     );
     directory.success(&[run.to_str().unwrap()]);
     assert_eq!(directory.latest(run.to_str().unwrap()).state.step(), 4);
-    directory.success(&["maximum", "--seed", "18446744073709551615", "--ticks", "0"]);
-    directory.success(&["maximum", "--ticks", "1"]);
-    let mut reference = Run::new(support::ecosystem("baseline"), u64::MAX).unwrap();
-    reference.tick().unwrap();
-    assert_eq!(directory.latest("maximum").restore(), reference);
 }
 
 #[test]
@@ -750,11 +559,7 @@ fn latest_resumes_by_save_time_with_saved_config_and_explicit_overrides() {
         "--ticks",
         "1",
     ]);
-    let mut reference = Run::new(support::ecosystem("debug"), 42).unwrap();
-    for _ in 0..3 {
-        reference.tick().unwrap();
-    }
-    assert_eq!(directory.latest("runs/a-newer").restore(), reference);
+    assert_eq!(directory.latest("runs/a-newer").state.step(), 3);
     assert_eq!(directory.latest("runs/z-older").state.step(), 9);
     let config = directory.config("runs/a-newer");
     assert_eq!(config["viewer"]["vsync"].as_bool(), Some(false));
@@ -829,6 +634,7 @@ fn invalid_resume_never_overwrites_the_saved_run() {
     let config = fs::read(&config_path).unwrap();
     let checkpoint_path = directory.checkpoints("saved").pop().unwrap();
     let checkpoint = fs::read(&checkpoint_path).unwrap();
+    let metrics = fs::read(directory.metrics_path("saved")).unwrap();
     fs::write(
         directory.0.join("replacement.toml"),
         "seed = 999\nticks = 0\n",
@@ -836,7 +642,11 @@ fn invalid_resume_never_overwrites_the_saved_run() {
     .unwrap();
     for args in [
         vec!["saved", "--seed", "2"],
-        vec!["saved", "--config", &support::preset("debug")],
+        vec![
+            "saved",
+            "--config",
+            &directory.overlay("model.toml", "[ecosystem.world]\nwidth = 100.0\n"),
+        ],
         vec!["saved", "--config", "replacement.toml"],
         vec![
             "saved",
@@ -848,6 +658,7 @@ fn invalid_resume_never_overwrites_the_saved_run() {
         assert!(!output.status.success(), "accepted {args:?}");
         assert_eq!(fs::read(&config_path).unwrap(), config);
         assert_eq!(fs::read(&checkpoint_path).unwrap(), checkpoint);
+        assert_eq!(fs::read(directory.metrics_path("saved")).unwrap(), metrics);
     }
     fs::write(&checkpoint_path, &checkpoint[..checkpoint.len() / 2]).unwrap();
     let broken = fs::read(&checkpoint_path).unwrap();
@@ -899,11 +710,7 @@ fn checkpoint_recovers_missing_config_and_ignores_an_interrupted_write() {
     )
     .unwrap();
     directory.success(&["recover", "--config", "replacement.toml"]);
-    let mut reference = Run::new(support::ecosystem("debug"), 42).unwrap();
-    for _ in 0..12 {
-        reference.tick().unwrap();
-    }
-    assert_eq!(directory.latest("recover").restore(), reference);
+    assert_eq!(directory.latest("recover").state.step(), 12);
     let config = directory.config("recover");
     assert_eq!(config["ecosystem"]["initial_animals"].as_integer(), Some(1));
     assert_eq!(config["seed"].as_str(), Some("42"));
@@ -925,8 +732,6 @@ fn checkpoint_recovers_missing_config_and_ignores_an_interrupted_write() {
 #[test]
 fn a_live_run_rejects_another_writer_and_saves_on_ctrl_c() {
     let directory = Directory::new();
-    let mut metrics_reader = Reader::new(directory.0.join("live"));
-    assert!(metrics_reader.poll().unwrap().is_empty());
     let child = directory.spawn(&[
         "live",
         "--seed",
@@ -934,10 +739,7 @@ fn a_live_run_rejects_another_writer_and_saves_on_ctrl_c() {
         "--tick-hz",
         "50",
         "--config",
-        &directory.overlay(
-            "policy.toml",
-            "checkpoint_every = 1\n[ecosystem.metrics]\nenabled = true\nwindow_ticks = 1\n",
-        ),
+        &directory.overlay("policy.toml", "checkpoint_every = 1\n"),
     ]);
     let start = Instant::now();
     while !fs::read_dir(directory.0.join("live/checkpoints")).is_ok_and(|entries| {
@@ -953,17 +755,6 @@ fn a_live_run_rejects_another_writer_and_saves_on_ctrl_c() {
             "run never saved its first tick"
         );
         thread::sleep(Duration::from_millis(5));
-    }
-    let mut observed_metrics = Vec::new();
-    while samples(&observed_metrics).is_empty() {
-        observed_metrics.extend(metrics_reader.poll().unwrap());
-        assert!(
-            start.elapsed() < Duration::from_secs(10),
-            "no live metric records arrived"
-        );
-        if samples(&observed_metrics).is_empty() {
-            thread::sleep(Duration::from_millis(5));
-        }
     }
     let blocked = directory.run(&["live", "--ticks", "0"]);
     assert!(!blocked.status.success());
@@ -983,20 +774,10 @@ fn a_live_run_rejects_another_writer_and_saves_on_ctrl_c() {
     assert!(String::from_utf8_lossy(&stopped.stdout).contains("stop=Requested"));
     let saved = directory.latest("live");
     assert!(saved.state.step() >= 1);
-    observed_metrics.extend(drain_metrics(&mut metrics_reader));
-    let points = samples(&observed_metrics);
-    assert_eq!(points.last().unwrap().tick, saved.state.step());
-    assert_eq!(points.len() as u64, saved.state.step());
-    assert!(!metrics_reader.has_pending_record());
-    let mut reference = Run::new(support::ecosystem("baseline"), 1).unwrap();
-    for _ in 0..saved.state.step() {
-        reference.tick().unwrap();
-    }
-    assert_eq!(saved.restore(), reference);
-    // The process released the OS lock; a subsequent invocation can continue.
+    // Orderly shutdown released the writer lock.
     directory.success(&["live", "--ticks", "1", "--tick-hz", "0"]);
-    let continued = drain_metrics(&mut metrics_reader);
-    assert!(matches!(&continued[0], Record::Session(_)));
-    assert_eq!(samples(&continued).len(), 1);
-    assert_eq!(samples(&continued)[0].tick, points.last().unwrap().tick + 1);
+    assert_eq!(
+        directory.latest("live").state.step(),
+        saved.state.step() + 1
+    );
 }

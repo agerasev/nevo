@@ -8,7 +8,7 @@ use anyhow::{Context, Result, ensure};
 use ciborium::Value;
 use serde::Serialize;
 
-use super::{MAX_RECORD_BYTES, Position, Reader, Record, Sample};
+use super::{MAX_RECORD_BYTES, Position, Record, Sample};
 
 /// The caller exclusively owns the run directory's writer lock for this lifetime.
 /// Each record reaches the file before `append` returns; `sync` requests durability.
@@ -33,33 +33,6 @@ impl Writer {
         })
     }
 
-    /// Validate all existing records before changing the file. Only an incomplete
-    /// final CBOR item is removed; malformed CBOR/schema/sequence data is an error.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        let mut reader = Reader::new(path);
-        while !reader.poll()?.is_empty() {}
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(true)
-            .open(path)
-            .context("opening metrics log for appending")?;
-        if reader.has_pending_record() {
-            file.set_len(reader.offset())
-                .context("removing incomplete final metrics record")?;
-        }
-        Ok(Self {
-            file,
-            position: reader.position().clone(),
-            poisoned: false,
-        })
-    }
-
-    pub fn next_session_id(&self) -> Result<u64> {
-        self.position.next_session_id()
-    }
-
     pub fn append_sample<T: Serialize>(
         &mut self,
         session: u64,
@@ -76,7 +49,7 @@ impl Writer {
     pub fn append(&mut self, record: &Record) -> Result<()> {
         ensure!(
             !self.poisoned,
-            "metrics writer failed previously; reopen it to recover the trailing record"
+            "metrics writer failed previously; start a new invocation"
         );
         let mut position = self.position.clone();
         position.observe(record)?;
@@ -88,7 +61,7 @@ impl Writer {
         );
         if let Err(error) = self.write_record(&encoded) {
             // A short write may leave a partial tail. No later record may follow
-            // that tail until open() validates and repairs it under the writer lock.
+            // that tail; this invocation must stop.
             self.poisoned = true;
             return Err(error).context("appending metrics record");
         }
@@ -114,7 +87,7 @@ mod tests {
     use crate::metrics::log::{FORMAT_VERSION, Session};
 
     #[test]
-    fn an_io_failure_poison_requires_reopening_even_after_the_file_is_writable() {
+    fn an_io_failure_prevents_further_writes() {
         let path = std::env::temp_dir().join(format!(
             "nevo-metrics-write-failure-{}-{}",
             std::process::id(),
@@ -123,7 +96,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let mut writer = Writer::open(&path).unwrap();
+        let mut writer = Writer::create(&path).unwrap();
         writer
             .append(&Record::Session(Session {
                 version: FORMAT_VERSION,
@@ -149,12 +122,6 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), before);
         drop(writer);
 
-        let mut reopened = Writer::open(&path).unwrap();
-        reopened.append_sample(1, 1, &42_u64).unwrap();
-        let mut reader = Reader::new(&path);
-        assert_eq!(reader.poll().unwrap().len(), 2);
-        assert!(reader.poll().unwrap().is_empty());
-        drop(reopened);
         fs::remove_file(path).unwrap();
     }
 }

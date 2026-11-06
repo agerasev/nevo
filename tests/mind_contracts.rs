@@ -68,19 +68,9 @@ struct ResearchContext {
 
 impl Context for ResearchContext {
     type Rng = dyn Rng + Send;
-    type DType = &'static str;
-    type Device = u8;
 
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
-    }
-
-    fn dtype(&self) -> Self::DType {
-        "f32"
-    }
-
-    fn device(&self) -> Self::Device {
-        0
     }
 }
 
@@ -108,16 +98,14 @@ fn mind_and_genome_accept_an_alternate_unsized_context() {
     let original = parent.clone();
     let mut agent = AnimalMind::new(parent.clone()).unwrap();
 
-    let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
-        &mut context;
+    let cx: &mut dyn Context<Rng = dyn Rng + Send> = &mut context;
     let action = agent.process(FoodObservation::default(), cx).unwrap();
     assert_eq!(action.direction, DVec2::X * f64::from(0.5_f32.tanh()));
     assert_eq!(action.speed_fraction, 1.0_f64.tanh());
     assert_ne!(agent.brain.memory, [0.0; 4]);
     assert_eq!(context, before, "processing must not consume genetic draws");
 
-    let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
-        &mut context;
+    let cx: &mut dyn Context<Rng = dyn Rng + Send> = &mut context;
     let param = WeightMutation { max_delta: 0.07 };
     let child = mutated_copy(&parent, &param, cx).unwrap();
     assert_eq!(parent, original);
@@ -187,14 +175,12 @@ fn random_initialization_accepts_unsized_context_without_requiring_a_genome() {
         rng: Xoshiro256PlusPlus::seed_from_u64(42),
     };
     let mut expected = context.clone();
-    let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
-        &mut context;
+    let cx: &mut dyn Context<Rng = dyn Rng + Send> = &mut context;
     let label = RandomLabel::random(&(), cx).unwrap();
     assert_eq!(label.0, expected.rng.next_u64());
     assert_eq!(context, expected);
 
-    let cx: &mut dyn Context<Rng = dyn Rng + Send, DType = &'static str, Device = u8> =
-        &mut context;
+    let cx: &mut dyn Context<Rng = dyn Rng + Send> = &mut context;
     let genome = RnnGenome::random(&nevo::mind::rnn::Initialization::default(), cx).unwrap();
     assert!(
         genome

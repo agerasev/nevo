@@ -4,10 +4,7 @@ mod metrics;
 mod persistence;
 
 #[cfg(feature = "viewer")]
-mod smoke;
-
-#[cfg(feature = "viewer")]
-use nevo::viewer::{self, Draw, Label};
+use nevo::viewer::{self, Label};
 
 use std::{
     process::ExitCode,
@@ -82,7 +79,6 @@ fn attach_viewer(
     seed: u64,
     display: config::ViewerConfig,
     metrics_path: std::path::PathBuf,
-    smoke: Option<smoke::SmokeCheck>,
     exit_requested: Arc<AtomicBool>,
 ) -> Result<(), String> {
     use std::sync::{Arc, Mutex};
@@ -100,7 +96,6 @@ fn attach_viewer(
                 let options = viewer::Options {
                     labels: vec![Label::new(format!("Seed {seed}"))],
                     exit_requested: exit_requested.clone(),
-                    interactive: smoke.is_none(),
                     metrics_path: Some(metrics_path.clone()),
                     initial_tab: match display.tab {
                         config::ViewerTab::World => viewer::Tab::World,
@@ -108,31 +103,7 @@ fn attach_viewer(
                     },
                     ..Default::default()
                 };
-                if let Some(mut check) = smoke.clone() {
-                    let mut frame = 0;
-                    let presented =
-                        viewer::show_with(window, control.clone(), options, |drawing| {
-                            check.command(frame, &control)?;
-                            let snapshot = world.read();
-                            snapshot.draw(drawing);
-                            check.verify(frame, &snapshot, &control)?;
-                            frame += 1;
-                            Ok(if frame == 12 {
-                                std::ops::ControlFlow::Break(())
-                            } else {
-                                std::ops::ControlFlow::Continue(())
-                            })
-                        })
-                        .await?;
-                    ensure!(
-                        presented == 12,
-                        "viewer closed before the smoke check finished"
-                    );
-                    println!("Verified 12 displayed snapshots and pause/step/pacing commands.");
-                    Ok(())
-                } else {
-                    viewer::show(window, world.clone(), control.clone(), options).await
-                }
+                viewer::show(window, world.clone(), control.clone(), options).await
             },
             config,
         )
@@ -199,7 +170,7 @@ fn execute(mut cli: Cli) -> Result<()> {
         "seed={} ticks={:?} interval={:?}",
         seed, limits.ticks, limits.interval,
     );
-    let (control, commands) = Control::channel(options.paused || options.smoke);
+    let (control, commands) = Control::channel(options.paused);
     let exit_requested = Arc::new(AtomicBool::new(false));
     let signal_exit = Arc::clone(&exit_requested);
     let signal_control = control.clone();
@@ -210,8 +181,6 @@ fn execute(mut cli: Cli) -> Result<()> {
     .context("installing shutdown handler")?;
     #[cfg(feature = "viewer")]
     let world = run.universe().clone();
-    #[cfg(feature = "viewer")]
-    let smoke = options.smoke.then(|| smoke::SmokeCheck::new(run.clone()));
     let worker_options = options.clone();
     let worker_exit = Arc::clone(&exit_requested);
     let thread = thread::spawn(move || {
@@ -277,7 +246,6 @@ fn execute(mut cli: Cli) -> Result<()> {
             seed,
             options.viewer,
             metrics_path,
-            smoke,
             exit_requested,
         );
         let _ = control.send(Command::Stop);

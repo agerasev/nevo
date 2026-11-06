@@ -135,8 +135,8 @@ fn entities_collect_owned_geometry_without_mind_traits() {
     assert_pixel(&image, 74, 50, [255, 217, 64, 255]);
     assert_pixel(&image, 50, 50, [14, 18, 19, 255]);
     // No genetic or inference bounds leak through the world's drawing interface.
-    let world = Ecosystem::<UnrelatedMind, (), (), (), ()>::empty(0, 0, 1, 2, None, ());
-    world.draw(&mut Drawing::new(&library));
+    fn assert_draw<T: Draw>() {}
+    assert_draw::<Ecosystem<UnrelatedMind, (), (), (), ()>>();
 }
 
 #[test]

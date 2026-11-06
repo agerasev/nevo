@@ -165,9 +165,10 @@ fn viewer_preset_and_shortcut_never_enable_simulation_pacing() {
 }
 
 #[test]
-fn saved_diagnostic_selectors_are_discarded_but_new_overlays_reject_them() {
+fn obsolete_saved_settings_are_discarded_but_new_overlays_reject_them() {
     let directory = Directory::new();
     let mut old = serde_json::to_value(Config::default()).unwrap();
+    old["smoke"] = false.into();
     old["ecosystem"]["metrics"]["genetic_diversity"] = true.into();
     old["ecosystem"]["metrics"]["population"] = true.into();
     old["ecosystem"]["metrics"]["event_rates"] = true.into();

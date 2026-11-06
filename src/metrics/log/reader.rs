@@ -34,11 +34,6 @@ impl Reader {
         }
     }
 
-    /// Offset after the last published complete record, never inside a pending item.
-    pub fn offset(&self) -> u64 {
-        self.offset
-    }
-
     pub fn has_pending_record(&self) -> bool {
         self.pending
     }
@@ -94,10 +89,6 @@ impl Reader {
         self.position = position;
         self.pending = pending;
         Ok(records)
-    }
-
-    pub(super) fn position(&self) -> &Position {
-        &self.position
     }
 }
 

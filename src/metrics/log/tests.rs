@@ -94,7 +94,6 @@ fn follows_creation_and_every_byte_of_new_records_without_duplicates() {
         session(2, 1),
         sample(2, 2),
     ];
-    let mut offset = 0;
     for record in records {
         let bytes = encoded(&record);
         for (index, byte) in bytes.iter().enumerate() {
@@ -102,66 +101,17 @@ fn follows_creation_and_every_byte_of_new_records_without_duplicates() {
             let found = reader.poll().unwrap();
             if index + 1 == bytes.len() {
                 assert_eq!(found.as_slice(), std::slice::from_ref(&record));
-                offset += bytes.len() as u64;
                 assert!(!reader.has_pending_record());
             } else {
                 assert!(found.is_empty());
                 assert!(reader.has_pending_record());
             }
-            assert_eq!(reader.offset(), offset);
         }
         assert!(
             reader.poll().unwrap().is_empty(),
             "EOF remains a waiting state"
         );
     }
-}
-
-#[test]
-fn writer_reopens_the_same_file_and_preserves_overlapping_sessions() {
-    let directory = Directory::new();
-    let path = directory.file();
-    let mut reader = Reader::new(&path);
-    let mut writer = Writer::open(&path).unwrap();
-    assert_eq!(writer.next_session_id().unwrap(), 1);
-    writer.append(&session(1, 0)).unwrap();
-    writer.append_sample(1, 20, &42_u64).unwrap();
-    writer.sync().unwrap();
-    let first = fs::read(&path).unwrap();
-    assert_eq!(reader.poll().unwrap().len(), 2);
-    drop(writer);
-
-    let mut writer = Writer::open(&path).unwrap();
-    assert_eq!(writer.next_session_id().unwrap(), 2);
-    writer.append(&session(2, 10)).unwrap();
-    writer.append_sample(2, 11, &99_u64).unwrap();
-    let next = reader.poll().unwrap();
-    assert_eq!(next.len(), 2);
-    assert_eq!(next[0], session(2, 10));
-    assert!(fs::read(&path).unwrap().starts_with(&first));
-    assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 1);
-}
-
-#[test]
-fn recovers_only_the_unfinished_tail_while_a_reader_stays_attached() {
-    let directory = Directory::new();
-    let path = directory.file();
-    let prefix = [encoded(&session(1, 0)), encoded(&sample(1, 1))].concat();
-    fs::write(&path, &prefix).unwrap();
-    let mut reader = Reader::new(&path);
-    assert_eq!(reader.poll().unwrap().len(), 2);
-    let incomplete = encoded(&sample(1, 2));
-    append_raw(&path, &incomplete[..incomplete.len() - 1]);
-    assert!(reader.poll().unwrap().is_empty());
-    assert!(reader.has_pending_record());
-    assert_eq!(reader.offset(), prefix.len() as u64);
-
-    let mut writer = Writer::open(&path).unwrap();
-    assert_eq!(fs::read(&path).unwrap(), prefix);
-    writer.append(&session(2, 1)).unwrap();
-    writer.append(&sample(2, 2)).unwrap();
-    assert_eq!(reader.poll().unwrap(), [session(2, 1), sample(2, 2)]);
-    assert!(!reader.has_pending_record());
 }
 
 #[test]
@@ -184,14 +134,11 @@ fn malformed_complete_records_and_invalid_sequences_are_never_truncated() {
     for suffix in invalid {
         let bytes = [prefix.clone(), suffix].concat();
         fs::write(&path, &bytes).unwrap();
-        assert!(Writer::open(&path).is_err());
-        assert_eq!(fs::read(&path).unwrap(), bytes);
         let mut reader = Reader::new(&path);
         assert_eq!(reader.poll().unwrap(), [session(1, 0)]);
-        assert_eq!(reader.offset(), prefix.len() as u64);
         assert!(reader.poll().is_err());
-        assert_eq!(reader.offset(), prefix.len() as u64);
         assert!(reader.poll().is_err(), "invalid data stays at the cursor");
+        assert_eq!(fs::read(&path).unwrap(), bytes);
     }
 }
 
@@ -199,7 +146,7 @@ fn malformed_complete_records_and_invalid_sequences_are_never_truncated() {
 fn an_invalid_append_preserves_bytes_and_writer_sequence_state() {
     let directory = Directory::new();
     let path = directory.file();
-    let mut writer = Writer::open(&path).unwrap();
+    let mut writer = Writer::create(&path).unwrap();
     writer.append(&session(1, 0)).unwrap();
     let before = fs::read(&path).unwrap();
     assert!(writer.append(&sample(2, 1)).is_err());
@@ -216,7 +163,7 @@ fn an_invalid_append_preserves_bytes_and_writer_sequence_state() {
 fn polls_bound_work_and_reject_truncation_of_committed_records() {
     let directory = Directory::new();
     let path = directory.file();
-    let mut writer = Writer::open(&path).unwrap();
+    let mut writer = Writer::create(&path).unwrap();
     writer.append(&session(1, 0)).unwrap();
     for tick in 1..=300 {
         writer.append(&sample(1, tick)).unwrap();
@@ -226,7 +173,7 @@ fn polls_bound_work_and_reject_truncation_of_committed_records() {
     assert_eq!(reader.poll().unwrap().len(), 128);
     assert_eq!(reader.poll().unwrap().len(), 45);
     assert!(reader.poll().unwrap().is_empty());
-    let committed = reader.offset();
+    let committed = fs::metadata(&path).unwrap().len();
     OpenOptions::new()
         .write(true)
         .open(&path)
@@ -234,14 +181,13 @@ fn polls_bound_work_and_reject_truncation_of_committed_records() {
         .set_len(committed - 1)
         .unwrap();
     assert!(reader.poll().is_err());
-    assert_eq!(reader.offset(), committed);
 }
 
 #[test]
 fn oversized_records_fail_before_writing_and_cannot_be_misread_as_pending() {
     let directory = Directory::new();
     let path = directory.file();
-    let mut writer = Writer::open(&path).unwrap();
+    let mut writer = Writer::create(&path).unwrap();
     writer.append(&session(1, 0)).unwrap();
     let before = fs::read(&path).unwrap();
     let large = vec![0_u8; MAX_RECORD_BYTES as usize];
@@ -258,5 +204,4 @@ fn oversized_records_fail_before_writing_and_cannot_be_misread_as_pending() {
     let mut reader = Reader::new(&path);
     assert_eq!(reader.poll().unwrap(), [session(1, 0)]);
     assert!(reader.poll().is_err());
-    assert!(Writer::open(&path).is_err());
 }

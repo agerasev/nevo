@@ -1,147 +1,37 @@
 # NEvo
 
-An ongoing artificial-life and neuroevolution experiment in Rust: evolving agents
-acting in simulated environments. Development proceeds through runnable milestones
-and recorded experiments, with no final endpoint for the research program.
+An artificial-life and neuroevolution research project in Rust. Animals with
+recurrent brains forage among replenishing plants. The aim is measurable
+adaptation across increasingly demanding environments; survival alone is not
+evidence of adaptation.
 
-## Current implementation
-
-The ecosystem has replenishing plants and animals with recurrent brains (3–4–3
-by default, with configurable hidden width). One configurable loop runs every
-experiment; an optional desktop viewer reads the shared Universe. Sensing precedes
-movement, feeding, and births.
-A fresh checkout needs `git submodule update --init` for the Cargo path dependency.
+Initialize the drawing dependency with `git submodule update --init`, then:
 
 ```sh
-cargo run --locked -- --config configs/baseline.toml --config configs/viewer.toml
-cargo run --locked -- --config configs/debug.toml --config configs/viewer.toml --paused
-cargo run --locked -- --config configs/baseline.toml --seed 1 --ticks 256
-cargo run --locked --bin nevo -- runs/baseline --seed 1 --ticks 256
-cargo run --locked --bin nevo -- runs/baseline
+# Start a seeded, bounded experiment.
+cargo run --locked -- runs/baseline --config configs/baseline.toml --seed 1 --ticks 256
+# Continue the saved experiment with a viewer.
+cargo run --locked -- runs/baseline --config configs/viewer.toml
+# Inspect a small deterministic scene.
+cargo run --locked -- --config configs/debug.toml --viewer --paused
 ```
 
-Use **Pause / Resume** to control playback and **Single step** to advance one tick
-and pause. Edit **Tick Hz** for paced playback; **Full speed** toggles unlimited
-speed while remembering the paced rate. With the arena focused, Space toggles
-playback and Right Arrow steps. See [viewer controls](docs/viewer.md).
-The toolbar shows the seed, tick, and population counts for the displayed
-world. Green circles are plants and yellow circles are animals.
+Run directories contain resolved configuration, checkpoints, and metrics.
+`--ticks` is an additional budget for each invocation; omit it on a new run for
+unlimited execution. See `--help` for CLI shortcuts and [persistence](docs/persistence.md)
+for resuming. Build with `--no-default-features` when graphics are unnecessary.
 
-Runs default to full speed (`--tick-hz 0`) and a seed drawn from system entropy.
-The resolved seed is printed before the run starts; supply `--seed N` to replay it.
-Use `--tick-hz 25` to pace simulation ticks and `--ticks N` for a reproducible budget. Omit
-the budget to run until interrupted. A trial simply supplies initialization and
-a tick limit. The `debug.toml` preset exercises a meal and a birth on tick one. The
-`baseline.toml` preset starts 20 animals among 500 mature plants.
-See the [tick and runner contracts](docs/simulation.md).
+The design keeps minds and environments replaceable through small contracts.
+Experiment-specific sensing, actions, bodies, and genomes stay outside the generic
+runner. Simulation time is independent of viewing and wall-clock pacing; wgame
+provides the optional drawing backend. The [simulation contracts](docs/simulation.md)
+explain the boundaries.
 
-TOML describes the full configuration; a separate CLI exposes common shortcuts.
-Repeat `--config PATH` to layer presets: later files override earlier ones,
-and explicit CLI shortcuts override all files. Tables merge by field; arrays replace as a whole.
-[Example configuration](configs/debug.toml):
+- [Configuration](docs/configuration.md): composable presets and energy units.
+- [Metrics](docs/metrics.md): measurements and interpretation.
+- [Viewer](docs/viewer.md): controls and drawing contract.
+- [Research roadmap](docs/roadmap.md): planned milestones and unresolved choices.
+- [Selected history](docs/history/README.md): measured results and their limits.
 
-```toml
-seed = 1
-trace_ticks = 3
-
-[ecosystem]
-initial_animals = 1
-plants = 1
-minimum_population = 0
-immigration.energy = 0.975
-immigration.position = [0.0, 0.0]
-plant.initial_position = [0.0, 0.0]
-```
-
-The CLI offers `--seed`, `--ticks`, `--tick-hz`, `--viewer`, and `--paused`.
-`--viewer` maps to `viewer.enable`; explicit `--viewer=false` or `--paused=false`
-overrides a true value. Ecosystem details and `viewer.vsync` are configured in files.
-Unknown keys are rejected in every file. See [configuration and precedence](docs/configuration.md).
-
-World dimensions, body and plant dynamics, reproduction, feeding, sensing, and
-genetic initialization/mutation are configurable. Initial and later immigrants
-use the same energy, placement, and genome initialization settings. The initial
-population and immigration floor only decide how many animals to admit.
-Energy uses a default reproduction threshold of `1.0`. Compose the
-[energy-proportional](configs/movement/cost.toml), [flat movement](configs/movement/flat.toml),
-or [upkeep-only](configs/movement/upkeep-only.toml) cost preset; see the [units and cost rules](docs/configuration.md).
-
-The viewer runs independently of simulation speed. Its preset enables VSync without
-slowing simulation; there is no additional rendering timer.
-
-Every run stores its resolved configuration and resumable CBOR checkpoints in
-the supplied directory, or a new directory under `runs/`. Pass that directory
-alone to resume with its last configuration, or use `--latest` for the most recently
-saved run under `runs/`. Checkpoints are saved periodically and on orderly shutdown,
-including Ctrl-C; their interval and retention count
-are configurable. `--ticks N` always means N additional ticks for that invocation.
-See [persistence options, format, and recovery](docs/persistence.md).
-
-Population, mean energy, food intake, turnover, immigration, and movement metrics
-are enabled by default. Layer `--config configs/metrics.toml` for 10,000-tick windows.
-Each invocation writes a separate file under `metrics/`; the **Metrics** tab follows
-the run's files and keeps plotting history in memory. See [metrics](docs/metrics.md).
-
-Build with `--no-default-features` when graphics are unnecessary; the executable
-and runner stay the same. Add `--config configs/smoke.toml` to verify twelve
-displayed snapshots and pause/step/pacing controls against a seeded reference run.
-
-## Project structure
-
-Component contracts live at their module roots; implementations live beneath them.
-Multi-file modules use `mod.rs` inside their directory.
-
-| Module | Responsibility |
-| --- | --- |
-| [mind](src/mind/mod.rs) | Mind contract, food-sensing adapter, and scalar RNN with memory and genome. |
-| [genome](src/genome/mod.rs) | Genome, Mutate, and independent RandomInit contracts. |
-| [context](src/context/mod.rs) | Execution context contract and CPU implementation. |
-| [ecosystem](src/ecosystem/mod.rs) | Plants and complete animals with body and mind; foraging, reproduction, and immigration rules. |
-| [universe](src/universe/mod.rs) | Complete serializable state and the small Simulation stepping contract. |
-| [run](src/run/mod.rs) | Shared read/compute/write loop and controls. |
-| [metrics](src/metrics/mod.rs) | Read-only summaries and per-invocation logs. |
-| [viewer](src/viewer/mod.rs) | Optional Draw contract, wgame scenes, and generic window controls. |
-| [app](src/app/mod.rs) | CLI configuration, run storage, worker and viewer startup. |
-
-`main.rs` only enters the application; `lib.rs` exposes the library modules.
-The concrete experiment is `ecosystem::Ecosystem`. Each animal owns its `body` and
-`mind` together. A `Universe` owns the complete experiment and step counter;
-both bounded and unlimited runs use `run::Run`. Initialization and later immigration
-share one admission path. Minds receive typed observations and return actions;
-there is no separate environment–actor storage or lifecycle synchronization.
-Each tick computes component updates under a read lock and applies them under a
-write lock, without cloning the Universe or existing minds.
-See [simulation contracts](docs/simulation.md) for the implemented boundaries.
-
-Objects compose their default drawing through `Draw`; the viewer collects a wgame
-scene under a read lock and renders after releasing it. Viewing requires no model
-or mind cloning. See [drawing and viewer contracts](docs/viewer.md).
-
-Keep current documentation in [docs/](docs/README.md), with selected milestone
-conclusions in [history](docs/history/README.md). Run configurations live in
-`configs/`; checkpoints, screenshots, and other run outputs stay in ignored `runs/`.
-
-## Agreed direction
-
-- Use one configurable loop for resettable trials and unlimited experiments;
-  the optional viewer reads snapshots independently of simulation stepping.
-- Make agents (genomes, brains, control mappings) and environments (worlds, bodies,
-  physical rules) generic and replaceable through compatible contracts/adapters.
-- Use wgame as the drawing backend, with one default presentation per object.
-- Use the [July 26 foraging experiment](docs/history/2016-07-26-ecosystem.md)
-  as the Rust baseline. Start with continuous 2D space, replenishing food, and one
-  animal body type. Wrapping boundaries remain part of the planned Rust world.
-- Develop richer spatial ecology and body-relative perception/control; see the
-  [research roadmap](docs/roadmap.md) for milestones and unresolved design choices.
-- Begin with the minimum evolutionary degrees of freedom needed to demonstrate
-  adaptation. The first baseline evolves weights and biases with fixed topology.
-- Use [windowed statistics](docs/metrics.md) to study behavior and evolution;
-  establish adaptation through controlled comparisons, not population survival alone.
-- Record concise conclusions from major research milestones in [history](docs/history/README.md).
-
-## Next milestones
-
-The [research and implementation roadmap](docs/roadmap.md) collects the proposed
-ecology, sensing, physics, and evolution changes in runnable steps, with checks
-and decisions to settle before implementation. It is the authoritative home for
-these plans; current behavior remains documented above and in [docs/](docs/README.md).
+Keep reusable presets in `configs/` and generated artifacts in ignored `runs/`.
+[Working instructions](AGENTS.md) cover code, tests, and documentation policy.

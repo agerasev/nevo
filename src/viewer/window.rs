@@ -1,6 +1,5 @@
 use std::{
     cell::{Cell, RefCell},
-    ops::ControlFlow,
     path::PathBuf,
     sync::{
         Arc,
@@ -28,7 +27,6 @@ pub enum Tab {
 pub struct Options {
     pub title: String,
     pub labels: Vec<Label>,
-    pub interactive: bool,
     pub metrics_path: Option<PathBuf>,
     pub initial_tab: Tab,
     pub exit_requested: Arc<AtomicBool>,
@@ -39,7 +37,6 @@ impl Default for Options {
         Self {
             title: "NEvo".into(),
             labels: Vec::new(),
-            interactive: true,
             metrics_path: None,
             initial_tab: Tab::World,
             exit_requested: Arc::new(AtomicBool::new(false)),
@@ -72,35 +69,6 @@ pub async fn show<U: Draw>(
     control: Control,
     options: Options,
 ) -> wgame::Result<()> {
-    show_inner(window, control, options, |drawing, tab| {
-        if tab == Tab::World {
-            state.read().draw(drawing);
-        }
-        Ok(ControlFlow::Continue(()))
-    })
-    .await
-    .map(|_| ())
-}
-
-/// Supply a custom capture, e.g. to check state or script controls before drawing.
-/// The callback runs once per attempted frame, outside UI layout. Release all
-/// simulation guards before returning. `Break` presents this final drawing and
-/// exits. The returned count includes only frames actually presented.
-pub async fn show_with(
-    window: Window<'_>,
-    control: Control,
-    options: Options,
-    mut capture: impl FnMut(&mut Drawing<'_>) -> wgame::Result<ControlFlow<()>>,
-) -> wgame::Result<u64> {
-    show_inner(window, control, options, |drawing, _| capture(drawing)).await
-}
-
-async fn show_inner(
-    window: Window<'_>,
-    control: Control,
-    options: Options,
-    mut capture: impl FnMut(&mut Drawing<'_>, Tab) -> wgame::Result<ControlFlow<()>>,
-) -> wgame::Result<u64> {
     let active_tab = Cell::new(options.initial_tab);
     let metrics = RefCell::new(metrics::Panel::new(options.metrics_path.clone()));
     let initial = control.status();
@@ -137,7 +105,7 @@ async fn show_inner(
             ui.horizontal_wrapped(|ui| {
                 ui.strong(&options.title);
                 ui.separator();
-                ui.add_enabled_ui(options.interactive && !status.stopped, |ui| {
+                ui.add_enabled_ui(!status.stopped, |ui| {
                     controls.borrow_mut().show(ui, status.paused, click);
                 });
                 ui.separator();
@@ -177,10 +145,9 @@ async fn show_inner(
             .inner
     });
     let library = Library::new(host.graphics());
-    let mut presented = 0;
     loop {
         if options.exit_requested.load(Ordering::Relaxed) {
-            return Ok(presented);
+            return Ok(());
         }
         for command in pending.take() {
             // A completed simulation remains visible until the window closes.
@@ -188,7 +155,9 @@ async fn show_inner(
         }
         metrics.borrow_mut().poll();
         let mut drawing = Drawing::new(&library);
-        let finish = capture(&mut drawing, active_tab.get())?;
+        if active_tab.get() == Tab::World {
+            state.read().draw(&mut drawing);
+        }
         let loop_status = control.status();
         controls.borrow_mut().begin_frame(loop_status.interval);
         *status.borrow_mut() = Status {
@@ -199,9 +168,9 @@ async fn show_inner(
         // UI layout and GPU work use the collected scene after its state lock ends.
         // The window/backend schedules presentation; there is no extra frame timer.
         let Some(mut frame) = host.next_frame().await? else {
-            return Ok(presented);
+            return Ok(());
         };
-        if options.interactive && loop_status.stop.is_none() && active_tab.get() == Tab::World {
+        if loop_status.stop.is_none() && active_tab.get() == Tab::World {
             for event in &frame.input().events {
                 if let Event::Key {
                     key,
@@ -221,10 +190,6 @@ async fn show_inner(
             drawing.render(&mut frame);
         }
         frame.present();
-        presented += 1;
-        if finish.is_break() {
-            return Ok(presented);
-        }
     }
 }
 

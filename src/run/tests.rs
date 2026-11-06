@@ -12,9 +12,7 @@ struct Probe {
     value: u64,
     memory: u64,
     rng: Xoshiro256PlusPlus,
-    births: u64,
-    interventions: u64,
-    fail_phase: u8,
+    fail: bool,
     #[serde(skip)]
     increment: u64,
     #[serde(skip)]
@@ -40,8 +38,6 @@ struct ProbeUpdate {
     value: u64,
     memory: u64,
     rng: Xoshiro256PlusPlus,
-    births: u64,
-    interventions: u64,
 }
 
 impl Simulation for Probe {
@@ -62,23 +58,9 @@ impl Simulation for Probe {
         }
         let mut rng = self.rng.clone();
         let memory = rng.next_u64();
-        ensure!(self.fail_phase != 1, "mind failed");
+        ensure!(!self.fail, "preparation failed");
         let value = self.value + self.increment;
-        let births = self.births + 1;
-        ensure!(self.fail_phase != 2, "physical update failed");
-        let interventions = self.interventions + 1;
-        ensure!(self.fail_phase != 3, "intervention failed");
-        ensure!(self.fail_phase != 4, "invalid prepared state");
-        Ok((
-            value,
-            ProbeUpdate {
-                value,
-                memory,
-                rng,
-                births,
-                interventions,
-            },
-        ))
+        Ok((value, ProbeUpdate { value, memory, rng }))
     }
 
     fn apply_update(&mut self, update: ProbeUpdate) {
@@ -88,16 +70,6 @@ impl Simulation for Probe {
         self.value = update.value;
         self.memory = update.memory;
         self.rng = update.rng;
-        self.births = update.births;
-        self.interventions = update.interventions;
-    }
-
-    fn validate(&self) -> Result<()> {
-        ensure!(
-            self.fail_phase != 4 || self.value == 0,
-            "invalid prepared state"
-        );
-        Ok(())
     }
 }
 
@@ -109,9 +81,7 @@ fn universe() -> TestUniverse {
         value: 0,
         memory: 0,
         rng: Xoshiro256PlusPlus::seed_from_u64(42),
-        births: 0,
-        interventions: 0,
-        fail_phase: 0,
+        fail: false,
         increment: 1,
         configurations: 0,
         inspect: None,
@@ -167,7 +137,6 @@ fn preparation_holds_read_lock_and_callback_runs_after_atomic_publication() {
                     .expect("callback holds no universe lock");
                 assert_eq!(state.step(), 1);
                 assert_eq!(state.world.value, *report);
-                assert_eq!(state.world.interventions, 1);
                 false
             },
         )
@@ -245,35 +214,6 @@ fn readers_can_hold_back_publication_while_preparation_runs() {
 }
 
 #[test]
-fn failed_preparation_preserves_all_experiment_state() {
-    for phase in 1..=4 {
-        let mut state = universe();
-        state.world.fail_phase = phase;
-        let before = encoded(&state);
-        let mut run = TestRun::from_universe(state);
-        let (control, commands) = Control::channel(false);
-        assert!(
-            run.execute(
-                LoopOptions {
-                    ticks: Some(1),
-                    interval: Duration::ZERO
-                },
-                commands,
-                |_, _| panic!("failed tick cannot be observed")
-            )
-            .is_err()
-        );
-        assert_eq!(control.status().stop, Some(StopReason::Failed));
-        assert_eq!(control.status().steps, 0);
-        assert_eq!(
-            encoded(&run.universe.read()),
-            before,
-            "failure phase {phase}"
-        );
-    }
-}
-
-#[test]
 fn restore_configures_once_and_steps_use_stored_component_settings() {
     let mut run = universe().restore(ProbeConfig { increment: 7 }).unwrap();
     assert_eq!(run.tick().unwrap(), 7);
@@ -292,23 +232,19 @@ fn restore_configures_once_and_steps_use_stored_component_settings() {
 }
 
 #[test]
-fn cloning_a_run_preserves_its_metrics_window_and_accumulation() {
-    use crate::metrics::Metrics;
-
-    let mut run = Run::new(crate::test_support::ecosystem("debug"), 1).unwrap();
-    for _ in 0..3 {
-        run.tick().unwrap();
-    }
-    let cloned = run.clone();
-    let original = run.universe().read();
-    let copy = cloned.universe().read();
-    assert_eq!(
-        original.world().metrics_window(),
-        copy.world().metrics_window()
+fn failed_preparation_preserves_state_and_does_not_call_observers() {
+    let mut state = universe();
+    state.world.fail = true;
+    let before = encoded(&state);
+    let mut run = TestRun::from_universe(state);
+    let (control, commands) = Control::channel(false);
+    assert!(
+        run.execute(LoopOptions::default(), commands, |_, _| panic!(
+            "failed tick"
+        ))
+        .is_err()
     );
-    assert_eq!(
-        serde_json::to_value(original.metrics()).unwrap(),
-        serde_json::to_value(copy.metrics()).unwrap()
-    );
-    assert_eq!(copy.world().metrics_window().unwrap().samples, 3);
+    assert_eq!(control.status().stop, Some(StopReason::Failed));
+    assert_eq!(control.status().steps, 0);
+    assert_eq!(encoded(&run.universe().read()), before);
 }

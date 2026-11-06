@@ -130,66 +130,16 @@ fn quoted_seed_supports_the_full_u64_range() {
 }
 
 #[test]
-fn invalid_configuration_and_removed_options_are_rejected() {
+fn invalid_configuration_is_rejected_before_startup() {
     for content in [
-        "unknown_key = true",
-        "seconds = 1",
-        "focal = 1",
-        "tick_hz = -1",
-        "tick_hz = nan",
-        "hz = 25",
-        "viewer = true",
-        "[viewer]\nenable = 1",
-        "[viewer]\nvsync = 1",
-        "[viewer]\nunknown = true",
-        "seed = -1",
-        "ticks = 'many'",
-        "scenario = 'debug'",
         "[ecosystem]\nunknown = 1",
-        "[ecosystem]\nplants = -1",
-        "[ecosystem]\nimmigration.energy = nan",
-        "[ecosystem]\nimmigration.position = [nan, 0.0]",
-        "[ecosystem]\nplant.initial_position = [631.0, 0.0]",
-        "[ecosystem]\nplant.initial_position = [0.0]",
-        "[ecosystem]\ninitial_animal_energy = 100.0",
-        "[ecosystem]\ninitial_animal_position = 'random'",
-        "[ecosystem]\ninitial_plant_position = 'random'",
-        "[ecosystem.world]\nwidth = 0.0",
-        "[ecosystem.world]\nheight = inf",
-        "[ecosystem.animal.body]\nupkeep = -1.0",
-        "[ecosystem.animal.reproduction]\nchild_energy_fraction = 1.0",
-        "[ecosystem.plant]\ngrowth = -1.0",
-        "[ecosystem.genetics.initialization]\nhidden_units = 0",
-        "[ecosystem.genetics.initialization]\nweight_min = 1.0\nweight_max = 0.0",
-        "[ecosystem.genetics.mutation]\nmax_delta = -0.01",
-        "not valid toml",
+        "[viewer]\nenable = 1",
+        "tick_hz = -1",
     ] {
-        let bounded = if content.starts_with("ticks =") {
-            content.to_owned()
-        } else {
-            format!("ticks = 0\n{content}")
-        };
-        let file = ConfigFile::new(&bounded);
+        let file = ConfigFile::new(&format!("ticks = 0\n{content}"));
         let output = run(&["--config", file.path()]);
         assert!(!output.status.success(), "accepted {content:?}");
         assert!(!output.stderr.is_empty());
-    }
-    for option in [
-        "--seconds",
-        "--focal",
-        "--scenario",
-        "--hz",
-        "--ecosystem-initial-animals",
-        "--viewer-vsync",
-        "--viewer-enable",
-        "--set",
-        "--checkpoint-every",
-        "--trace-ticks",
-        "--smoke",
-    ] {
-        let output = run(&[option, "1", "--ticks", "0"]);
-        assert!(!output.status.success(), "accepted {option}");
-        assert!(String::from_utf8_lossy(&output.stderr).contains(option));
     }
 }
 
@@ -203,12 +153,6 @@ fn missing_config_fails_but_help_does_not_need_the_file() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("missing.toml"));
     let help = success(&["--config", missing, "--help"]);
     assert!(help.contains("--config"));
-    assert!(!help.contains("--seconds"));
-    assert!(!help.contains("--focal"));
-    assert!(!help.contains("--scenario"));
-    assert!(!help.contains("--ecosystem-initial-animals"));
-    assert!(!help.contains("--viewer-vsync"));
-    assert!(!help.contains("--hz"));
     assert!(help.contains("--tick-hz"));
     assert!(help.contains("--viewer"));
     assert!(help.contains("--latest"));

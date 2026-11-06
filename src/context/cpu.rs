@@ -15,11 +15,4 @@ impl<R: Rng + Send> Context for Cpu<R> {
     fn rng(&mut self) -> &mut Self::Rng {
         &mut self.rng
     }
-
-    type DType = ();
-    type Device = ();
-
-    fn dtype(&self) -> Self::DType {}
-
-    fn device(&self) -> Self::Device {}
 }
