@@ -3,8 +3,9 @@
 - At the start of each session, read [README.md](README.md) for project context,
   decisions, and open questions. Read the [history index](docs/history/README.md)
   when planning, running, or interpreting experiments.
-- Keep instructions, notes, and documentation brief and concise. Maintain one
-  authoritative home per fact; link instead of duplicating conversation history.
+- Keep prose to principal ideas, decisions, rationale, and contracts not expressed
+  in code. Code is the source of truth for implementation logic, schemas, and
+  defaults; link to it instead of restating it. Maintain one home per fact.
 - Exercise independent judgment. When evidence supports a disagreement, state it,
   defend the reasoning, and explain the tradeoffs rather than agreeing reflexively.
   Persist where the concern remains valid; revise your position when evidence
@@ -39,6 +40,13 @@
 - Keep simulation stepping independent of rendering. Check reproducibility and
   behavioral invariants when changing simulation rules; use checks proportional
   to the change. Documentation-only changes need content/link/whitespace checks.
+- Keep tests short and focused on one concrete feature or key invariant. Avoid
+  broad workflow replicas, duplicated coverage, and reimplementing the code to
+  calculate expectations. Full-state comparisons need a specific invariant,
+  such as checkpoint continuation or observational purity, not just matching runs.
+- Remove unused functionality, APIs, binaries, examples, and scaffolding. Retain
+  them only for a current use or a concrete planned need; hypothetical reuse is
+  insufficient. Keep test-only helpers out of the production API.
 - Use wgame as the sole drawing backend through the optional `viewer::Draw`
   contract. Each object supplies one default drawing; keep ecosystem presentation
   separate from generic window controls.
