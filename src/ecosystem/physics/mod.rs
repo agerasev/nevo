@@ -1,4 +1,4 @@
-//! Synchronous disk dynamics with bounded, adaptive `phy` integration.
+//! Synchronous disk dynamics with fixed-step `phy` RK4 integration.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -18,7 +18,6 @@ pub(super) struct Step {
     pub contacts: BTreeSet<(usize, usize)>,
 }
 
-#[derive(Clone)]
 struct Particle {
     position: Var<DVec2, Integrator>,
     velocity: Var<DVec2, Integrator>,
@@ -118,15 +117,12 @@ impl Particle {
     }
 }
 
-#[derive(Clone)]
 struct Scene<'a> {
     particles: Vec<Particle>,
     animals: usize,
     obstacles: &'a [Obstacle],
     parameters: Parameters,
     contacts: BTreeSet<(usize, usize)>,
-    proposed_step: f64,
-    required_step: f64,
     error: Option<String>,
 }
 
@@ -283,90 +279,6 @@ impl Scene<'_> {
                 "non-finite physical derivative"
             );
         }
-        self.limit_contact_travel()?;
-        Ok(())
-    }
-
-    /// Only potentially interacting disks constrain travel. In particular, a
-    /// tiny coasting disk in open space does not require tiny global time steps.
-    fn limit_contact_travel(&mut self) -> Result<()> {
-        struct Swept {
-            index: usize,
-            min: DVec2,
-            max: DVec2,
-            position: DVec2,
-            velocity: DVec2,
-            acceleration: DVec2,
-            radius: f64,
-            moving: bool,
-        }
-
-        let step = self.proposed_step;
-        let mut swept = Vec::with_capacity(self.particles.len() + self.obstacles.len());
-        for (index, particle) in self.particles.iter().enumerate() {
-            if particle.mass == 0.0 {
-                continue;
-            }
-            let extent = DVec2::splat(particle.radius)
-                + particle.velocity.abs() * step
-                + (0.5 * step) * (particle.velocity.deriv.abs() * step);
-            swept.push(Swept {
-                index,
-                min: *particle.position - extent,
-                max: *particle.position + extent,
-                position: *particle.position,
-                velocity: *particle.velocity,
-                acceleration: particle.velocity.deriv,
-                radius: particle.radius,
-                moving: true,
-            });
-        }
-        for (index, obstacle) in self.obstacles.iter().enumerate() {
-            swept.push(Swept {
-                index: self.particles.len() + index,
-                min: obstacle.position - DVec2::splat(obstacle.radius),
-                max: obstacle.position + DVec2::splat(obstacle.radius),
-                position: obstacle.position,
-                velocity: DVec2::ZERO,
-                acceleration: DVec2::ZERO,
-                radius: obstacle.radius,
-                moving: false,
-            });
-        }
-        ensure!(
-            swept
-                .iter()
-                .all(|disk| disk.min.is_finite() && disk.max.is_finite()),
-            "non-finite swept disk bounds"
-        );
-        swept.sort_unstable_by(|a, b| {
-            a.min
-                .x
-                .total_cmp(&b.min.x)
-                .then_with(|| a.index.cmp(&b.index))
-        });
-        for (index, a) in swept.iter().enumerate() {
-            for b in &swept[index + 1..] {
-                if b.min.x > a.max.x {
-                    break;
-                }
-                if (!a.moving && !b.moving) || b.min.y > a.max.y || a.min.y > b.max.y {
-                    continue;
-                }
-                let distance = length(b.position - a.position).max(a.radius + b.radius);
-                let speed = length(b.velocity - a.velocity);
-                let acceleration = length(b.acceleration - a.acceleration);
-                ensure!(
-                    distance.is_finite() && speed.is_finite() && acceleration.is_finite(),
-                    "non-finite relative disk motion"
-                );
-                self.required_step = self.required_step.min(travel_step(
-                    speed,
-                    acceleration,
-                    self.parameters.physics.max_displacement_fraction * distance,
-                ));
-            }
-        }
         Ok(())
     }
 }
@@ -416,17 +328,6 @@ fn cell(position: DVec2, width: f64) -> Result<(i64, i64)> {
         "physical spatial index is out of range"
     );
     Ok((coordinates.x as i64, coordinates.y as i64))
-}
-
-/// Solve speed*t + acceleration*t²/2 <= distance without subtractive cancellation.
-fn travel_step(speed: f64, acceleration: f64, distance: f64) -> f64 {
-    let denominator = 0.5 * speed
-        + 0.5 * speed.hypot(std::f64::consts::SQRT_2 * acceleration.sqrt() * distance.sqrt());
-    if denominator == 0.0 {
-        f64::INFINITY
-    } else {
-        distance / denominator
-    }
 }
 
 pub(super) fn advance(
@@ -492,65 +393,21 @@ pub(super) fn advance(
         obstacles,
         parameters,
         contacts: BTreeSet::new(),
-        proposed_step: 0.0,
-        required_step: f64::INFINITY,
         error: None,
     };
-    let drag = parameters
-        .body
-        .linear_drag
-        .max(parameters.body.angular_drag)
-        .max(parameters.plant.linear_drag)
-        .max(parameters.plant.angular_drag);
-    let contact_rate = physics.contact_frequency * (2.0 * physics.contact_damping).max(1.0);
-    let nominal = (physics.time_step / f64::from(physics.substeps))
-        .min(0.25 / contact_rate)
-        .min(0.25 / drag);
-    let mut remaining = physics.time_step;
-    let mut attempts = 0;
-    let mut retry_limit = f64::INFINITY;
-    while remaining > 0.0 {
-        ensure!(
-            attempts < physics.max_substeps,
-            "physics exceeded max_substeps"
-        );
-        attempts += 1;
-        let mut step = nominal.min(remaining).min(retry_limit);
-        // Absorb only roundoff-sized remainders, avoiding an extra counted step.
-        if remaining <= step * (1.0 + 64.0 * f64::EPSILON) {
-            step = remaining;
-        }
-        ensure!(
-            step.is_finite() && step > 0.0 && remaining - step < remaining,
-            "physics requires an unrepresentable substep"
-        );
-        let mut trial = scene.clone();
-        trial.proposed_step = step;
-        trial.required_step = f64::INFINITY;
-        Integrator::default().solve_step(&mut trial, step);
-        if let Some(error) = &trial.error {
+    let step = physics.time_step / f64::from(physics.substeps);
+    for _ in 0..physics.substeps {
+        Integrator::default().solve_step(&mut scene, step);
+        if let Some(error) = &scene.error {
             anyhow::bail!("{error}");
         }
-        for particle in &trial.particles {
+        for particle in &mut scene.particles {
             particle.validate()?;
-        }
-        if step > trial.required_step * (1.0 + 1e-12) {
-            retry_limit = (step * 0.5).min(trial.required_step * 0.9);
-            continue;
-        }
-        for particle in &mut trial.particles {
             *particle.heading = body::normalize_heading(*particle.heading);
         }
-        scene = trial;
-        remaining = if step >= remaining {
-            0.0
-        } else {
-            remaining - step
-        };
-        retry_limit = f64::INFINITY;
     }
 
-    // No input state is touched until every bounded substep has succeeded.
+    // Publish only after every fixed substep has succeeded.
     let motions = scene.particles[..animals.len()]
         .iter()
         .map(Particle::motion)

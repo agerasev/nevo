@@ -29,10 +29,10 @@ The [shared dynamics](../src/ecosystem/physics/mod.rs) use `phy`'s `f64` RK4
 integrator and `geom2`'s disk contact geometry. Contacts between moving disks,
 arena walls, and fixed infinite-mass obstacles use non-attractive normal spring
 and damping forces. Contacts are compliant and allow temporary overlap. Reduced
-mass scales disk-pair response. Adaptive bounded
+mass scales disk-pair response. Fixed RK4
 substeps resolve motion and contacts, while minds and ecological events run once
 per tick. Spatial bins accelerate pair lookup without discretizing positions or
-contact geometry. Movement budgets and integration limits are described in
+contact geometry. Movement budgets and timestep settings are described in
 [configuration](configuration.md).
 
 [Assimilation](../src/ecosystem/feeding.rs) joins the edible fraction of a plant

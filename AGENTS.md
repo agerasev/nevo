@@ -6,6 +6,8 @@
 - Keep prose to principal ideas, decisions, rationale, and contracts not expressed
   in code. Code is the source of truth for implementation logic, schemas, and
   defaults; link to it instead of restating it. Maintain one home per fact.
+- Follow KISS: use the simplest implementation that meets the request. Do not
+  invent extra mechanisms, abstractions, or complications unless requested.
 - Exercise independent judgment. When evidence supports a disagreement, state it,
   defend the reasoning, and explain the tradeoffs rather than agreeing reflexively.
   Persist where the concern remains valid; revise your position when evidence

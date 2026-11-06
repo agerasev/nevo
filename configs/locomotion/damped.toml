@@ -5,8 +5,6 @@ substeps = 4
 mass_per_energy = 1.0
 contact_frequency = 20.0
 contact_damping = 1.0
-max_substeps = 256
-max_displacement_fraction = 0.25
 max_placement_attempts = 1024
 
 [ecosystem.animal.body]

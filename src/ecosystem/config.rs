@@ -205,7 +205,7 @@ impl WorldConfig {
 pub struct PhysicsConfig {
     /// Physical time per ecological tick; viewer pacing does not change it.
     pub time_step: f64,
-    /// Minimum integration steps; adaptive contact resolution may subdivide further.
+    /// Fixed RK4 steps per ecological tick, each lasting time_step / substeps.
     pub substeps: u32,
     /// Common inertial mass per unit of stored animal or plant energy.
     pub mass_per_energy: f64,
@@ -213,10 +213,6 @@ pub struct PhysicsConfig {
     pub contact_frequency: f64,
     /// Contact damping ratio; one is critical damping for an isolated pair.
     pub contact_damping: f64,
-    /// Hard bound on accepted and rejected integration attempts per ecological tick.
-    pub max_substeps: u32,
-    /// Maximum relative travel near possible contacts, as a fraction of pair size/separation.
-    pub max_displacement_fraction: f64,
     /// Bounded random placement attempts for each immigrant or fixed-count plant.
     pub max_placement_attempts: u32,
 }
@@ -228,8 +224,6 @@ impl Default for PhysicsConfig {
             mass_per_energy: 1.0,
             contact_frequency: 20.0,
             contact_damping: 1.0,
-            max_substeps: 256,
-            max_displacement_fraction: 0.25,
             max_placement_attempts: 1024,
         }
     }
@@ -355,18 +349,6 @@ impl Parameters {
             2.0 * self.physics.contact_damping * self.physics.contact_frequency,
             "contact damping rate",
         )?;
-        positive(
-            self.physics.max_displacement_fraction,
-            "physics max_displacement_fraction",
-        )?;
-        ensure!(
-            self.physics.max_displacement_fraction <= 0.5,
-            "max_displacement_fraction must not exceed 0.5"
-        );
-        ensure!(
-            self.physics.max_substeps >= self.physics.substeps,
-            "max_substeps must be at least substeps"
-        );
         ensure!(
             self.physics.max_placement_attempts > 0,
             "max_placement_attempts must be positive"

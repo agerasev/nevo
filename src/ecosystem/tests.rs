@@ -1247,8 +1247,6 @@ fn invalid_physics_and_conflicting_restore_parameters_are_rejected() {
         |c| c.physics.mass_per_energy = f64::NAN,
         |c| c.physics.contact_frequency = 0.0,
         |c| c.physics.contact_damping = -1.0,
-        |c| c.physics.max_substeps = 0,
-        |c| c.physics.max_displacement_fraction = 0.0,
         |c| c.physics.max_placement_attempts = 0,
         |c| c.animal.body.max_acceleration = f64::INFINITY,
         |c| c.animal.body.max_angular_acceleration = -1.0,

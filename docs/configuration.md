@@ -102,8 +102,9 @@ See the
 
 Physical `time_step` advances shared dynamics and motor energy expenditure. Upkeep,
 plant growth, replenishment, and reproduction remain per ecological tick;
-adaptive substeps subdivide physics only. `max_substeps` bounds integration work;
-an unresolved step fails instead of silently relaxing that bound. `tick_hz`
+`substeps` divides this interval into exactly that many fixed RK4 steps. Each
+step evaluates forces four times. Choose a smaller step when increasing contact
+stiffness or speed; integration does not automatically refine it. `tick_hz`
 changes wall-clock pacing only.
 
 Seed and model settings are immutable on [resume](persistence.md). Runtime
