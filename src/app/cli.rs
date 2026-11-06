@@ -19,7 +19,7 @@ pub struct Cli {
     pub latest: bool,
 
     /// Load TOML files in order; later files override earlier ones, then CLI wins.
-    #[arg(long)]
+    #[arg(long, short)]
     pub config: Vec<PathBuf>,
 
     /// Override the master seed; new runs draw one from entropy when unspecified.

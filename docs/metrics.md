@@ -12,7 +12,7 @@ Defaults collect animal/plant counts, event totals and rates, and animal/plant
 energy mean/min/max. Brain diagnostics, genetic diversity, movement distance,
 and other detailed reductions are opt-in. `[ecosystem.metrics] enabled = false`
 disables all collectors, including nested brain diagnostics, and log output.
-`window_ticks` defaults to 100 and must be positive when enabled. Windows are
+`window_ticks` defaults to 1000 and must be positive when enabled. Windows are
 consecutive, non-overlapping tick intervals `(start_tick, end_tick]`. Each summary
 gives its actual bounds, completed tick count (`samples`), and whether the window
 is complete.
@@ -86,7 +86,7 @@ They default to false except energy's `mean`, `min`, and `max`. For example:
 ```toml
 [ecosystem.metrics]
 enabled = true
-window_ticks = 100
+window_ticks = 1000
 population = true
 event_rates = true
 genetic_diversity = true

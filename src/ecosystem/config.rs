@@ -375,7 +375,7 @@ impl Default for MetricsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            window_ticks: 100,
+            window_ticks: 1000,
             population: true,
             event_rates: true,
             genetic_diversity: false,

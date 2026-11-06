@@ -112,9 +112,9 @@ fn checkpoint_recovers_missing_config_but_existing_file_takes_precedence() {
 fn each_cost_preset_replaces_the_complete_energy_budget() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("configs");
     let presets = [
-        ("upkeep-only.toml", 0.005, 0.0, 0.0),
-        ("movement-flat.toml", 0.0005, 0.00045, 0.0),
-        ("movement-cost.toml", 0.0005, 0.0009, 1.0),
+        ("movement/upkeep-only.toml", 0.005, 0.0, 0.0),
+        ("movement/flat.toml", 0.0005, 0.00045, 0.0),
+        ("movement/cost.toml", 0.0005, 0.003, 1.0),
     ];
     for (first, ..) in presets {
         for (last, upkeep, cost, power) in presets {

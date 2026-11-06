@@ -110,15 +110,15 @@ so the last cost preset wins without retaining part of an earlier selection.
 
 | Preset | Upkeep | Movement coefficient | Energy power |
 | --- | ---: | ---: | ---: |
-| [Upkeep only](../configs/upkeep-only.toml), also the default | 0.005 | 0 | 0 |
-| [Flat movement](../configs/movement-flat.toml) | 0.0005 | 0.00045 | 0 |
-| [Energy-proportional movement](../configs/movement-cost.toml) | 0.0005 | 0.0009 | 1 |
+| [Upkeep only](../configs/movement/upkeep-only.toml), also the default | 0.005 | 0 | 0 |
+| [Flat movement](../configs/movement/flat.toml) | 0.0005 | 0.00045 | 0 |
+| [Energy-proportional movement](../configs/movement/cost.toml) | 0.0005 | 0.003 | 1 |
 
-At energy `0.5` and maximum displacement `10`, both movement presets cost `0.005`
-per tick, including upkeep. Other nonnegative powers are also configurable.
+At energy `0.5` and maximum displacement `10`, the flat preset costs `0.005`
+and the energy-proportional preset `0.0155` per tick, including upkeep. Other nonnegative powers are also configurable.
 
 ```sh
-cargo run --locked -- --config configs/baseline.toml --config configs/movement-cost.toml --config configs/metrics.toml --config configs/viewer.toml
+cargo run --locked -- --config configs/baseline.toml --config configs/movement/cost.toml --config configs/metrics.toml --config configs/viewer.toml
 ```
 
 `movement_time_step` scales displacement and hence distance-based movement cost:

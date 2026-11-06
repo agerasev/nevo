@@ -63,8 +63,8 @@ genetic initialization/mutation are configurable. Initial and later immigrants
 use the same energy, placement, and genome initialization settings. The initial
 population and immigration floor only decide how many animals to admit.
 Energy uses a default reproduction threshold of `1.0`. Compose the
-[energy-proportional](configs/movement-cost.toml), [flat movement](configs/movement-flat.toml),
-or [upkeep-only](configs/upkeep-only.toml) cost preset; see the [units and cost rules](docs/configuration.md).
+[energy-proportional](configs/movement/cost.toml), [flat movement](configs/movement/flat.toml),
+or [upkeep-only](configs/movement/upkeep-only.toml) cost preset; see the [units and cost rules](docs/configuration.md).
 
 The viewer runs independently of simulation speed. Its preset enables VSync without
 slowing simulation; there is no additional rendering timer.

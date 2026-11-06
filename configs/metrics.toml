@@ -2,7 +2,7 @@
 # Compose with any simulation preset. Statistics restart after resume.
 [ecosystem.metrics]
 enabled = true
-window_ticks = 100
+window_ticks = 10000
 population = true
 event_rates = true
 genetic_diversity = true

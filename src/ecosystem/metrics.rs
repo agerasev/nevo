@@ -85,7 +85,7 @@ impl Default for Cache {
                 population: false,
                 event_rates: false,
                 genetic_diversity: false,
-                window_ticks: 100,
+                window_ticks: 1000,
             },
             animal_config: AnimalMetricsConfig::default(),
             body_config: BodyMetricsConfig {
