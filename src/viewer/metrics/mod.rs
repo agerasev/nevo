@@ -35,8 +35,6 @@ pub(super) struct Panel {
     fit_when_ready: bool,
     reset_plot: bool,
     #[cfg(test)]
-    plot_updates: usize,
-    #[cfg(test)]
     plot_rect: Option<egui::Rect>,
     #[cfg(test)]
     plot_bounds: Option<[f64; 2]>,
@@ -59,8 +57,6 @@ impl Panel {
             pixels: 1024,
             fit_when_ready: true,
             reset_plot: false,
-            #[cfg(test)]
-            plot_updates: 0,
             #[cfg(test)]
             plot_rect: None,
             #[cfg(test)]
@@ -104,10 +100,6 @@ impl Panel {
         };
         if changed || self.plotted.as_ref() != Some(&query) {
             self.segments = history.query(&query.metric, query.range, query.pixels);
-            #[cfg(test)]
-            {
-                self.plot_updates += 1;
-            }
             if query.range.is_none() && (self.follow || self.fit_when_ready) {
                 self.reset_plot = true;
                 self.fit_when_ready = false;

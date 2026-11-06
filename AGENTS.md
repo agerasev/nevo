@@ -40,9 +40,11 @@
 - Keep simulation stepping independent of rendering. Check reproducibility and
   behavioral invariants when changing simulation rules; use checks proportional
   to the change. Documentation-only changes need content/link/whitespace checks.
-- Keep tests short and focused on one concrete feature or key invariant. Avoid
-  broad workflow replicas, duplicated coverage, and reimplementing the code to
-  calculate expectations. Full-state comparisons need a specific invariant,
+- Keep tests short and focused on one concrete feature or key invariant. Give each
+  behavior one primary test at the narrowest useful layer; reserve process/UI tests
+  for behavior specific to those boundaries. Avoid broad workflow replicas,
+  duplicated coverage, and reimplementing code to calculate expectations.
+  Full-state comparisons need a specific invariant,
   such as checkpoint continuation or observational purity, not just matching runs.
 - Remove unused functionality, APIs, binaries, examples, and scaffolding. Retain
   them only for a current use or a concrete planned need; hypothetical reuse is

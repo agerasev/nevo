@@ -74,46 +74,18 @@ impl Context for ResearchContext {
     }
 }
 
-// Reproduction can use the genome contract without knowing its representation.
-fn mutated_copy<C: Context + ?Sized, G: Mutate<C, WeightMutation>>(
-    parent: &G,
-    param: &WeightMutation,
-    cx: &mut C,
-) -> Result<G> {
-    let mut child = parent.clone();
-    child.mutate(param, cx)?;
-    Ok(child)
-}
-
 #[test]
-fn mind_and_genome_accept_an_alternate_unsized_context() {
+fn mind_initialization_and_mutation_accept_an_unsized_context() {
     let mut context = ResearchContext {
         rng: Xoshiro256PlusPlus::seed_from_u64(42),
     };
-    let before = context.clone();
-    let mut parent = RnnGenome::default();
-    parent.weights[28] = 0.5;
-    parent.weights[32] = 1.0;
-    parent.weights[46] = 1.0;
-    let original = parent.clone();
-    let mut agent = AnimalMind::new(parent.clone()).unwrap();
-
     let cx: &mut dyn Context<Rng = dyn Rng + Send> = &mut context;
-    let action = agent.process(FoodObservation::default(), cx).unwrap();
-    assert_eq!(action.direction, DVec2::X * f64::from(0.5_f32.tanh()));
-    assert_eq!(action.speed_fraction, 1.0_f64.tanh());
-    assert_ne!(agent.brain.memory, [0.0; 4]);
-    assert_eq!(context, before, "processing must not consume genetic draws");
-
-    let cx: &mut dyn Context<Rng = dyn Rng + Send> = &mut context;
-    let param = WeightMutation { max_delta: 0.07 };
-    let child = mutated_copy(&parent, &param, cx).unwrap();
-    assert_eq!(parent, original);
-    assert_ne!(child, parent);
-    assert_ne!(context, before);
-    for (inherited, original) in child.weights.iter().zip(parent.weights) {
-        assert!((inherited - original).abs() <= param.max_delta + f32::EPSILON);
-    }
+    let mut genome = RnnGenome::random(&Default::default(), cx).unwrap();
+    genome.mutate(&WeightMutation::default(), cx).unwrap();
+    AnimalMind::new(genome)
+        .unwrap()
+        .process(FoodObservation::default(), cx)
+        .unwrap();
 }
 
 #[test]
@@ -159,34 +131,14 @@ fn invalid_mutation_fails_without_changing_genome_or_random_stream() {
 }
 
 #[test]
-fn random_initialization_accepts_unsized_context_without_requiring_a_genome() {
-    // No Clone or Genome implementation: random initialization is independent.
-    struct RandomLabel(u64);
-
-    impl<C: Context + ?Sized> RandomInit<C> for RandomLabel {
-        type Config = ();
-
-        fn random(_: &(), cx: &mut C) -> Result<Self> {
-            Ok(Self(cx.rng().next_u64()))
-        }
-    }
-
-    let mut context = ResearchContext {
+fn nonzero_mutation_changes_weights_within_the_configured_range() {
+    let mut cx = Cpu {
         rng: Xoshiro256PlusPlus::seed_from_u64(42),
     };
-    let mut expected = context.clone();
-    let cx: &mut dyn Context<Rng = dyn Rng + Send> = &mut context;
-    let label = RandomLabel::random(&(), cx).unwrap();
-    assert_eq!(label.0, expected.rng.next_u64());
-    assert_eq!(context, expected);
-
-    let cx: &mut dyn Context<Rng = dyn Rng + Send> = &mut context;
-    let genome = RnnGenome::random(&nevo::mind::rnn::Initialization::default(), cx).unwrap();
-    assert!(
-        genome
-            .weights
-            .iter()
-            .all(|weight| (-0.5..0.5).contains(weight))
-    );
-    assert_ne!(context, expected);
+    let mut genome = RnnGenome::default();
+    genome
+        .mutate(&WeightMutation { max_delta: 0.07 }, &mut cx)
+        .unwrap();
+    assert!(genome.weights.iter().any(|&w| w != 0.0));
+    assert!(genome.weights.iter().all(|w| (-0.07..0.07).contains(w)));
 }

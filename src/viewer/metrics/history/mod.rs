@@ -320,4 +320,4 @@ fn collect_scalars(value: &Value, path: &str, values: &mut BTreeMap<String, f64>
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

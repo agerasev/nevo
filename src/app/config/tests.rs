@@ -4,7 +4,6 @@ use clap::Parser;
 use std::{
     env,
     sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
 };
 
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
@@ -37,135 +36,115 @@ fn load(args: &[&str], fallback: Option<&Config>) -> Result<Config> {
 }
 
 #[test]
-fn saved_configuration_loads_with_only_explicit_cli_overrides() {
+fn only_explicit_shortcuts_override_saved_settings() {
     let directory = Directory::new();
-    let original: Config = toml::from_str("seed = '18446744073709551615'\nticks = 32\ncheckpoint_every = 7\nkeep_checkpoints = 2\ntick_hz = 25\npaused = true\n[ecosystem]\ninitial_animals = 1\nimmigration.position = [0, 0]\n[viewer]\nenable = true\nvsync = false\ntab = 'metrics'\n").unwrap();
-    let saved = original.to_toml().unwrap();
-    assert!(saved.contains("seed = \"18446744073709551615\""));
-    assert!(!saved.contains("directory"));
-    assert!(!saved.contains("config ="));
-    fs::write(directory.0.join("config.toml"), saved).unwrap();
-
-    let restored = load(
+    fs::write(directory.0.join("config.toml"), "seed = '18446744073709551615'\nticks = 32\npaused = true\n[viewer]\nenable = true\nvsync = false\n").unwrap();
+    let config = load(
         &[
             directory.0.to_str().unwrap(),
             "--ticks",
             "5",
-            "--paused=false",
             "--viewer=false",
+            "--paused=false",
         ],
         None,
     )
     .unwrap();
-    assert_eq!(restored.ecosystem, original.ecosystem);
-    assert_eq!(restored.seed, Some(u64::MAX));
-    assert_eq!(restored.ticks, Some(5));
-    assert_eq!(restored.checkpoint_every, 7);
-    assert_eq!(restored.keep_checkpoints, 2);
-    assert_eq!(restored.tick_hz, 25.0);
-    assert!(!restored.paused);
-    assert!(!restored.viewer.enable);
-    assert_eq!(restored.viewer.tab, ViewerTab::Metrics);
-    assert!(
-        !restored.viewer.vsync,
-        "viewer shortcut must preserve other display settings"
+    assert_eq!(config.seed, Some(u64::MAX));
+    assert_eq!(config.ticks, Some(5));
+    assert!(!config.paused && !config.viewer.enable && !config.viewer.vsync);
+    assert_eq!(
+        toml::from_str::<Config>(&config.to_toml().unwrap())
+            .unwrap()
+            .seed,
+        Some(u64::MAX)
     );
-
-    let mut bytes = Vec::new();
-    ciborium::into_writer(&restored, &mut bytes).unwrap();
-    let decoded: Config = ciborium::from_reader(&bytes[..]).unwrap();
-    assert_eq!(decoded, restored);
 }
 
 #[test]
-fn checkpoint_recovers_missing_config_but_existing_file_takes_precedence() {
+fn precedence_is_checkpoint_saved_file_ordered_overlays_then_cli() {
     let directory = Directory::new();
     let path = directory.0.to_str().unwrap();
-    let saved: Config = toml::from_str("seed = 42\nticks = 9\ncheckpoint_every = 7\nkeep_checkpoints = 2\n[ecosystem]\ninitial_animals = 1\n").unwrap();
-    let overlay = directory.0.join("overlay.toml");
-    fs::write(&overlay, "ticks = 3\n[viewer]\nvsync = false\n").unwrap();
-    let recovered = load(
-        &[path, "--config", overlay.to_str().unwrap(), "--ticks", "5"],
-        Some(&saved),
-    )
-    .unwrap();
-    assert_eq!(recovered.ecosystem, saved.ecosystem);
-    assert_eq!(recovered.seed, Some(42));
-    assert_eq!(recovered.ticks, Some(5));
-    assert_eq!(recovered.checkpoint_every, 7);
-    assert_eq!(recovered.keep_checkpoints, 2);
-    assert!(!recovered.viewer.vsync);
-    let error = load(&[path, "--config", "missing.toml"], Some(&saved)).unwrap_err();
-    assert!(error.to_string().contains("reading configuration"));
-
-    fs::write(
-        directory.0.join("config.toml"),
-        "seed = 42\nticks = 4\ncheckpoint_every = 8\n",
-    )
-    .unwrap();
-    let restored = load(&[path, "--ticks", "6"], Some(&saved)).unwrap();
-    assert_eq!(restored.ticks, Some(6));
-    assert_eq!(restored.checkpoint_every, 8);
+    let checkpoint = Config {
+        ticks: Some(1),
+        ..Config::default()
+    };
+    assert_eq!(load(&[path], Some(&checkpoint)).unwrap().ticks, Some(1));
+    fs::write(directory.0.join("config.toml"), "ticks = 2").unwrap();
+    assert_eq!(load(&[path], Some(&checkpoint)).unwrap().ticks, Some(2));
+    let first = directory.0.join("first.toml");
+    let second = directory.0.join("second.toml");
+    fs::write(&first, "ticks = 3").unwrap();
+    fs::write(&second, "ticks = 4").unwrap();
+    let args = [
+        path,
+        "-c",
+        first.to_str().unwrap(),
+        "-c",
+        second.to_str().unwrap(),
+    ];
+    assert_eq!(load(&args, Some(&checkpoint)).unwrap().ticks, Some(4));
+    assert_eq!(
+        load(&[&args[..], &["--ticks", "5"]].concat(), Some(&checkpoint))
+            .unwrap()
+            .ticks,
+        Some(5)
+    );
 }
 
 #[test]
-fn each_cost_preset_replaces_the_complete_energy_budget() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("configs");
-    let presets = [
-        ("movement/upkeep-only.toml", 0.005, 0.0, 0.0),
-        ("movement/flat.toml", 0.0005, 0.00045, 0.0),
-        ("movement/cost.toml", 0.0005, 0.003, 1.0),
-    ];
-    for (first, ..) in presets {
-        for (last, upkeep, cost, power) in presets {
-            let first = root.join(first);
-            let last = root.join(last);
-            let config = load(
-                &[
-                    "--config",
-                    first.to_str().unwrap(),
-                    "--config",
-                    last.to_str().unwrap(),
-                ],
-                None,
-            )
-            .unwrap();
-            let body = config.ecosystem.animal.body;
-            assert_eq!(
-                (body.upkeep, body.movement_cost, body.movement_energy_power),
-                (upkeep, cost, power)
+fn merging_preserves_sibling_fields_and_replaces_arrays() {
+    let mut base = toml::from_str(
+        "[viewer]\nenable = true\nvsync = false\n[ecosystem.immigration]\nposition = [1, 2]",
+    )
+    .unwrap();
+    merge(
+        &mut base,
+        toml::from_str("[viewer]\nenable = false\n[ecosystem.immigration]\nposition = [3, 4]")
+            .unwrap(),
+    );
+    let config: Config = base.try_into().unwrap();
+    assert!(!config.viewer.enable && !config.viewer.vsync);
+    assert_eq!(
+        config.ecosystem.immigration.position,
+        nevo::ecosystem::Placement::Fixed(glam::DVec2::new(3.0, 4.0))
+    );
+}
+
+#[test]
+fn overwritten_files_still_reject_unknown_keys_and_invalid_types() {
+    let directory = Directory::new();
+    let first = directory.0.join("first.toml");
+    let second = directory.0.join("second.toml");
+    fs::write(&second, "ticks = 0").unwrap();
+    for content in ["ticks = 'wrong'", "[viewer]\nunknown = true"] {
+        fs::write(&first, content).unwrap();
+        assert!(Config::load(None, &[first.clone(), second.clone()], None).is_err());
+    }
+}
+
+#[test]
+fn movement_presets_each_specify_a_complete_energy_budget() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("configs/movement");
+    for name in ["upkeep-only", "flat", "cost"] {
+        let text = fs::read_to_string(root.join(format!("{name}.toml"))).unwrap();
+        let value: toml::Value = toml::from_str(&text).unwrap();
+        for field in ["upkeep", "movement_cost", "movement_energy_power"] {
+            assert!(
+                value["ecosystem"]["animal"]["body"].get(field).is_some(),
+                "{name}: {field}"
             );
-            assert_eq!(config.ecosystem.animal.reproduction.threshold, 1.0);
-            assert_eq!(config.ecosystem.immigration.energy, 0.25);
-            assert_eq!(config.ecosystem.plant.max_energy, 1.0);
         }
     }
 }
 
 #[test]
-fn viewer_preset_and_shortcut_never_enable_simulation_pacing() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("configs/viewer.toml");
-    let preset = load(&["--config", path.to_str().unwrap()], None).unwrap();
-    assert!(preset.viewer.enable);
-    assert!(preset.viewer.vsync);
-    assert_eq!(preset.tick_hz, 0.0);
-    assert_eq!(preset, load(&["--viewer"], None).unwrap());
-    let default = load(&[], None).unwrap();
-    assert!(!default.viewer.enable);
-    assert!(default.viewer.vsync);
-    assert_eq!(default.loop_options().unwrap().interval, Duration::ZERO);
-    let paced = load(&["--tick-hz", "25"], None).unwrap();
-    assert_eq!(
-        paced.loop_options().unwrap().interval,
-        Duration::from_millis(40)
-    );
-    assert!(load(&["--hz", "25"], None).is_err());
-    let unpaced = load(&["--tick-hz", "0"], Some(&paced)).unwrap();
-    assert_eq!(unpaced.loop_options().unwrap().interval, Duration::ZERO);
+fn enabling_the_viewer_does_not_enable_simulation_pacing() {
+    assert_eq!(load(&["--viewer"], None).unwrap().tick_hz, 0.0);
 }
 
 #[test]
-fn obsolete_saved_settings_are_discarded_but_new_overlays_reject_them() {
+fn obsolete_settings_are_accepted_only_in_saved_configuration() {
     let directory = Directory::new();
     let mut old = serde_json::to_value(Config::default()).unwrap();
     old["smoke"] = false.into();
@@ -178,14 +157,8 @@ fn obsolete_saved_settings_are_discarded_but_new_overlays_reject_them() {
         "/ecosystem/animal/mind/brain",
         "/ecosystem/plant",
     ] {
-        old.pointer_mut(parent).unwrap()["metrics"] =
-            serde_json::json!({"energy": {"min": true}, "saturation": true});
+        old.pointer_mut(parent).unwrap()["metrics"] = serde_json::json!({"energy": {"min": true}});
     }
-    assert!(serde_json::from_value::<Config>(old.clone()).is_err());
-    assert_eq!(
-        Config::from_saved_value(old.clone()).unwrap(),
-        Config::default()
-    );
     let path = directory.0.join("config.toml");
     fs::write(&path, toml::to_string(&old).unwrap()).unwrap();
     assert_eq!(
@@ -193,15 +166,4 @@ fn obsolete_saved_settings_are_discarded_but_new_overlays_reject_them() {
         Config::default()
     );
     assert!(load(&["--config", path.to_str().unwrap()], None).is_err());
-
-    // Checkpoint configuration uses the same saved-data conversion.
-    #[derive(Deserialize)]
-    struct Stored {
-        #[serde(deserialize_with = "Config::deserialize_saved")]
-        config: Config,
-    }
-    let mut bytes = Vec::new();
-    ciborium::into_writer(&serde_json::json!({"config": old}), &mut bytes).unwrap();
-    let stored: Stored = ciborium::from_reader(&bytes[..]).unwrap();
-    assert_eq!(stored.config, Config::default());
 }

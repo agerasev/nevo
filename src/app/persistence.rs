@@ -415,4 +415,23 @@ mod tests {
         assert!(!path.join(".checkpoint.cbor.tmp").exists());
         fs::remove_dir_all(path).unwrap();
     }
+    #[test]
+    fn latest_uses_save_time_and_ignores_unfinished_files() {
+        let root = std::env::temp_dir().join(format!("nevo-latest-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        assert!(latest_run(&root).is_err());
+        for (name, seconds) in [("z-older", 100), ("a-newer", 200)] {
+            let checkpoints = root.join(name).join("checkpoints");
+            fs::create_dir_all(&checkpoints).unwrap();
+            File::create(checkpoints.join("00000000000000000001.cbor"))
+                .unwrap()
+                .set_modified(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
+                .unwrap();
+        }
+        let unfinished = root.join("unfinished/checkpoints");
+        fs::create_dir_all(&unfinished).unwrap();
+        fs::write(unfinished.join(".00000000000000000099.cbor.tmp"), "partial").unwrap();
+        assert_eq!(latest_run(&root).unwrap(), root.join("a-newer"));
+        fs::remove_dir_all(root).unwrap();
+    }
 }

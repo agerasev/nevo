@@ -3,7 +3,6 @@ mod support;
 
 use std::{
     fs,
-    io::Write,
     path::{Path, PathBuf},
     process::{Child, Command, Output, Stdio},
     sync::atomic::{AtomicUsize, Ordering},
@@ -78,11 +77,6 @@ impl Directory {
         read_checkpoint(self.checkpoints(run).last().expect("checkpoint exists"))
     }
 
-    fn config(&self, run: &str) -> toml::Value {
-        let text = fs::read_to_string(self.0.join(run).join("config.toml")).unwrap();
-        toml::from_str(&text).unwrap()
-    }
-
     fn metrics_path(&self, run: &str) -> PathBuf {
         self.0
             .join(run)
@@ -153,15 +147,12 @@ struct CheckpointConfig {
 
 #[derive(Debug, Deserialize)]
 struct Checkpoint {
-    format_version: u32,
     config: CheckpointConfig,
     state: Universe,
 }
 
 fn read_checkpoint(path: &Path) -> Checkpoint {
-    let checkpoint: Checkpoint = ciborium::from_reader(fs::File::open(path).unwrap()).unwrap();
-    assert_eq!(checkpoint.format_version, 11);
-    checkpoint
+    ciborium::from_reader(fs::File::open(path).unwrap()).unwrap()
 }
 
 fn checkpoint_tick(path: &Path) -> u64 {
@@ -267,465 +258,66 @@ fn invocation_files_record_full_partial_and_zero_tick_windows() {
 }
 
 #[test]
-fn live_history_discovers_resume_files_and_preserves_each_invocation() {
+fn periodic_and_exit_saves_obey_retention() {
     let directory = Directory::new();
-    let mut reader = Reader::new(directory.0.join("resumed"));
-    assert!(reader.poll().unwrap().is_empty());
-    directory.success(&[
-        "resumed",
-        "-c",
-        &support::preset("debug"),
-        "-c",
-        &directory.overlay("first.toml", "[ecosystem.metrics]\nwindow_ticks = 3\n"),
-        "--ticks",
-        "2",
-    ]);
-    let first = drain_metrics(&mut reader);
-    assert_eq!(first.len(), 2);
-    let path = directory.metrics_path("resumed");
-    let bytes = fs::read(&path).unwrap();
-    directory.success(&[
-        "resumed",
-        "-c",
-        &directory.overlay("second.toml", "[ecosystem.metrics]\nwindow_ticks = 4\n"),
-        "--ticks",
-        "5",
-    ]);
-    assert_eq!(fs::read(&path).unwrap(), bytes);
-    assert_eq!(
-        fs::read_dir(directory.0.join("resumed/metrics"))
-            .unwrap()
-            .count(),
-        2
-    );
-    let second = drain_metrics(&mut reader);
-    assert_eq!(second.len(), 3);
-    for (records, id, start, size) in [(&first, 1, 0, 3), (&second, 2, 2, 4)] {
-        let Record::Session(s) = &records[0] else {
-            panic!("missing metadata")
-        };
-        assert_eq!((s.id, s.start_tick), (id, start));
-        let config: toml::Value = toml::from_str(&s.config).unwrap();
-        assert_eq!(
-            config["ecosystem"]["metrics"]["window_ticks"].as_integer(),
-            Some(size)
-        );
-    }
-    let points = samples(&second);
-    assert_eq!(points.iter().map(|s| s.tick).collect::<Vec<_>>(), [6, 7]);
-    assert_eq!(metric_values(points[1])["window"]["samples"], 1);
-    assert!(reader.poll().unwrap().is_empty());
-}
-
-#[test]
-fn interrupted_tail_is_preserved_and_later_files_are_followed() {
-    let directory = Directory::new();
-    directory.success(&["recover", "-c", &support::preset("debug"), "--ticks", "2"]);
-    let path = directory.metrics_path("recover");
-    let mut reader = Reader::new(directory.0.join("recover"));
-    let prior = drain_metrics(&mut reader);
-    let record = Record::Sample(Sample {
-        session: 1,
-        tick: 3,
-        values: samples(&prior)[0].values.clone(),
-    });
-    let mut bytes = Vec::new();
-    ciborium::into_writer(&record, &mut bytes).unwrap();
-    fs::OpenOptions::new()
-        .append(true)
-        .open(&path)
-        .unwrap()
-        .write_all(&bytes[..bytes.len() / 2])
-        .unwrap();
-    let original = fs::read(&path).unwrap();
-    assert!(reader.poll().unwrap().is_empty());
-    assert!(reader.has_pending_record());
-    directory.success(&["recover", "--ticks", "1"]);
-    assert_eq!(fs::read(path).unwrap(), original);
-    let next = drain_metrics(&mut reader);
-    assert_eq!(next.len(), 2);
-    assert_eq!(samples(&next)[0].tick, 3);
-    assert_eq!(samples(&next)[0].session, 2);
-    assert!(!reader.has_pending_record());
-}
-
-#[test]
-fn old_corruption_cannot_block_a_new_invocation_or_be_overwritten() {
-    let directory = Directory::new();
-    directory.success(&["corrupt", "-c", &support::preset("debug"), "--ticks", "2"]);
-    let path = directory.metrics_path("corrupt");
-    let mut corrupt = fs::read(&path).unwrap();
-    corrupt.push(0xff);
-    fs::write(&path, &corrupt).unwrap();
-    directory.success(&["corrupt", "--ticks", "1"]);
-    assert_eq!(fs::read(&path).unwrap(), corrupt);
-    assert_eq!(
-        fs::read_dir(directory.0.join("corrupt/metrics"))
-            .unwrap()
-            .count(),
-        2
-    );
-    let mut reader = Reader::new(directory.0.join("corrupt"));
-    assert_eq!(reader.poll().unwrap().len(), 2);
-    assert!(
-        reader.poll().is_err(),
-        "viewer must still report old corruption"
-    );
-}
-
-#[test]
-fn resuming_an_older_checkpoint_keeps_overlapping_metric_ticks_in_distinct_sessions() {
-    let directory = Directory::new();
-    directory.success(&[
-        "rollback",
-        "--config",
-        &support::preset("debug"),
-        "--config",
-        &support::preset("metrics"),
-        "--config",
-        &directory.overlay(
-            "rollback.toml",
-            "checkpoint_every = 2\nkeep_checkpoints = 4\n[ecosystem.metrics]\nwindow_ticks = 1\n",
-        ),
-        "--ticks",
-        "4",
-    ]);
-    let path = directory.metrics_path("rollback");
-    let old = fs::read(&path).unwrap();
-    let mut reader = Reader::new(directory.0.join("rollback"));
-    let previous = drain_metrics(&mut reader);
-    let initial_samples = samples(&previous);
-    assert_eq!(
-        initial_samples
-            .iter()
-            .map(|sample| sample.tick)
-            .collect::<Vec<_>>(),
-        [1, 2, 3, 4]
-    );
-    fs::remove_file(directory.checkpoints("rollback").last().unwrap()).unwrap();
-    directory.success(&["rollback", "--ticks", "2"]);
-    assert!(fs::read(&path).unwrap().starts_with(&old));
-    let records = drain_metrics(&mut reader);
-    let Record::Session(session) = &records[0] else {
-        panic!("missing rollback metadata")
-    };
-    assert_eq!(session.start_tick, 2);
-    let appended = samples(&records);
-    assert_eq!(
-        appended
-            .iter()
-            .map(|sample| sample.tick)
-            .collect::<Vec<_>>(),
-        [3, 4]
-    );
-    assert!(appended.iter().all(|sample| sample.session == session.id));
-    assert_ne!(session.id, initial_samples[0].session);
-}
-
-#[test]
-fn periodic_and_exit_saves_obey_retention_across_resumes() {
-    let directory = Directory::new();
-    directory.success(&[
-        "retained",
-        "--seed",
-        "42",
-        "--ticks",
-        "25",
-        "--config",
-        &directory.overlay(
-            "policy.toml",
-            "checkpoint_every = 10\nkeep_checkpoints = 2\n",
-        ),
-    ]);
+    let policy = directory.overlay("policy.toml", "checkpoint_every = 2\nkeep_checkpoints = 2");
+    directory.success(&["saved", "-c", &policy, "--ticks", "5"]);
     let ticks = || {
         directory
-            .checkpoints("retained")
+            .checkpoints("saved")
             .iter()
-            .map(|path| checkpoint_tick(path))
+            .map(|p| checkpoint_tick(p))
             .collect::<Vec<_>>()
     };
-    assert_eq!(ticks(), vec![20, 25]);
-    assert_eq!(directory.latest("retained").state.step(), 25);
-    directory.success(&["retained", "--ticks", "6"]);
-    assert_eq!(ticks(), vec![30, 31]);
-    // Saving the same tick at exit replaces it; it does not consume another slot.
-    directory.success(&[
-        "retained",
-        "--ticks",
-        "0",
-        "--config",
-        &directory.overlay("retention.toml", "keep_checkpoints = 1\n"),
-    ]);
-    assert_eq!(ticks(), vec![31]);
-    assert_eq!(
-        directory.config("retained")["keep_checkpoints"].as_integer(),
-        Some(1)
-    );
-    assert_eq!(directory.config("retained")["ticks"].as_integer(), Some(0));
+    assert_eq!(ticks(), [4, 5]);
+    directory.success(&["saved", "--ticks", "0"]);
+    assert_eq!(ticks(), [4, 5]);
 }
 
 #[test]
-fn exit_only_and_zero_tick_runs_are_resumable() {
+fn a_zero_tick_run_saves_and_can_resume() {
     let directory = Directory::new();
-    directory.success(&[
-        "exit-only",
-        "--config",
-        &support::preset("debug"),
-        "--seed",
-        "1",
-        "--ticks",
-        "7",
-        "--config",
-        &directory.overlay("exit-only.toml", "checkpoint_every = 0\n"),
-    ]);
-    assert_eq!(directory.checkpoints("exit-only").len(), 1);
-    assert_eq!(directory.latest("exit-only").state.step(), 7);
-    directory.success(&["exit-only", "--ticks", "0"]);
-    assert_eq!(directory.checkpoints("exit-only").len(), 1);
-    assert_eq!(directory.latest("exit-only").state.step(), 7);
-
-    directory.success(&[
-        "zero",
-        "--config",
-        &support::preset("debug"),
-        "--seed",
-        "7",
-        "--ticks",
-        "0",
-    ]);
+    let exit_only = directory.overlay("exit.toml", "checkpoint_every = 0");
+    directory.success(&["zero", "-c", &exit_only, "--ticks", "0"]);
     assert_eq!(directory.latest("zero").state.step(), 0);
-    directory.success(&["zero", "--ticks", "3"]);
-    assert_eq!(directory.latest("zero").state.step(), 3);
+    directory.success(&["zero", "--ticks", "1"]);
+    assert_eq!(directory.latest("zero").state.step(), 1);
 }
 
 #[test]
-fn default_directory_records_the_resolved_entropy_seed() {
+fn latest_fails_on_corruption_instead_of_falling_back() {
     let directory = Directory::new();
-    let output = directory.success(&["--ticks", "2"]);
-    let seed: u64 = output
-        .split_whitespace()
-        .find_map(|field| field.strip_prefix("seed="))
-        .unwrap()
-        .parse()
-        .unwrap();
-    let run = fs::read_dir(directory.0.join("runs"))
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
-    let name = run.file_name().unwrap().to_str().unwrap();
-    assert_eq!(name.len(), 19);
-    jiff::civil::DateTime::strptime("%Y-%m-%d_%H-%M-%S", name).unwrap();
-    let config: toml::Value =
-        toml::from_str(&fs::read_to_string(run.join("config.toml")).unwrap()).unwrap();
-    assert_eq!(
-        config["seed"].as_str().unwrap().parse::<u64>().unwrap(),
-        seed
-    );
-    directory.success(&[run.to_str().unwrap()]);
-    assert_eq!(directory.latest(run.to_str().unwrap()).state.step(), 4);
-}
-
-#[test]
-fn latest_resumes_by_save_time_with_saved_config_and_explicit_overrides() {
-    let directory = Directory::new();
-    directory.success(&["runs/z-older", "--seed", "1", "--ticks", "9"]);
-    directory.success(&[
-        "runs/a-newer",
-        "--config",
-        &support::preset("debug"),
-        "--seed",
-        "42",
-        "--ticks",
-        "2",
-    ]);
-    directory.saved_at("runs/z-older", 100);
-    directory.saved_at("runs/a-newer", 200);
-    // Unfinished saves, artifact folders, and runs outside runs/ are not candidates.
-    fs::create_dir_all(directory.0.join("runs/artifacts/checkpoints")).unwrap();
-    fs::write(
-        directory
-            .0
-            .join("runs/artifacts/checkpoints/.00000000000000000003.cbor.tmp"),
-        b"incomplete",
-    )
-    .unwrap();
-    directory.success(&["outside", "--ticks", "0"]);
-    directory.success(&[
-        "--latest",
-        "--config",
-        &directory.overlay("override.toml", "ticks = 7\n[viewer]\nvsync = false\n"),
-        "--ticks",
-        "1",
-    ]);
-    assert_eq!(directory.latest("runs/a-newer").state.step(), 3);
-    assert_eq!(directory.latest("runs/z-older").state.step(), 9);
-    let config = directory.config("runs/a-newer");
-    assert_eq!(config["viewer"]["vsync"].as_bool(), Some(false));
-    assert!(config.get("latest").is_none());
-
-    // Saving an older run makes it the latest, irrespective of its creation/name.
-    directory.success(&["runs/z-older", "--ticks", "0"]);
-    directory.saved_at("runs/a-newer", 200);
-    directory.success(&["--latest", "--ticks", "1"]);
-    assert_eq!(directory.latest("runs/z-older").state.step(), 10);
-    assert_eq!(directory.latest("runs/a-newer").state.step(), 3);
-}
-
-#[test]
-fn latest_requires_a_saved_run_and_conflicts_with_a_directory() {
-    let directory = Directory::new();
-    let missing = directory.run(&["--latest", "--ticks", "0"]);
-    assert!(!missing.status.success());
-    assert!(String::from_utf8_lossy(&missing.stderr).contains("no saved runs"));
-    assert!(!directory.0.join("runs").exists());
-
-    fs::create_dir_all(directory.0.join("runs/unfinished/checkpoints")).unwrap();
-    let empty = directory.run(&["--latest", "--ticks", "0"]);
-    assert!(!empty.status.success());
-    assert!(String::from_utf8_lossy(&empty.stderr).contains("no saved runs"));
-    assert!(!directory.0.join("runs/unfinished/config.toml").exists());
-
-    let conflict = directory.run(&["explicit", "--latest", "--ticks", "0"]);
-    assert!(!conflict.status.success());
-    assert!(String::from_utf8_lossy(&conflict.stderr).contains("cannot be used with"));
-    assert!(!directory.0.join("explicit").exists());
-}
-
-#[test]
-fn latest_does_not_fall_back_when_selected_run_is_locked_or_corrupt() {
-    let directory = Directory::new();
-    directory.success(&["runs/older", "--seed", "1", "--ticks", "2"]);
-    directory.success(&["runs/newer", "--seed", "42", "--ticks", "3"]);
+    directory.success(&["runs/older", "--ticks", "0"]);
+    directory.success(&["runs/newer", "--ticks", "1"]);
     directory.saved_at("runs/older", 100);
     directory.saved_at("runs/newer", 200);
-    let config_path = directory.0.join("runs/newer/config.toml");
-    let config = fs::read(&config_path).unwrap();
-    let checkpoint_path = directory.checkpoints("runs/newer").pop().unwrap();
-    let checkpoint = fs::read(&checkpoint_path).unwrap();
-
-    let lock = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(directory.0.join("runs/newer/.lock"))
-        .unwrap();
-    lock.try_lock().unwrap();
-    let locked = directory.run(&["--latest", "--ticks", "1"]);
-    assert!(!locked.status.success());
-    assert!(String::from_utf8_lossy(&locked.stderr).contains("cannot lock run directory"));
-    assert_eq!(fs::read(&checkpoint_path).unwrap(), checkpoint);
-    drop(lock);
-
-    fs::write(&checkpoint_path, b"broken checkpoint").unwrap();
-    let corrupt = directory.run(&["--latest", "--ticks", "1"]);
-    assert!(!corrupt.status.success());
-    assert!(String::from_utf8_lossy(&corrupt.stderr).contains("reading checkpoint"));
-    assert_eq!(fs::read(&config_path).unwrap(), config);
-    assert_eq!(fs::read(&checkpoint_path).unwrap(), b"broken checkpoint");
-    assert_eq!(directory.latest("runs/older").state.step(), 2);
-}
-
-#[test]
-fn invalid_resume_never_overwrites_the_saved_run() {
-    let directory = Directory::new();
-    directory.success(&["saved", "--seed", "1", "--ticks", "3"]);
-    let config_path = directory.0.join("saved/config.toml");
-    let config = fs::read(&config_path).unwrap();
-    let checkpoint_path = directory.checkpoints("saved").pop().unwrap();
-    let checkpoint = fs::read(&checkpoint_path).unwrap();
-    let metrics = fs::read(directory.metrics_path("saved")).unwrap();
-    fs::write(
-        directory.0.join("replacement.toml"),
-        "seed = 999\nticks = 0\n",
-    )
-    .unwrap();
-    for args in [
-        vec!["saved", "--seed", "2"],
-        vec![
-            "saved",
-            "--config",
-            &directory.overlay("model.toml", "[ecosystem.world]\nwidth = 100.0\n"),
-        ],
-        vec!["saved", "--config", "replacement.toml"],
-        vec![
-            "saved",
-            "--config",
-            &directory.overlay("invalid-policy.toml", "keep_checkpoints = 0\n"),
-        ],
-    ] {
-        let output = directory.run(&args);
-        assert!(!output.status.success(), "accepted {args:?}");
-        assert_eq!(fs::read(&config_path).unwrap(), config);
-        assert_eq!(fs::read(&checkpoint_path).unwrap(), checkpoint);
-        assert_eq!(fs::read(directory.metrics_path("saved")).unwrap(), metrics);
-    }
-    fs::write(&checkpoint_path, &checkpoint[..checkpoint.len() / 2]).unwrap();
-    let broken = fs::read(&checkpoint_path).unwrap();
-    let output = directory.run(&["saved"]);
+    let path = directory.checkpoints("runs/newer").pop().unwrap();
+    fs::write(&path, b"broken").unwrap();
+    let output = directory.run(&["--latest", "--ticks", "1"]);
     assert!(!output.status.success());
-    assert_eq!(fs::read(&config_path).unwrap(), config);
-    assert_eq!(fs::read(&checkpoint_path).unwrap(), broken);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("reading checkpoint"));
+    assert_eq!(fs::read(path).unwrap(), b"broken");
+    assert_eq!(directory.latest("runs/older").state.step(), 0);
 }
 
 #[test]
-fn checkpoint_recovers_missing_config_and_ignores_an_interrupted_write() {
+fn a_model_override_cannot_overwrite_the_saved_run() {
     let directory = Directory::new();
-    directory.success(&[
-        "recover",
-        "--config",
-        &support::preset("debug"),
-        "--seed",
-        "42",
-        "--ticks",
-        "7",
-        "--config",
-        &directory.overlay(
-            "policy.toml",
-            "checkpoint_every = 3\nkeep_checkpoints = 2\n",
-        ),
-    ]);
-    let config_path = directory.0.join("recover/config.toml");
-    fs::remove_file(&config_path).unwrap();
-    let partial = directory
-        .0
-        .join("recover/checkpoints/.00000000000000000009.cbor.tmp");
-    fs::write(&partial, b"incomplete checkpoint").unwrap();
-    fs::write(
-        directory.0.join("replacement.toml"),
-        "seed = 999\nticks = 0\n",
-    )
-    .unwrap();
-    let saved_path = directory.checkpoints("recover").pop().unwrap();
-    let saved = fs::read(&saved_path).unwrap();
-
-    let rejected = directory.run(&["recover", "--config", "replacement.toml"]);
-    assert!(!rejected.status.success());
-    assert!(!config_path.exists());
-    assert_eq!(fs::read(&saved_path).unwrap(), saved);
-
-    fs::write(
-        directory.0.join("replacement.toml"),
-        "ticks = 5\ntick_hz = 0\n",
-    )
-    .unwrap();
-    directory.success(&["recover", "--config", "replacement.toml"]);
-    assert_eq!(directory.latest("recover").state.step(), 12);
-    let config = directory.config("recover");
-    assert_eq!(config["ecosystem"]["initial_animals"].as_integer(), Some(1));
-    assert_eq!(config["seed"].as_str(), Some("42"));
-    assert_eq!(config["ticks"].as_integer(), Some(5));
-    assert_eq!(config["checkpoint_every"].as_integer(), Some(3));
-    assert_eq!(config["keep_checkpoints"].as_integer(), Some(2));
-    assert!(!partial.exists());
-    assert_eq!(
-        directory
-            .checkpoints("recover")
-            .iter()
-            .map(|path| checkpoint_tick(path))
-            .collect::<Vec<_>>(),
-        vec![9, 12]
-    );
+    directory.success(&["saved", "--seed", "1", "--ticks", "1"]);
+    let config_path = directory.0.join("saved/config.toml");
+    let checkpoint_path = directory.checkpoints("saved").pop().unwrap();
+    let paths = [
+        config_path,
+        checkpoint_path,
+        directory.metrics_path("saved"),
+    ];
+    let before: Vec<_> = paths.iter().map(|p| fs::read(p).unwrap()).collect();
+    let change = directory.overlay("model.toml", "[ecosystem.world]\nwidth = 100.0");
+    let output = directory.run(&["saved", "-c", &change, "--ticks", "0"]);
+    assert!(!output.status.success());
+    for (path, bytes) in paths.iter().zip(before) {
+        assert_eq!(fs::read(path).unwrap(), bytes);
+    }
 }
 
 #[cfg(unix)]
@@ -779,5 +371,21 @@ fn a_live_run_rejects_another_writer_and_saves_on_ctrl_c() {
     assert_eq!(
         directory.latest("live").state.step(),
         saved.state.step() + 1
+    );
+}
+
+#[test]
+fn resume_starts_a_new_metrics_file_without_modifying_the_previous_one() {
+    let directory = Directory::new();
+    directory.success(&["saved", "--ticks", "1"]);
+    let first = directory.metrics_path("saved");
+    let bytes = fs::read(&first).unwrap();
+    directory.success(&["saved", "--ticks", "1"]);
+    assert_eq!(fs::read(first).unwrap(), bytes);
+    assert_eq!(
+        fs::read_dir(directory.0.join("saved/metrics"))
+            .unwrap()
+            .count(),
+        2
     );
 }

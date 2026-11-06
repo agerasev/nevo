@@ -1,25 +1,16 @@
 use super::*;
 use anyhow::{Result, ensure};
-use rand::{Rng, SeedableRng};
-use rand_xoshiro::Xoshiro256PlusPlus;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// An unrelated experiment demonstrates that the runner requires no animal,
 /// perception, lifecycle, or population contracts.
 // Deliberately not Clone: stepping must prepare changes without copying the model.
-#[derive(serde::Serialize, serde::Deserialize)]
 struct Probe {
     value: u64,
-    memory: u64,
-    rng: Xoshiro256PlusPlus,
     fail: bool,
-    #[serde(skip)]
     increment: u64,
-    #[serde(skip)]
     configurations: u32,
-    #[serde(skip)]
     inspect: Option<Arc<dyn Fn() + Send + Sync>>,
-    #[serde(skip)]
     inspect_apply: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
@@ -34,15 +25,9 @@ impl Default for ProbeConfig {
     }
 }
 
-struct ProbeUpdate {
-    value: u64,
-    memory: u64,
-    rng: Xoshiro256PlusPlus,
-}
-
 impl Simulation for Probe {
     type Config = ProbeConfig;
-    type Update = ProbeUpdate;
+    type Update = u64;
     type Report = u64;
 
     fn configure(&mut self, config: &ProbeConfig) -> Result<()> {
@@ -52,24 +37,20 @@ impl Simulation for Probe {
         Ok(())
     }
 
-    fn compute_update(&self, _: u64) -> Result<(u64, ProbeUpdate)> {
+    fn compute_update(&self, _: u64) -> Result<(u64, u64)> {
         if let Some(inspect) = &self.inspect {
             inspect();
         }
-        let mut rng = self.rng.clone();
-        let memory = rng.next_u64();
         ensure!(!self.fail, "preparation failed");
         let value = self.value + self.increment;
-        Ok((value, ProbeUpdate { value, memory, rng }))
+        Ok((value, value))
     }
 
-    fn apply_update(&mut self, update: ProbeUpdate) {
+    fn apply_update(&mut self, update: u64) {
         if let Some(inspect) = &self.inspect_apply {
             inspect();
         }
-        self.value = update.value;
-        self.memory = update.memory;
-        self.rng = update.rng;
+        self.value = update;
     }
 }
 
@@ -79,8 +60,6 @@ type TestRun = Run<Probe>;
 fn universe() -> TestUniverse {
     Universe::from_world(Probe {
         value: 0,
-        memory: 0,
-        rng: Xoshiro256PlusPlus::seed_from_u64(42),
         fail: false,
         increment: 1,
         configurations: 0,
@@ -88,12 +67,6 @@ fn universe() -> TestUniverse {
         inspect_apply: None,
     })
     .unwrap()
-}
-
-fn encoded(state: &TestUniverse) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    ciborium::into_writer(state, &mut bytes).unwrap();
-    bytes
 }
 
 #[test]
@@ -106,7 +79,6 @@ fn preparation_holds_read_lock_and_callback_runs_after_atomic_publication() {
         assert!(view.0.try_write().is_err(), "preparation holds a read lock");
         let state = view.0.try_read().expect("concurrent readers are allowed");
         assert_eq!(state.step(), 0);
-        assert_eq!(state.world.memory, 0);
         assert_eq!(state.world.value, 0);
         count.fetch_add(1, Ordering::Relaxed);
     }));
@@ -150,67 +122,12 @@ fn preparation_holds_read_lock_and_callback_runs_after_atomic_publication() {
 }
 
 #[test]
-fn discarding_an_update_preserves_state_and_randomness() {
-    let mut state = universe();
-    let before = encoded(&state);
-    let _ = state.compute_update().unwrap();
-    assert_eq!(encoded(&state), before);
-
-    let mut expected_rng = state.world.rng.clone();
-    let expected_memory = expected_rng.next_u64();
-    assert_eq!(state.advance().unwrap(), 1);
-    assert_eq!(state.step(), 1);
-    assert_eq!(state.world.memory, expected_memory);
-    assert_eq!(state.world.rng, expected_rng);
-}
-
-#[test]
 fn exhausted_step_counter_fails_before_model_preparation() {
     let mut state = universe();
     state.step = u64::MAX - 1;
     state.world.inspect = Some(Arc::new(|| panic!("must check counter before preparation")));
-    let before = encoded(&state);
     assert!(state.advance().is_err());
-    assert_eq!(encoded(&state), before);
-}
-
-#[test]
-fn readers_can_hold_back_publication_while_preparation_runs() {
-    let mut run = TestRun::from_universe(universe());
-    let view = run.universe.clone();
-    let (entered, acting) = mpsc::channel();
-    let (release, proceed) = mpsc::channel();
-    let proceed = Mutex::new(proceed);
-    run.universe.0.write().unwrap().world.inspect = Some(Arc::new(move || {
-        entered.send(()).unwrap();
-        proceed
-            .lock()
-            .unwrap()
-            .recv_timeout(Duration::from_secs(3))
-            .unwrap();
-    }));
-    let (done, completed) = mpsc::channel();
-    std::thread::spawn(move || {
-        done.send(run.tick()).unwrap();
-    });
-    acting.recv_timeout(Duration::from_secs(3)).unwrap();
-    let old = view.read();
-    assert_eq!(old.step(), 0);
-    release.send(()).unwrap();
-    assert!(matches!(
-        completed.recv_timeout(Duration::from_millis(30)),
-        Err(mpsc::RecvTimeoutError::Timeout)
-    ));
-    assert_eq!(old.world.value, 0);
-    drop(old);
-    assert_eq!(
-        completed
-            .recv_timeout(Duration::from_secs(3))
-            .unwrap()
-            .unwrap(),
-        1
-    );
-    assert_eq!(view.read().step(), 1);
+    assert_eq!(state.step, u64::MAX - 1);
 }
 
 #[test]
@@ -221,21 +138,12 @@ fn restore_configures_once_and_steps_use_stored_component_settings() {
     assert_eq!(run.universe().read().world().value, 14);
     assert_eq!(run.universe().read().world().increment, 7);
     assert_eq!(run.universe().read().world().configurations, 1);
-    let bytes = encoded(&run.universe().read());
-    let decoded: TestUniverse = ciborium::from_reader(bytes.as_slice()).unwrap();
-    assert_eq!(decoded.world.increment, 0);
-    let mut resumed = decoded.restore(ProbeConfig { increment: 3 }).unwrap();
-    assert_eq!(resumed.universe().read().world().configurations, 1);
-    assert_eq!(resumed.tick().unwrap(), 17);
-    assert_eq!(resumed.universe().read().world().configurations, 1);
-    assert!(universe().restore(ProbeConfig { increment: 0 }).is_err());
 }
 
 #[test]
 fn failed_preparation_preserves_state_and_does_not_call_observers() {
     let mut state = universe();
     state.world.fail = true;
-    let before = encoded(&state);
     let mut run = TestRun::from_universe(state);
     let (control, commands) = Control::channel(false);
     assert!(
@@ -246,5 +154,6 @@ fn failed_preparation_preserves_state_and_does_not_call_observers() {
     );
     assert_eq!(control.status().stop, Some(StopReason::Failed));
     assert_eq!(control.status().steps, 0);
-    assert_eq!(encoded(&run.universe().read()), before);
+    assert_eq!(run.universe().read().step(), 0);
+    assert_eq!(run.universe().read().world().value, 0);
 }

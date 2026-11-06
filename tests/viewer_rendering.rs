@@ -5,20 +5,17 @@
 #[allow(dead_code)]
 mod support;
 
-use std::{sync::mpsc, thread, time::Duration};
+use std::{sync::mpsc, time::Duration};
 
 use glam::{DVec2, Vec2};
 use nevo::{
     ecosystem::{Animal, Body, Ecosystem, Plant},
-    run::Run,
-    universe::{Simulation, Universe},
-    viewer::{Bounds, Draw, Drawing, Label},
+    universe::Universe,
+    viewer::{Bounds, Draw, Drawing},
 };
 use wgame::{
     Library,
     gfx::{Graphics, Offscreen, Target},
-    prelude::*,
-    rgb::Rgb,
 };
 
 fn graphics() -> Graphics {
@@ -116,9 +113,9 @@ fn entities_collect_owned_geometry_without_mind_traits() {
     let library = Library::new(&graphics);
     let mut drawing = Drawing::new(&library);
     {
-        let plant = Plant::new(1, DVec2::new(-0.5, 0.0), 0.04);
+        let plant = Plant::new(1, DVec2::new(-0.5, 0.0), 0.0001);
         let animal = Animal {
-            body: Body::new(DVec2::new(0.5, 0.0), 0.16),
+            body: Body::new(DVec2::new(0.5, 0.0), 0.0004),
             mind: UnrelatedMind,
         };
         plant.draw(&mut drawing);
@@ -144,8 +141,8 @@ fn entities_collect_owned_geometry_without_mind_traits() {
 fn overlapping_circles_hide_borders_inside_their_fills() {
     let graphics = graphics();
     let library = Library::new(&graphics);
-    let plant = |x| Plant::new(1, DVec2::new(x, 0.0), 1.0);
-    let body = |x| Body::new(DVec2::new(x, 0.0), 1.0);
+    let plant = |x| Plant::new(1, DVec2::new(x, 0.0), 0.0025);
+    let body = |x| Body::new(DVec2::new(x, 0.0), 0.0025);
     let green = [51, 189, 82, 255];
     let yellow = [255, 217, 64, 255];
     let cases: [(&dyn Draw, &dyn Draw, _, _); 3] = [
@@ -183,127 +180,17 @@ fn overlapping_circles_hide_borders_inside_their_fills() {
     }
 }
 
-// A second world with no Clone implementation, no ecosystem entities, and offset bounds.
-struct Marker {
-    x: f32,
-}
-
-impl Simulation for Marker {
-    type Config = ();
-    type Update = f32;
-    type Report = ();
-
-    fn compute_update(&self, _: u64) -> anyhow::Result<((), f32)> {
-        Ok(((), self.x + 1.0))
-    }
-
-    fn apply_update(&mut self, x: f32) {
-        self.x = x;
-    }
-}
-
-impl Draw for Marker {
-    fn draw(&self, drawing: &mut Drawing<'_>) {
-        drawing.bounds = Some(Bounds {
-            min: Vec2::new(10.0, 20.0),
-            max: Vec2::new(12.0, 22.0),
-        });
-        drawing.scene.add(
-            &drawing
-                .library
-                .shapes()
-                .unit_circle()
-                .fill_color(Rgb::new(1.0, 0.0, 0.0))
-                .scale(0.15)
-                .move_to(Vec2::new(self.x, 21.0)),
-        );
-        drawing.labels.push(Label::new("Marker"));
-    }
-}
-
 #[test]
 #[ignore = "requires a graphics adapter"]
-fn a_second_world_can_advance_while_its_previous_drawing_is_rendered() {
+fn ecosystem_drawing_preserves_complete_state() {
     let graphics = graphics();
     let library = Library::new(&graphics);
-    let mut run = Run::from_universe(Universe::from_world(Marker { x: 10.5 }).unwrap());
-    let state = run.universe().clone();
+    let mut universe = Universe::new(support::ecosystem("debug"), 1).unwrap();
+    universe.advance().unwrap();
+    let before = universe.clone();
     let mut drawing = Drawing::new(&library);
-    state.read().draw(&mut drawing);
-    let (done, result) = mpsc::channel();
-    let worker = thread::spawn(move || {
-        run.tick().unwrap();
-        done.send(run).unwrap();
-    });
-    let run = result
-        .recv_timeout(Duration::from_secs(3))
-        .expect("drawing retained the simulation lock");
-    worker.join().unwrap();
-    assert_eq!(run.universe().read().world().x, 11.5);
-    assert_eq!(drawing.labels, [Label::new("Tick 0"), Label::new("Marker")]);
+    universe.draw(&mut drawing);
     let mut target = Offscreen::new(&graphics, (100, 100));
     drawing.render(&mut target);
-    let image = pixels(&mut target);
-    assert_pixel(&image, 26, 50, [255, 0, 0, 255]);
-    assert_pixel(&image, 74, 50, [14, 18, 19, 255]);
-    let mut next = Drawing::new(&library);
-    state.read().draw(&mut next);
-    next.render(&mut target);
-    let image = pixels(&mut target);
-    assert_pixel(&image, 26, 50, [14, 18, 19, 255]);
-    assert_pixel(&image, 74, 50, [255, 0, 0, 255]);
-    // The normal window entry point also accepts this non-Clone world.
-    let _ = nevo::viewer::show::<Universe<Marker>>;
-}
-
-#[test]
-#[ignore = "requires a graphics adapter"]
-fn ecosystem_drawing_preserves_complete_state_and_same_tick_labels() {
-    let graphics = graphics();
-    let library = Library::new(&graphics);
-    let mut resized = support::ecosystem::<nevo::ecosystem::Config>("baseline");
-    resized.world.width = 100.0;
-    resized.world.height = 80.0;
-    resized.animal.body.radius_scale = 4.0;
-    resized.plant.radius_scale = 6.0;
-    for config in [
-        support::ecosystem::<nevo::ecosystem::Config>("debug"),
-        support::ecosystem::<nevo::ecosystem::Config>("baseline"),
-        resized,
-    ] {
-        for seed in [1, 42] {
-            let mut universe = Universe::new(config.clone(), seed).unwrap();
-            for tick in 0..3 {
-                let before = universe.clone();
-                let mut drawing = Drawing::new(&library);
-                universe.draw(&mut drawing);
-                let half_size =
-                    Vec2::new(config.world.width as f32, config.world.height as f32) * 0.5;
-                assert_eq!(
-                    drawing.bounds,
-                    Some(Bounds {
-                        min: -half_size,
-                        max: half_size
-                    })
-                );
-                assert_eq!(drawing.labels[0].text, format!("Tick {tick}"));
-                assert_eq!(
-                    drawing.labels[1].text,
-                    format!("Plants {}", universe.world().plants().len())
-                );
-                assert_eq!(
-                    drawing.labels[2].text,
-                    format!("Animals {}", universe.world().animals().len())
-                );
-                let mut target = Offscreen::new(&graphics, (100, 100));
-                drawing.render(&mut target);
-                assert!(!pixels(&mut target).is_empty());
-                assert_eq!(
-                    universe, before,
-                    "drawing changed model state or consumed randomness"
-                );
-                universe.advance().unwrap();
-            }
-        }
-    }
+    assert_eq!(universe, before);
 }

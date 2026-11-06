@@ -205,3 +205,41 @@ fn oversized_records_fail_before_writing_and_cannot_be_misread_as_pending() {
     assert_eq!(reader.poll().unwrap(), [session(1, 0)]);
     assert!(reader.poll().is_err());
 }
+
+#[test]
+fn invocation_files_follow_legacy_history_and_remap_overlapping_ticks() {
+    let dir = Directory::new();
+    fs::write(
+        dir.file(),
+        [encoded(&session(1, 0)), encoded(&sample(1, 1))].concat(),
+    )
+    .unwrap();
+    let mut reader = RunReader::new(&dir.0);
+    assert_eq!(reader.poll().unwrap(), [session(1, 0), sample(1, 1)]);
+    for id in [2, 3] {
+        let (_, mut writer) = create_invocation(&dir.0).unwrap();
+        writer.append(&session(1, 0)).unwrap();
+        writer.append(&sample(1, 1)).unwrap();
+        assert_eq!(reader.poll().unwrap(), [session(id, 0), sample(id, 1)]);
+        writer.append(&sample(1, 2)).unwrap();
+        assert_eq!(reader.poll().unwrap(), [sample(id, 2)]);
+        assert!(reader.poll().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn interrupted_invocations_are_preserved_when_a_later_file_arrives() {
+    let dir = Directory::new();
+    let (path, mut writer) = create_invocation(&dir.0).unwrap();
+    writer.append(&session(1, 0)).unwrap();
+    append_raw(&path, &encoded(&sample(1, 1))[..3]);
+    let bytes = fs::read(&path).unwrap();
+    let mut reader = RunReader::new(&dir.0);
+    assert_eq!(reader.poll().unwrap(), [session(1, 0)]);
+    assert!(reader.poll().unwrap().is_empty());
+    assert!(reader.has_pending_record());
+    let (_, mut next) = create_invocation(&dir.0).unwrap();
+    next.append(&session(1, 0)).unwrap();
+    assert_eq!(reader.poll().unwrap(), [session(2, 0)]);
+    assert_eq!(fs::read(path).unwrap(), bytes);
+}
