@@ -1114,7 +1114,7 @@ fn invalid_physics_and_conflicting_restore_parameters_are_rejected() {
 #[test]
 fn metrics_are_pure_and_do_not_change_reports_or_checkpoint_bytes() {
     use crate::metrics::Metrics;
-    let mut config: Config = crate::test_support::ecosystem("debug");
+    let mut config: Config = crate::test_support::ecosystem("world/debug");
     config.metrics.enabled = false;
     config.animal.body.movement_cost = 0.003;
     config.animal.body.movement_energy_power = 1.0;
@@ -1210,7 +1210,7 @@ fn complete_and_partial_windows_preserve_rate_units() {
 #[test]
 fn resuming_starts_a_fresh_metrics_window() {
     use crate::universe::Universe;
-    let config: Config = crate::test_support::ecosystem("debug");
+    let config: Config = crate::test_support::ecosystem("world/debug");
     let mut original = Universe::new(config.clone(), 44).unwrap();
     original.advance().unwrap();
     let decoded: Universe = ciborium::from_reader(encode(&original).as_slice()).unwrap();

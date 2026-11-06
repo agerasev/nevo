@@ -199,7 +199,7 @@ fn overlapping_circles_hide_borders_inside_their_fills() {
 fn ecosystem_drawing_preserves_complete_state() {
     let graphics = graphics();
     let library = Library::new(&graphics);
-    let mut universe = Universe::new(support::ecosystem("debug"), 1).unwrap();
+    let mut universe = Universe::new(support::ecosystem("world/debug"), 1).unwrap();
     universe.advance().unwrap();
     let before = universe.clone();
     let mut drawing = Drawing::new(&library);

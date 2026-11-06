@@ -16,8 +16,8 @@ movement; it does not by itself establish adaptation.
 | `distance_per_animal_tick` | Controlled travel per active animal-tick. |
 
 Set `ecosystem.metrics.enabled` and `window_ticks`, or layer the
-[metrics preset](../configs/metrics.toml). Windows cover `(start_tick, end_tick]`;
-orderly exit records any partial window. Rates use actual exposure, so changing
+[long-window preset](../configs/metrics/long-window.toml). Windows cover
+`(start_tick, end_tick]`; orderly exit records any partial window. Rates use actual exposure, so changing
 window length changes smoothing, not units or scale. Combine event/food/growth rates
 with tick weights and movement rates with active-animal-tick weights.
 

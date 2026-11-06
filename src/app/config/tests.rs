@@ -139,6 +139,83 @@ fn movement_presets_each_specify_a_complete_energy_budget() {
 }
 
 #[test]
+fn preset_categories_own_disjoint_fields_and_compose_independently_of_order() {
+    use std::collections::BTreeMap;
+
+    fn claim_leaves<'a>(
+        value: &toml::Value,
+        path: String,
+        category: &'a str,
+        owners: &mut BTreeMap<String, &'a str>,
+    ) {
+        if let toml::Value::Table(table) = value {
+            for (key, value) in table {
+                let path = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{path}.{key}")
+                };
+                claim_leaves(value, path, category, owners);
+            }
+        } else if let Some(previous) = owners.insert(path.clone(), category) {
+            assert_eq!(previous, category, "preset categories both own {path}");
+        }
+    }
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("configs");
+    let categories: &[(&str, &[&str])] = &[
+        (
+            "world",
+            &[
+                "small-uniform",
+                "large-uniform",
+                "small-nonuniform",
+                "large-nonuniform",
+                "debug",
+            ],
+        ),
+        ("movement", &["upkeep-only", "flat", "cost"]),
+        ("plant-growth", &["uniform", "patches"]),
+        ("viewer", &["window"]),
+        ("metrics", &["long-window"]),
+        ("diagnostics", &["trace"]),
+    ];
+    let mut owners = BTreeMap::new();
+    for &(category, names) in categories {
+        for name in names {
+            let path = root.join(category).join(format!("{name}.toml"));
+            let value: toml::Value = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+            assert!(
+                value.get("ticks").is_none(),
+                "{} sets a run duration",
+                path.display()
+            );
+            claim_leaves(&value, String::new(), category, &mut owners);
+            if category == "world" {
+                let config = Config::load(None, &[path], None).unwrap();
+                config.ecosystem.validate().unwrap();
+                assert_eq!(config.ticks, None);
+            }
+        }
+    }
+
+    let mut paths = [
+        "world/large-nonuniform.toml",
+        "movement/cost.toml",
+        "plant-growth/patches.toml",
+        "viewer/window.toml",
+        "metrics/long-window.toml",
+        "diagnostics/trace.toml",
+    ]
+    .map(|path| root.join(path));
+    let forward = Config::load(None, &paths, None).unwrap();
+    forward.ecosystem.validate().unwrap();
+    assert_eq!(forward.ticks, None);
+    paths.reverse();
+    assert_eq!(Config::load(None, &paths, None).unwrap(), forward);
+}
+
+#[test]
 fn enabling_the_viewer_does_not_enable_simulation_pacing() {
     assert_eq!(load(&["--viewer"], None).unwrap().tick_hz, 0.0);
 }

@@ -20,7 +20,8 @@ In **World**, drag with the left mouse button to pan and scroll to zoom around t
 cursor. **Fit world** or Home with the arena focused restores automatic fitting.
 Manual navigation preserves the center and magnification when resizing or switching
 tabs. Camera state belongs to the viewer and is not saved in simulation checkpoints.
-Try the [larger-world preset](../configs/large-world.toml) with `--viewer --paused`.
+Try a [large non-uniform world](../configs/world/large-nonuniform.toml) with
+`--viewer --paused`.
 
 The [rendering tests](../tests/viewer_rendering.rs) require a GPU or software adapter:
 

@@ -1,9 +1,10 @@
 # Twice the baseline width/height, with the same plant and animal densities.
-ticks = 1000
-
 [ecosystem]
 world.width = 2520.0
 world.height = 1400.0
 plants = 2000
 initial_animals = 80
 minimum_population = 80
+immigration.energy = 0.25
+immigration.position = "random"
+plant.initial_position = "random"

@@ -167,7 +167,7 @@ fn a_new_process_resumes_the_complete_seeded_state() {
         directory.success(&[
             name,
             "-c",
-            &support::preset("debug"),
+            &support::preset("world/debug"),
             "-c",
             &settings,
             "--ticks",
@@ -220,7 +220,7 @@ fn invocation_files_record_full_partial_and_zero_tick_windows() {
         directory.success(&[
             run,
             "-c",
-            &support::preset("debug"),
+            &support::preset("world/debug"),
             "-c",
             &window,
             "--ticks",
@@ -248,7 +248,7 @@ fn invocation_files_record_full_partial_and_zero_tick_windows() {
     directory.success(&[
         "disabled",
         "-c",
-        &support::preset("debug"),
+        &support::preset("world/debug"),
         "-c",
         &directory.overlay("off.toml", "[ecosystem.metrics]\nenabled = false\n"),
         "--ticks",

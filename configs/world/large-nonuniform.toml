@@ -1,0 +1,22 @@
+# Large arena with smooth local plant capacity and recovery.
+[ecosystem]
+world.width = 2520.0
+world.height = 1400.0
+plants = 2000
+initial_animals = 80
+minimum_population = 80
+immigration.energy = 0.25
+immigration.position = "random"
+plant.initial_position = "random"
+
+[ecosystem.plant.patches]
+count = 6
+spread = 120.0
+
+[ecosystem.plant.replenishment]
+density_floor = 0.0001
+density_peak = 0.006
+crowding_radius = 40.0
+recovery_rate = 0.002
+max_attempts_per_tick = 128
+max_initial_attempts = 100000

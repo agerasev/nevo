@@ -92,7 +92,7 @@ fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover()
 
 #[test]
 fn zero_rngs_and_wrong_weight_dimensions_are_rejected() {
-    let universe = Universe::new(crate::test_support::ecosystem("debug"), 1).unwrap();
+    let universe = Universe::new(crate::test_support::ecosystem("world/debug"), 1).unwrap();
     for path in [
         ["world", "rng", "s"].as_slice(),
         ["world", "context", "rng", "s"].as_slice(),

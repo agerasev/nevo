@@ -5,31 +5,38 @@ Rust. The [Serde types](../src/app/config/mod.rs) and
 [ecosystem settings](../src/ecosystem/config.rs) define the schema and defaults.
 The separate [CLI](../src/app/cli.rs) exposes common shortcuts, not every field.
 Each run's resolved `config.toml` is a complete editable configuration.
+Reusable presets leave run duration unset; use `--ticks N` for a bounded run.
 
 Precedence is defaults, saved configuration, ordered `--config` files, then
 explicit CLI values. Tables merge by field; scalars and arrays replace. Every
 file is checked even if later files override it. Preset paths are not needed to
 resume. Quote seeds beyond TOML's signed integer range.
 
-[Baseline](../configs/baseline.toml) and [debug](../configs/debug.toml) provide
-starting populations. Layer [viewer](../configs/viewer.toml) and
-[metrics](../configs/metrics.toml) settings as needed. Choose a complete energy
-budget with [upkeep only](../configs/movement/upkeep-only.toml),
-[flat movement cost](../configs/movement/flat.toml), or
-[energy-proportional movement cost](../configs/movement/cost.toml).
+Choose one file from each relevant directory and combine them with repeated
+`--config` arguments. Omitted choices retain defaults or saved values. World
+presets own the arena, initial populations, and resource landscape; other
+directories configure separate aspects of the experiment.
 
-The bounded [larger-world preset](../configs/large-world.toml) expands the arena
-while preserving initial plant and animal densities. Local sensing uses fixed
-`sensing.distance_scale` and `sensing.signal_scale`, independent of arena dimensions
+| Choice | Presets |
+| --- | --- |
+| World | [Small uniform](../configs/world/small-uniform.toml), [small non-uniform](../configs/world/small-nonuniform.toml), [large uniform](../configs/world/large-uniform.toml), [large non-uniform](../configs/world/large-nonuniform.toml), [debug](../configs/world/debug.toml) |
+| Movement energy budget | [Upkeep only](../configs/movement/upkeep-only.toml), [flat cost](../configs/movement/flat.toml), [energy-proportional cost](../configs/movement/cost.toml) |
+| Plant growth | [Uniform](../configs/plant-growth/uniform.toml), [patch-dependent](../configs/plant-growth/patches.toml) |
+| Viewer | [Window](../configs/viewer/window.toml) |
+| Metrics | [Long window](../configs/metrics/long-window.toml) |
+| Diagnostics | [Tick trace](../configs/diagnostics/trace.toml) |
+
+Large worlds preserve the corresponding small world's initial plant and animal
+densities. Local sensing uses fixed `sensing.distance_scale` and
+`sensing.signal_scale`, independent of arena dimensions
 and plant count. Their defaults retain the original 500-plant baseline's signal
 scale; sparse worlds no longer amplify each source by averaging over fewer plants.
 Sources still contribute at all distances; finite-range sensing is a later milestone.
 This changes the world model, so earlier checkpoints require their original build.
 
-Layer [resource patches](../configs/resource-patches.toml) on the larger world to
-give fixed, seeded Gaussian patches a local plant capacity. Patch centers persist
-in checkpoints, independently of animal initialization. The optional
-`plant.replenishment` table enables density-based replenishment; omitting it keeps
+Non-uniform worlds give fixed, seeded Gaussian patches a local plant capacity.
+Patch centers persist in checkpoints, independently of animal initialization.
+The optional `plant.replenishment` table enables density-based replenishment; omitting it keeps
 the baseline's immediate replacement to a fixed plant count.
 
 Replenishment samples fresh continuous positions according to unused capacity.
@@ -51,14 +58,16 @@ the requested `ecosystem.plants` within its separate attempt limit or fail clear
 Explicit initial positions override that sampling; fixed replacement positions
 are incompatible with density-based replenishment.
 
-The [patch-growth overlay](../configs/patch-growth.toml) independently varies
-individual plant growth across the same landscape. The resource-patches preset
-keeps per-plant growth uniform, but plant count and food production can still
-change. Compare [measured plant production](metrics.md) as well as collected food.
-For a bounded patchy-world run:
+Patch-dependent growth requires a non-uniform world and varies individual plant
+growth across its landscape. Growth is uniform by default, but plant count and
+food production can still change. Compare [measured plant production](metrics.md)
+as well as collected food. For a bounded run combining a world and movement choice:
 
 ```sh
-cargo run --locked -- --config configs/large-world.toml --config configs/resource-patches.toml --seed 1
+cargo run --locked -- \
+  --config configs/world/large-nonuniform.toml \
+  --config configs/movement/cost.toml \
+  --seed 1 --ticks 1000
 ```
 
 Energy units use a reference reproduction threshold of `1.0`, consistently for

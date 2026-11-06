@@ -9,13 +9,13 @@ Initialize the drawing dependency with `git submodule update --init`, then:
 
 ```sh
 # Start a seeded, bounded experiment.
-cargo run --locked -- runs/baseline --config configs/baseline.toml --seed 1 --ticks 256
+cargo run --locked -- runs/baseline --config configs/world/small-uniform.toml --seed 1 --ticks 256
 # Continue the saved experiment with a viewer.
-cargo run --locked -- runs/baseline --config configs/viewer.toml
+cargo run --locked -- runs/baseline --config configs/viewer/window.toml
 # Inspect a small deterministic scene.
-cargo run --locked -- --config configs/debug.toml --viewer --paused
+cargo run --locked -- --config configs/world/debug.toml --config configs/diagnostics/trace.toml --viewer --paused
 # Explore smooth resource patches with camera pan and zoom.
-cargo run --locked -- --config configs/large-world.toml --config configs/resource-patches.toml --viewer --paused
+cargo run --locked -- --config configs/world/large-nonuniform.toml --viewer --paused
 ```
 
 Run directories contain resolved configuration, checkpoints, and metrics.

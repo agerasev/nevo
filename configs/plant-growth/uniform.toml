@@ -1,0 +1,4 @@
+# The same per-plant growth rate throughout the world.
+[ecosystem.plant.patches]
+growth_floor = 1.0
+growth_peak = 1.0

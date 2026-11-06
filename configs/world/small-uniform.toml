@@ -1,4 +1,6 @@
 [ecosystem]
+world.width = 1260.0
+world.height = 700.0
 initial_animals = 20
 plants = 500
 minimum_population = 20

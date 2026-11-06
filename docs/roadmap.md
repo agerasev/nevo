@@ -7,13 +7,15 @@ food-production ceiling, while [costly movement](history/2026-11-05-costly-movem
 slowed reproductive turnover. Prioritize environments where navigation and
 behavioral tradeoffs can pay off before adding evolutionary complexity.
 
-Each milestone should yield a bounded runnable preset and relevant invariants.
+Each milestone should yield a runnable preset and relevant invariants, validated
+with an explicit tick budget.
 Steps 1–4 establish navigation; 5–6 extend ecology. Step 7 can happen earlier;
 8–9 need an established evaluation environment.
 
 1. **Completed: larger worlds and camera navigation.** [Camera controls](viewer.md)
-   and fixed [sensing scales](configuration.md) support a bounded
-   [larger-world preset](../configs/large-world.toml) with unchanged initial densities.
+   and fixed [sensing scales](configuration.md) support a
+   [large uniform world](../configs/world/large-uniform.toml) with unchanged
+   initial densities.
 2. **Completed: persistent resource patches.** Fixed Gaussian landscapes set local
    capacity; smooth crowding limits seedling recruitment with bounded sampling and
    configurable recovery. [Composable presets](configuration.md) separate

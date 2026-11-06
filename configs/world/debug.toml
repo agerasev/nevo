@@ -1,5 +1,4 @@
 seed = 1
-trace_ticks = 3
 
 [ecosystem]
 initial_animals = 1
