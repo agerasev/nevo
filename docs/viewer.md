@@ -22,7 +22,8 @@ Overlapping entities therefore have no border crossing their interiors; animal
 fills remain above plant fills. Individual bounds include the border.
 
 The window has **World** and **Metrics** tabs. The [Metrics panel](metrics.md#viewing)
-reads the run's CBOR log independently, including records appended after EOF.
+reads the run's CBOR metrics files independently, discovering new invocation files
+and following records appended after EOF.
 Its searchable scalar plot supports full-history pan/zoom, hover values, and resume
 boundaries. The viewer loop loads bounded batches into memory and downsamples
 changed plots before UI layout, outside Universe locks. There is no separate

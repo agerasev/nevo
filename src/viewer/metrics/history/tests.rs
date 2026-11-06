@@ -260,3 +260,36 @@ fn following_appends_to_memory_without_changing_older_values() {
     assert_eq!(history.last_tick(), Some(1));
     assert_eq!(history.extent(), Some([1, 2]));
 }
+
+#[test]
+fn directory_history_discovers_new_files_and_keeps_overlapping_ticks_separate() {
+    use crate::metrics::log::create_invocation;
+    let temp = Temporary::new();
+    let run = temp.0.parent().unwrap();
+    // Existing historical sessions remain readable alongside new files.
+    write(&temp.0, [session(1, 0), sample(1, 1, Some(10.0))]);
+    let mut history = History::new(run.to_owned());
+    catch_up(&mut history);
+    assert_eq!(history.total_windows(), 1);
+    let (_, mut first) = create_invocation(run).unwrap();
+    first.append(&session(1, 0)).unwrap();
+    first.append(&sample(1, 1, Some(20.0))).unwrap();
+    catch_up(&mut history);
+    first.append(&sample(1, 2, Some(21.0))).unwrap();
+    catch_up(&mut history);
+    let (_, mut second) = create_invocation(run).unwrap();
+    second.append(&session(1, 0)).unwrap();
+    second.append(&sample(1, 1, Some(30.0))).unwrap();
+    catch_up(&mut history);
+    let segments = history.query("value", None, 800);
+    assert_eq!(segments.len(), 3);
+    assert_eq!(
+        segments.iter().map(|s| s.session).collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    assert_eq!(segments[0].points[0].value, 10.0);
+    assert_eq!(segments[1].points.len(), 2);
+    assert_eq!(segments[2].points[0].value, 30.0);
+    assert_eq!(history.extent(), Some([1, 2]));
+    assert_eq!(history.total_windows(), 4);
+}

@@ -77,12 +77,10 @@ including Ctrl-C; their interval and retention count
 are configurable. `--ticks N` always means N additional ticks for that invocation.
 See [persistence options, format, and recovery](docs/persistence.md).
 
-Lightweight population, event, and energy statistics are enabled by default.
-Layer `--config configs/metrics.toml` for detailed behavior, brain, and genetic
-statistics. Finalized windows append to one `metrics.cborseq` per run;
-accumulators reset on resume while recorded history remains. The **Metrics** tab
-follows that file alongside **World**, keeping its full plotting history in memory
-and downsampling for display. See [metrics and aggregation](docs/metrics.md).
+Population, mean energy, food intake, turnover, immigration, and movement metrics
+are enabled by default. Layer `--config configs/metrics.toml` for 10,000-tick windows.
+Each invocation writes a separate file under `metrics/`; the **Metrics** tab follows
+the run's files and keeps plotting history in memory. See [metrics](docs/metrics.md).
 
 Build with `--no-default-features` when graphics are unnecessary; the executable
 and runner stay the same. Add `--config configs/smoke.toml` to verify twelve
@@ -101,7 +99,7 @@ Multi-file modules use `mod.rs` inside their directory.
 | [ecosystem](src/ecosystem/mod.rs) | Plants and complete animals with body and mind; foraging, reproduction, and immigration rules. |
 | [universe](src/universe/mod.rs) | Complete serializable state and the small Simulation stepping contract. |
 | [run](src/run/mod.rs) | Shared read/compute/write loop and controls. |
-| [metrics](src/metrics/mod.rs) | Typed collection and selected, mergeable reductions. |
+| [metrics](src/metrics/mod.rs) | Read-only summaries and per-invocation logs. |
 | [viewer](src/viewer/mod.rs) | Optional Draw contract, wgame scenes, and generic window controls. |
 | [app](src/app/mod.rs) | CLI configuration, run storage, worker and viewer startup. |
 

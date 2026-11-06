@@ -63,7 +63,9 @@ and an optional metrics log reinitializes from that saved seed. Recorded history
 runs/baseline/
   config.toml
   .lock
-  metrics.cborseq          # enabled by default; appends across invocations
+  metrics/                # one file per enabled invocation
+    00000000000000000001.cborseq
+    00000000000000000002.cborseq
   checkpoints/
     00000000000000000100.cbor
     00000000000000000200.cbor
@@ -84,12 +86,13 @@ no safetensors payload is used.
 Locks, channels, pacing clocks, and viewer/device resources live outside Universe.
 Metric caches are omitted from serialization and start fresh after loading;
 recurrent memory and RNG positions are required state. Finalized statistics remain
-in the single [CBOR metrics log](metrics.md), which is never replayed into checkpoints.
+in the [per-invocation CBOR metrics files](metrics.md), which is never replayed into checkpoints.
 Core simulation and genetics contracts have no persistence bounds.
 
 The current format is checkpoint version 11, with `foraging-sense-first-v5` and
 `animal-rnn-3-n-3-v2` model identifiers. Only this format is accepted;
-compatibility and migrations are intentionally unsupported. Rust module/type names
+older simulation formats are unsupported. Removed diagnostic settings in saved
+version-11 configurations are discarded on load (see [metrics](metrics.md)). Rust module/type names
 are not part of the format.
 
 Only the simulation owner saves, between complete ticks. Snapshot copying holds

@@ -136,8 +136,6 @@ on resume. Seed and all physical, genetic, and initialization settings must matc
 the checkpoint; conflicting overrides fail before replacing saved files. See
 [persistence](persistence.md) for format and recovery.
 
-Metrics configuration follows component ownership: `ecosystem.metrics`,
-`ecosystem.animal.metrics`, `ecosystem.animal.body.metrics`,
-`ecosystem.animal.mind.brain.metrics`, and `ecosystem.plant.metrics`.
-The [detailed metrics preset](../configs/metrics.toml) is an overlay; see
-[selection syntax and window semantics](metrics.md).
+Metrics use `ecosystem.metrics.enabled` and `ecosystem.metrics.window_ticks`
+(default 1,000). The [metrics preset](../configs/metrics.toml) uses 10,000-tick windows.
+See [measurements, units, and window semantics](metrics.md).

@@ -163,3 +163,44 @@ fn viewer_preset_and_shortcut_never_enable_simulation_pacing() {
     let unpaced = load(&["--tick-hz", "0"], Some(&paced)).unwrap();
     assert_eq!(unpaced.loop_options().unwrap().interval, Duration::ZERO);
 }
+
+#[test]
+fn saved_diagnostic_selectors_are_discarded_but_new_overlays_reject_them() {
+    let directory = Directory::new();
+    let mut old = serde_json::to_value(Config::default()).unwrap();
+    old["ecosystem"]["metrics"]["genetic_diversity"] = true.into();
+    old["ecosystem"]["metrics"]["population"] = true.into();
+    old["ecosystem"]["metrics"]["event_rates"] = true.into();
+    for parent in [
+        "/ecosystem/animal",
+        "/ecosystem/animal/body",
+        "/ecosystem/animal/mind/brain",
+        "/ecosystem/plant",
+    ] {
+        old.pointer_mut(parent).unwrap()["metrics"] =
+            serde_json::json!({"energy": {"min": true}, "saturation": true});
+    }
+    assert!(serde_json::from_value::<Config>(old.clone()).is_err());
+    assert_eq!(
+        Config::from_saved_value(old.clone()).unwrap(),
+        Config::default()
+    );
+    let path = directory.0.join("config.toml");
+    fs::write(&path, toml::to_string(&old).unwrap()).unwrap();
+    assert_eq!(
+        load(&[directory.0.to_str().unwrap()], None).unwrap(),
+        Config::default()
+    );
+    assert!(load(&["--config", path.to_str().unwrap()], None).is_err());
+
+    // Checkpoint configuration uses the same saved-data conversion.
+    #[derive(Deserialize)]
+    struct Stored {
+        #[serde(deserialize_with = "Config::deserialize_saved")]
+        config: Config,
+    }
+    let mut bytes = Vec::new();
+    ciborium::into_writer(&serde_json::json!({"config": old}), &mut bytes).unwrap();
+    let stored: Stored = ciborium::from_reader(&bytes[..]).unwrap();
+    assert_eq!(stored.config, Config::default());
+}

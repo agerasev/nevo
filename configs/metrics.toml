@@ -1,24 +1,4 @@
-# Detailed metrics overlay; lightweight statistics are already enabled by default.
-# Compose with any simulation preset. Statistics restart after resume.
+# Record the standard ecological metrics over longer windows.
 [ecosystem.metrics]
 enabled = true
 window_ticks = 10000
-population = true
-event_rates = true
-genetic_diversity = true
-
-[ecosystem.animal.metrics]
-food_gained = { count = true, sum = true, mean = true, min = true, max = true, variance = true }
-offspring = { count = true, sum = true, mean = true, min = true, max = true, variance = true }
-distance = { count = true, sum = true, mean = true, min = true, max = true, variance = true }
-observed_survival = { count = true, mean = true, min = true, max = true }
-
-[ecosystem.animal.body.metrics]
-energy = { count = true, sum = true, mean = true, min = true, max = true, variance = true }
-
-[ecosystem.animal.mind.brain.metrics]
-activation = { count = true, mean = true, min = true, max = true, variance = true }
-saturation = true
-
-[ecosystem.plant.metrics]
-energy = { count = true, sum = true, mean = true, min = true, max = true, variance = true }

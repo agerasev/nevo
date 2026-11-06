@@ -58,7 +58,7 @@ where
         &self,
         tick: u64,
     ) -> Result<(TickReport, EcosystemUpdate<M, M::Update>)> {
-        let (metrics, reset_metrics) = self.metrics.begin(tick);
+        let metrics = self.metrics.begin(tick);
         let mut update = EcosystemUpdate {
             rng: self.rng.clone(),
             context: self.context.clone(),
@@ -82,10 +82,7 @@ where
                 "non-finite movement action"
             );
             actions.push((id, observation, action));
-            let mut body = animal.body.clone();
-            if reset_metrics {
-                body.metrics.reset();
-            }
+            let body = animal.body.clone();
             update.animals.insert(
                 id,
                 Animal {
@@ -114,12 +111,6 @@ where
                 position_before: body.position,
                 position_after: position,
             });
-            let distance = if body.metrics.animal.distance.enabled() {
-                body.position.distance(position)
-            } else {
-                0.0
-            };
-            body.metrics.observe_action(distance);
             body.position = position;
         }
 
@@ -134,9 +125,6 @@ where
                 {
                     let gain = plant.energy * self.parameters.feeding.efficiency;
                     body.energy += gain;
-                    if body.metrics.animal.food_gained.enabled() {
-                        body.metrics.food_gained += gain;
-                    }
                     events.push(Event::Meal {
                         id,
                         plant: plant.id,
@@ -151,13 +139,6 @@ where
         for (&id, animal) in &self.animals {
             if animal.body.energy < 0.0 {
                 events.push(Event::Death { id });
-                if update.metrics.observed_survival.enabled() {
-                    update.metrics.observed_survival.push(if reset_metrics {
-                        0.0
-                    } else {
-                        animal.body.metrics.active_ticks as f64
-                    });
-                }
             }
         }
         while update.plants.len() < self.plant_target {
@@ -174,12 +155,6 @@ where
                 self.parameters.plant.replacement_energy,
                 self.parameters.plant.radius_scale,
             )?;
-            update
-                .plants
-                .last_mut()
-                .expect("new plant exists")
-                .metrics
-                .energy = self.metrics.plant_config.energy;
         }
         let count = self.minimum_population.saturating_sub(update.animals.len());
         for _ in 0..count {
@@ -233,9 +208,6 @@ where
         while let Some(parent) = parents.pop_front() {
             let animal = update.animals.get_mut(&parent).expect("parent exists");
             let body = &mut animal.body;
-            if body.metrics.animal.offspring.enabled() {
-                body.metrics.offspring += 1;
-            }
             let before = body.energy;
             let energy = before * self.parameters.reproduction.child_energy_fraction;
             body.energy *= 1.0 - self.parameters.reproduction.child_energy_fraction;
@@ -260,16 +232,10 @@ where
             };
             let mut genome = inherited.clone();
             genome.mutate(&self.mutation, &mut update.context)?;
-            let mind = Self::develop(
-                genome,
-                self.mind_config.as_ref(),
-                self.metrics.config.enabled,
-            )?;
+            let mind = Self::develop(genome, self.mind_config.as_ref())?;
             let child = allocate_animal(&mut update.next_animal)?;
-            let mut body =
+            let body =
                 Body::with_radius_scale(child_position, energy, self.parameters.body.radius_scale);
-            body.metrics =
-                metrics::BodyCache::new(self.metrics.body_config, self.metrics.animal_config);
             update.animals.insert(
                 child,
                 Animal {

@@ -6,7 +6,7 @@ use anyhow::Result;
 use nevo::{
     metrics::{
         Metrics,
-        log::{FILE_NAME, FORMAT_VERSION, Record, Session, Writer},
+        log::{FORMAT_VERSION, Record, Session, Writer, create_invocation},
     },
     run::Run,
 };
@@ -24,13 +24,12 @@ pub struct MetricsLog {
 
 impl MetricsLog {
     /// The caller holds the run's writer lock for this object's entire lifetime.
-    /// Validate existing records before replacing the saved run configuration.
+    /// Each invocation owns a fresh file; earlier logs stay untouched.
     pub fn new(directory: &Path, options: &Config, start_tick: u64) -> Result<Option<Self>> {
         if !options.ecosystem.metrics.enabled {
             return Ok(None);
         }
-        let path = directory.join(FILE_NAME);
-        let mut writer = Writer::open(&path)?;
+        let (path, mut writer) = create_invocation(directory)?;
         let session = writer.next_session_id()?;
         writer.append(&Record::Session(Session {
             version: FORMAT_VERSION,

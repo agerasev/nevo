@@ -8,7 +8,7 @@ use std::{
 use anyhow::Result;
 use ciborium::Value;
 
-use crate::metrics::log::{Reader, Record, Sample};
+use crate::metrics::log::{Record, RunReader, Sample};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Window {
@@ -40,7 +40,7 @@ struct Snapshot {
 }
 
 pub(super) struct History {
-    reader: Reader,
+    reader: RunReader,
     snapshots: Vec<Snapshot>,
     names: BTreeSet<String>,
     sessions: BTreeMap<u64, String>,
@@ -50,7 +50,7 @@ pub(super) struct History {
 impl History {
     pub fn new(path: PathBuf) -> Self {
         Self {
-            reader: Reader::new(path),
+            reader: RunReader::new(path),
             snapshots: Vec::new(),
             names: BTreeSet::new(),
             sessions: BTreeMap::new(),

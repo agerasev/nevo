@@ -1,12 +1,6 @@
-//! Typed, composable metrics. Accumulators remain local to their owners.
+//! Read-only summaries; experiment-specific observations stay in the ecosystem.
 
 pub mod log;
-
-mod aggregate;
-mod selection;
-
-pub use aggregate::{Aggregate, Count, Max, Mean, Min, Moments, Sum};
-pub use selection::{SelectedStats, Selection, Statistics};
 
 /// Read metrics without changing simulation state or its caches.
 pub trait Metrics {
@@ -20,6 +14,3 @@ pub trait Metrics {
         summary
     }
 }
-
-#[cfg(test)]
-mod tests;

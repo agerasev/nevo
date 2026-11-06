@@ -102,12 +102,47 @@ impl Config {
             let text = fs::read_to_string(path)
                 .with_context(|| format!("reading configuration {name}"))?;
             // Validate every layer before merging, but merge only explicitly set fields.
-            toml::from_str::<Self>(&text)
-                .with_context(|| format!("parsing configuration {name}"))?;
-            let document = toml::from_str(&text)?;
+            let document = if saved.as_ref() == Some(path) {
+                let value: toml::Value = toml::from_str(&text)?;
+                let config = Self::from_saved_value(serde_json::to_value(value)?)?;
+                toml::from_str(&config.to_toml()?)?
+            } else {
+                toml::from_str::<Self>(&text)
+                    .with_context(|| format!("parsing configuration {name}"))?;
+                toml::from_str(&text)?
+            };
             merge(&mut merged, document);
         }
         merged.try_into().context("parsing merged configuration")
+    }
+
+    // Only saved configurations discard the removed diagnostic selectors.
+    // Explicit new overlays still reject unknown/obsolete keys.
+    fn from_saved_value(mut value: serde_json::Value) -> Result<Self> {
+        for (parent, fields) in [
+            (
+                "/ecosystem/metrics",
+                &["population", "event_rates", "genetic_diversity"][..],
+            ),
+            ("/ecosystem/animal", &["metrics"][..]),
+            ("/ecosystem/animal/body", &["metrics"][..]),
+            ("/ecosystem/animal/mind/brain", &["metrics"][..]),
+            ("/ecosystem/plant", &["metrics"][..]),
+        ] {
+            if let Some(table) = value.pointer_mut(parent).and_then(|v| v.as_object_mut()) {
+                for field in fields {
+                    table.remove(*field);
+                }
+            }
+        }
+        serde_json::from_value(value).context("reading saved configuration")
+    }
+
+    pub fn deserialize_saved<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Self::from_saved_value(value).map_err(serde::de::Error::custom)
     }
 
     pub fn to_toml(&self) -> Result<String> {
@@ -118,9 +153,6 @@ impl Config {
         self.ecosystem.validate()?;
         self.ecosystem.genetics.initialization.validate()?;
         self.ecosystem.genetics.mutation.validate()?;
-        if self.ecosystem.metrics.enabled {
-            self.ecosystem.animal.mind.brain.metrics.validate()?;
-        }
         ensure!(
             self.keep_checkpoints > 0,
             "keep-checkpoints must be at least one"

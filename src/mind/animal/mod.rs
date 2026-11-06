@@ -10,7 +10,6 @@ use super::{
 use crate::{
     context::Context,
     ecosystem::{FoodObservation, MoveAction},
-    metrics::Metrics,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -64,8 +63,8 @@ where
     type Update = M::Update;
     type Config = Config<M::Config>;
 
-    fn configure(&mut self, config: &Self::Config, metrics_enabled: bool) -> Result<()> {
-        self.brain.configure(&config.brain, metrics_enabled)
+    fn configure(&mut self, config: &Self::Config) -> Result<()> {
+        self.brain.configure(&config.brain)
     }
 
     fn compute_update(
@@ -96,14 +95,6 @@ where
 
     fn validate(&self) -> Result<()> {
         self.brain.validate()
-    }
-}
-
-impl<M: Metrics> Metrics for AnimalMind<M> {
-    type Summary = M::Summary;
-
-    fn collect_metrics(&self, summary: &mut Self::Summary) {
-        self.brain.collect_metrics(summary);
     }
 }
 

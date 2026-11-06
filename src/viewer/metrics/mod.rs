@@ -132,7 +132,7 @@ impl Panel {
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
         let (Some(path), Some(history)) = (&self.path, &self.history) else {
-            ui.label("No metrics file is attached to this viewer.");
+            ui.label("No metrics history is attached to this viewer.");
             return;
         };
         ui.horizontal(|ui| {

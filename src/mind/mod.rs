@@ -14,10 +14,8 @@ pub trait Mind<C: Context + ?Sized> {
     type Update;
     type Config: Default + Clone + std::fmt::Debug;
 
-    /// Apply runtime settings on creation or resume, resetting diagnostic caches
-    /// without changing inherited parameters or recurrent state. The parent gate
-    /// disables every collector even when individual metrics remain selected.
-    fn configure(&mut self, _config: &Self::Config, _metrics_enabled: bool) -> Result<()> {
+    /// Apply runtime settings without changing inherited parameters or recurrent state.
+    fn configure(&mut self, _config: &Self::Config) -> Result<()> {
         Ok(())
     }
 

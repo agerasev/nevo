@@ -15,7 +15,7 @@ serializes directly to CBOR; locks and the viewer live outside it.
 | [Genome / Mutate](../src/genome/mod.rs) | Clone inherited representations and mutate them using an execution context. |
 | [RandomInit](../src/genome/mod.rs) | Initialize a value from typed settings and the context RNG, independently of Genome. |
 | [Context](../src/context/mod.rs) | Supply RNG and execution resources; the CPU context owns the genetic RNG. |
-| [Metrics / Aggregate](metrics.md) | Collect typed component summaries and reduce scalar observations. |
+| [Metrics](metrics.md) | Read typed ecosystem observations without changing state. |
 
 `Ecosystem<M, G, P>` can use another compatible mind, genome, and mutation parameter
 type. Genetic minds expose their genome through `AsRef<G>` and construct fresh minds
@@ -74,8 +74,7 @@ computation; their `Update` types contain changes to commit.
 
 Each contract has an associated `Config` and a `configure` setup hook. Creation
 and `Universe::restore(config)` configure components before running; step methods
-use stored settings. Mind setup receives its own config and the parent's metrics
-enable flag, which gates diagnostics without changing behavior. New animals use
+use stored settings. Mind setup receives only its own config. New animals use
 the ecosystem's stored mind settings. Configuration follows component ownership
 without a per-entity map. Direct `Universe::advance()` needs no configuration.
 `Run::from_universe` wraps an already configured Universe; cloning a Run preserves
@@ -91,7 +90,7 @@ the model or mind.
 The ecosystem works on body and plant copies to preserve sequential feeding and
 birth rules. Its update carries final physical state, mind updates, new animals,
 deaths, RNG positions, and ID counters. Existing minds and genomes stay in place:
-the RNN computes recurrent memory and optional diagnostics, and reproduction copies
+the RNN computes recurrent memory, and reproduction copies
 a genome only for the child. Immutable experiment parameters are borrowed during computation.
 Updates are transient; metric caches are omitted from the serialized Universe.
 
@@ -142,6 +141,6 @@ run and checks pause/step/pacing commands.
 
 ## Statistics
 
-Independent [Metrics and Aggregate contracts](metrics.md) compose typed summaries.
-Components own optional caches, computed with their updates and omitted from CBOR.
+The read-only [Metrics contract](metrics.md) exposes a typed ecosystem summary.
+One ecosystem window accumulator observes existing tick reports and is omitted from CBOR.
 Windows restart after resume; metrics never change simulation rules or random draws.

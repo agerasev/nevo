@@ -23,6 +23,7 @@ pub struct Checkpoint {
     format_version: u32,
     world_model: String,
     agent_model: String,
+    #[serde(deserialize_with = "Config::deserialize_saved")]
     pub config: Config,
     pub state: Universe,
 }
@@ -184,6 +185,7 @@ impl RunDirectory {
                         | "config.toml"
                         | ".config.toml.tmp"
                         | nevo::metrics::log::FILE_NAME
+                        | nevo::metrics::log::DIRECTORY_NAME
                 )
             ) {
                 bail!(

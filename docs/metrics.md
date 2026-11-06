@@ -1,191 +1,114 @@
 # Metrics
 
-Lightweight metrics are enabled by default. Layer the
-[detailed metrics preset](../configs/metrics.toml) over an experiment configuration:
+Eight inexpensive ecological metrics are enabled by default:
 
-```sh
-cargo run --locked -- --config configs/baseline.toml --config configs/metrics.toml --seed 1 --ticks 250
-cargo run --locked -- runs/my-run --config configs/metrics.toml --ticks 250
-```
+| Metric | Meaning |
+| --- | --- |
+| `population` | Animal count at the window endpoint. |
+| `mean_animal_energy` | Mean energy of animals present at the endpoint. |
+| `mean_plant_energy` | Mean energy of plants present at the endpoint. |
+| `food_per_tick` | Total assimilated food energy divided by observed ticks. |
+| `births_per_tick` | Births divided by observed ticks. |
+| `deaths_per_tick` | Deaths divided by observed ticks. |
+| `immigrants_per_tick` | Immigrants divided by observed ticks. |
+| `distance_per_animal_tick` | Controlled travel divided by active animal-ticks. |
 
-Defaults collect animal/plant counts, event totals and rates, and animal/plant
-energy mean/min/max. Brain diagnostics, genetic diversity, movement distance,
-and other detailed reductions are opt-in. `[ecosystem.metrics] enabled = false`
-disables all collectors, including nested brain diagnostics, and log output.
-`window_ticks` defaults to 1000 and must be positive when enabled. Windows are
-consecutive, non-overlapping tick intervals `(start_tick, end_tick]`. Each summary
-gives its actual bounds, completed tick count (`samples`), and whether the window
-is complete.
+These describe abundance, energy availability, food collection, turnover, reliance
+on immigration, and movement. They do not establish adaptation; that requires
+controlled comparisons. Plant count is fixed by configuration. Neuron monitoring,
+genetic reducers, per-survivor totals, truncated survival observations, and the
+selectable count/sum/min/max/variance framework have been removed.
 
-Each run has one append-only `metrics.cborseq`, a CBOR Sequence of independently
-encoded records. Each metrics-enabled invocation appends immutable metadata: its
-ID, start/resume tick, UTC timestamp, effective TOML config, compiled Git revision
-(with a dirty marker when applicable), package version, and model identifiers.
-A source archive without Git records an unknown revision. Window samples reference
-the invocation ID and carry their end tick and finalized component summary.
+## Windows and configuration
 
-One sample is written per completed window, plus the unfinished window on orderly
-exit. Finishing exactly at a boundary does not duplicate that window. A zero-tick
-invocation records metadata only. Snapshot values describe the end of the window;
-event totals cover all its ticks. Previous invocations' configuration stays in the
-file even when `config.toml` changes. The current metrics format is version 1;
-old JSONL logs are not imported or modified.
-
-The [log reader](../src/metrics/log/mod.rs) always follows the same file: it reads
-existing records, waits at EOF or an incomplete tail, then accepts later appends.
-It also accepts creation after the reader starts. It never takes the run writer
-lock. Polls bound the work per call; complete records before a corrupt item remain
-readable, and the next poll reports that item as an error.
-
-Before appending, the writer validates the entire file under the run writer lock.
-It removes only an incomplete final CBOR item. Malformed CBOR, invalid schemas,
-and invalid record ordering produce an error without changing the file. Records
-are limited to 16 MiB. Each append becomes visible to readers; orderly shutdown
-also syncs the file to disk. Power loss can still lose unsynced data. CBOR Sequence
-has no checksum and cannot reliably recover past an internally corrupted record.
-
-## Viewing
-
-Attach the viewer and select **Metrics** to browse the recorded scalar series:
-
-```sh
-cargo run --locked -- --config configs/baseline.toml --config configs/metrics.toml --viewer
-```
-
-Use the search field and metric selector, drag or scroll to pan, Ctrl-scroll or
-pinch to zoom, and hover for values and window bounds. **Follow data** fits new
-records automatically; panning or zooming turns it off. **Fit all** resets the view.
-Diamonds mark partial windows. Missing values break curves; separate invocation
-curves preserve resume boundaries and overlapping ticks after restoring an older
-checkpoint.
-
-The viewer loads the full plotting history into memory once and adds new windows
-as they arrive. Panning, zooming, and selecting metrics use these retained values
-without rereading the file. The viewer loop loads one bounded batch per frame
-while catching up, and polls every 200 ms when caught up. Plot data is recomputed
-only when history, metric selection, viewport, or plot width changes. This work
-runs before UI layout and outside Universe locks, with no separate metrics thread.
-Zoomed-out curves retain the first, last, minimum, and maximum recorded values in horizontal display
-bins; zooming in reveals the original points. There is no history cap, offset
-index, or additional file. Memory use grows with the number of windows and metrics;
-this is the current simplicity tradeoff. Very large histories can also make plot
-updates take longer on the viewer thread.
-
-The reader follows appends even while World is selected and after catching up;
-there is no historical/live mode distinction. Browsing an older range keeps that
-viewport when new windows arrive. Loading and plotting use the log, without reading
-or advancing the Universe. Collection continues independently of the selected tab.
-Switching to Metrics skips world scene collection and drawing in the normal viewer.
-`viewer.tab = "metrics"` selects it initially (`"world"` is the default).
-
-## Selection and interpretation
-
-Scalar selections accept `count`, `sum`, `mean`, `min`, `max`, and `variance` booleans.
-They default to false except energy's `mean`, `min`, and `max`. For example:
+Only collection and recording interval are configurable:
 
 ```toml
 [ecosystem.metrics]
 enabled = true
 window_ticks = 1000
-population = true
-event_rates = true
-genetic_diversity = true
-
-[ecosystem.animal.body.metrics.energy]
-count = true
-mean = true
-min = true
-max = true
-
-[ecosystem.animal.metrics.offspring]
-sum = true
-mean = true
-max = true
 ```
 
-Selections belong to the component which defines the measurement. Typed settings
-are applied once on creation and resume, down the component ownership tree.
-Newborns, immigrants, and replacement plants receive the current settings at
-creation. Steps use stored settings; window rollover clears counters while
-preserving selections. Configuration files are saved with the run; selectors and
-window length can change on resume. Setup resets accumulation without changing
-physical state, recurrent memory, or randomness.
+The [metrics preset](../configs/metrics.toml) uses 10,000 ticks. Windows are consecutive
+intervals `(start_tick, end_tick]`. Each record includes actual tick count
+(`samples`), active animal-ticks, and whether the window is complete. This metadata
+is excluded from plotted series. One sample is written per complete window, plus
+the unfinished window on orderly exit; the last full window is never duplicated.
 
-| Selection | Measurement |
-| --- | --- |
-| `ecosystem.metrics.population` | Current animal and plant counts. |
-| `ecosystem.metrics.event_rates` | Meals, food gained, births, deaths, and immigrants over the window; birth/death/immigration rates per observed tick and food/meal/birth/death rates per active animal-tick. |
-| `ecosystem.animal.metrics.food_gained` | Window food gain per currently present animal. |
-| `ecosystem.animal.metrics.offspring` | Window offspring count per currently present animal. |
-| `ecosystem.animal.metrics.distance` | Window controlled movement distance per currently present animal, excluding birth offsets. |
-| `ecosystem.animal.metrics.observed_survival` | Active ticks observed within the window for animals that died in it. |
-| `ecosystem.animal.body.metrics.energy` | Current animal energy distribution. |
-| `ecosystem.plant.metrics.energy` | Current plant energy distribution. |
-| `ecosystem.animal.mind.brain.metrics.activation` | Latest hidden activations across current brains that have acted since initialization or resume. |
-| `ecosystem.animal.mind.brain.metrics.saturation` | Fraction of those hidden units with absolute activation at least `saturation_threshold` (default 0.95). |
-| `ecosystem.metrics.genetic_diversity` | Mean population variance across corresponding genome coordinates, including newborns. |
+Rates use actual exposure, including partial windows. An active animal-tick means
+one animal sensed and acted. Newborns and immigrants first contribute next tick;
+animals that later die still contribute their movement and events. Distance excludes
+birth offsets and growth clamping. Empty populations have no energy mean; zero
+active exposure has no distance rate. Unavailable values are omitted.
 
-An active animal-tick means an animal sensed and acted during that tick; newborns
-and immigrants first contribute on the next tick. Rates use actual exposure, even
-in partial windows. Zero exposure makes the corresponding rate unavailable.
-Selected empty counts and sums are zero; empty means, extrema, and variances are
-unavailable and omitted from recorded summaries. Variance is population variance, `M2 / n`.
+Changing the interval changes time resolution and smoothing, not units or scale.
+A long-window rate equals the exposure-weighted average of its constituent windows:
+use tick counts for event/food rates and active animal-ticks for distance. Snapshot
+values at the same endpoint are identical regardless of interval. Different
+endpoints can naturally differ; averages of endpoint snapshots are not time averages.
+Resizing the viewer only changes downsampling, never recorded values.
 
-Window offspring and food gain are useful reproductive and foraging proxies.
-They are not proof of adaptation: immigration can sustain an unfit population,
-resource density changes opportunity, and summaries over surviving animals omit
-animals that died. World event totals retain those animals' events. Observed
-survival is truncated by the window and includes only deaths, so it is not a
-lifespan estimate. Brain activity and genetic variance are diagnostics, not fitness.
-Controlled comparisons across seeds and conditions remain necessary.
+## Files and resume
 
-For heading changes and energy budgets over all animals, replay a saved checkpoint
-with the same build:
+Each metrics-enabled invocation creates a new numbered file:
 
-```sh
-cargo run --release --no-default-features --example movement_report -- runs/RUN/checkpoints/TICK.cbor
+```text
+runs/RUN/metrics/
+  00000000000000000001.cborseq
+  00000000000000000002.cborseq
 ```
 
-This writes `analysis/movement.json` beside the checkpoints only after the replay's
-complete final state matches the checkpoint exactly. It records mean turn angle
-and fractions of turns above 90° and 150° between consecutive nonzero controlled
-displacements of the same animal; stops break the sequence and birth offsets are
-excluded. Totals include animals that later die, plus energy expenditure, food,
-and population exposure. The report includes 1,000-tick windows and a final-third
-summary. These are movement diagnostics, not a standalone fitness measure.
+Each file is a CBOR Sequence: one metadata record followed by window samples.
+Metadata includes start tick, UTC timestamp, effective TOML configuration,
+compiled Git revision, package version, and model identifiers. The local session ID
+is 1; file boundaries distinguish invocations. There are no separator records between
+invocations within new files. A zero-tick invocation writes metadata only.
+The envelope format remains version 1; metric names describe their units.
 
-## Contracts and caches
+Earlier files are never modified or scanned by the new writer. Orderly shutdown
+syncs the current file. An interrupted trailing record remains in its original
+file; readers can continue with the next invocation. Complete malformed records
+are reported as errors, not silently skipped. Records are limited to 16 MiB.
+There is no checksum or recovery past internal corruption.
 
-[Metrics](../src/metrics/mod.rs) exposes a typed `Summary` through
-`collect_metrics(&self, &mut summary)` and the convenience `metrics()` query.
-Bodies, plants, minds, genomes, and animals merge into typed summaries. The
-ecosystem replaces its complete snapshot on collection: pooling different worlds
-or windows requires an explicit analysis operation. There is no runtime registry.
-Genome diversity is computed on demand over matching weight coordinates; variance among different weights within one genome is not diversity.
-Different hidden widths have incompatible coordinates, so their pooled diversity
-is unavailable. `saturation_threshold` accepts values from zero through one.
+The history reader also accepts the earlier `metrics.cborseq` at the run root,
+read-only, before the new files. That format used metadata records and session IDs
+to separate invocations, rather than raw separator bytes. Old records retain their
+original metric names and definitions. Saved version-11 configurations discard
+removed diagnostic selectors when resuming; explicit new configuration overlays
+reject obsolete keys. Simulation state and checkpoint version are unchanged.
 
-[Aggregate](../src/metrics/aggregate.rs) provides `push`, `merge`, and `value`.
-Count, sum, mean, min, max, and Welford moments can combine independently collected
-samples. `Selection` and `SelectedStats` update only requested reductions. A merge
-combines each reduction's enabled samples; use matching selections for a common
-sample population.
+## Viewing
 
-Event counters live in skipped caches on the ecosystem and concrete animal bodies;
-brain diagnostics live in the RNN. The generic `Animal<B, M>` still owns only body
-and mind. Consequently animal event distributions appear under `animal.body` in
-output, while their selection belongs to `animal.metrics`. Snapshot energy and
-genome reductions run when queried; event caches update on every committed tick.
+Select **Metrics** in the viewer. Search/select a metric, drag or scroll to pan,
+Ctrl-scroll or pinch to zoom, and hover for values and window bounds. **Follow data**
+fits arriving records; panning or zooming disables it. **Fit all** restores the full
+view. Diamonds mark partial windows. Missing values and invocation boundaries break
+curves, including overlapping ticks after restoring an older checkpoint.
 
-Computation creates candidate cache changes under the read lock; publication applies
-them with the physical and mind updates under the write lock. Failed or discarded
-updates publish no metrics. Collection itself is read-only and consumes no randomness.
-Neither `Mind` nor `Simulation` requires the `Metrics` trait.
+The viewer loads history once, discovers new files, and follows the current file
+even while **World** is selected. It reads bounded batches outside Universe locks,
+polling every 200 ms when caught up. Original samples stay in memory; plotting does
+not reread them. Display downsampling retains extrema and endpoints, so narrow plots
+preserve spikes. These extrema are drawing choices, not additional metrics.
+Memory grows with recorded history. `viewer.tab = "metrics"` selects this tab initially.
 
-Runtime metric settings and accumulators are omitted from the Universe checkpoint
-state. Resume reapplies the effective run configuration before stepping, starts
-the next window at the restored tick, and fills it from new observations.
-Before the first observed tick, population and energy snapshots are available,
-but there is no window or event-rate summary. New records append to the same log;
-previous records are never used to reconstruct accumulators. Recurrent
-memory and RNG state remain checkpointed, so resetting metrics preserves dynamics.
+## Collection
+
+[Metrics](../src/metrics/mod.rs) is a read-only typed-summary contract. The ecosystem
+collects event and movement rates from existing `TickReport` data; energy means
+read current bodies/plants only when a summary is requested. No monitoring caches
+or selectors live in bodies, plants, minds, or genomes. Neither `Mind` nor
+`Simulation` requires the metrics trait.
+
+The ecosystem's small window accumulator is part of the prepared tick update:
+failed or discarded updates publish nothing. It consumes no randomness and is
+excluded from serialized simulation state. Resume starts a fresh window at the
+restored tick. Before any tick, population and energy snapshots are available but
+rates are not. Previous logs never reconstruct simulation state or accumulators.
+
+For a targeted movement investigation, the separate
+[`movement_report` example](../examples/movement_report.rs) replays a saved checkpoint
+with the same build, verifies its complete final state, and writes
+`analysis/movement.json`. It measures heading changes and energy budgets offline;
+these additional diagnostics are not part of normal runtime monitoring.

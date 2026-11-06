@@ -1,46 +1,30 @@
 //! Scalar recurrent network with configurable hidden width and evolved parameters.
 
 mod genome;
-mod metrics;
 
 pub use genome::{Initialization, RnnGenome, WeightMutation};
-pub use metrics::{GenomeStatistics, GenomeSummary, MetricsConfig, Statistics, Summary};
 
 use std::array;
 
 use anyhow::{Result, ensure};
 
 use super::Mind;
-use crate::{context::Context, metrics::Metrics};
+use crate::context::Context;
 
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct Config {
-    pub metrics: MetricsConfig,
-}
+pub struct Config {}
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rnn {
     pub genome: RnnGenome,
     pub memory: Vec<f32>,
-    #[serde(skip)]
-    metrics_config: Option<MetricsConfig>,
-    #[serde(skip)]
-    metrics: Summary,
-}
-
-// Observation caches do not participate in simulation-state equality.
-impl PartialEq for Rnn {
-    fn eq(&self, other: &Self) -> bool {
-        self.genome == other.genome && self.memory == other.memory
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Update {
     pub memory: Vec<f32>,
-    metrics: Summary,
 }
 
 impl Rnn {
@@ -49,12 +33,7 @@ impl Rnn {
         let mut memory = Vec::new();
         memory.try_reserve_exact(genome.hidden_units)?;
         memory.resize(genome.hidden_units, 0.0);
-        Ok(Self {
-            genome,
-            memory,
-            metrics_config: None,
-            metrics: Summary::default(),
-        })
+        Ok(Self { genome, memory })
     }
 }
 
@@ -87,17 +66,6 @@ impl<C: Context + ?Sized> Mind<C> for Rnn {
     type Update = Update;
     type Config = Config;
 
-    fn configure(&mut self, config: &Config, metrics_enabled: bool) -> Result<()> {
-        if metrics_enabled {
-            config.metrics.validate()?;
-        }
-        self.metrics_config = (metrics_enabled
-            && (config.metrics.activation.enabled() || config.metrics.saturation))
-            .then_some(config.metrics);
-        self.metrics = Summary::default();
-        Ok(())
-    }
-
     fn compute_update(&self, input: Self::Input, _cx: &mut C) -> Result<(Self::Output, Update)> {
         <Self as Mind<C>>::validate(self)?;
         let weights = &self.genome.weights;
@@ -128,17 +96,11 @@ impl<C: Context + ?Sized> Mind<C> for Rnn {
             *value += bias;
         }
 
-        let metrics = self
-            .metrics_config
-            .as_ref()
-            .map(|config| Summary::from_memory(&memory, config))
-            .unwrap_or_default();
-        Ok((output, Update { memory, metrics }))
+        Ok((output, Update { memory }))
     }
 
     fn apply_update(&mut self, update: Update) {
         self.memory = update.memory;
-        self.metrics = update.metrics;
     }
 
     fn validate(&self) -> Result<()> {
@@ -152,14 +114,6 @@ impl<C: Context + ?Sized> Mind<C> for Rnn {
             "non-finite recurrent memory"
         );
         Ok(())
-    }
-}
-
-impl Metrics for Rnn {
-    type Summary = Summary;
-
-    fn collect_metrics(&self, summary: &mut Summary) {
-        summary.merge(&self.metrics);
     }
 }
 

@@ -19,6 +19,20 @@ pub struct Writer {
 }
 
 impl Writer {
+    /// Create one invocation without modifying any existing log.
+    pub fn create(path: impl AsRef<Path>) -> Result<Self> {
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .context("creating metrics invocation file")?;
+        Ok(Self {
+            file,
+            position: Position::default(),
+            poisoned: false,
+        })
+    }
+
     /// Validate all existing records before changing the file. Only an incomplete
     /// final CBOR item is removed; malformed CBOR/schema/sequence data is an error.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {

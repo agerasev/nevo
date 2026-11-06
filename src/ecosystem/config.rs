@@ -6,10 +6,7 @@ use anyhow::{Result, ensure};
 use glam::DVec2;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
-use crate::{
-    metrics::Selection,
-    mind::{animal, rnn},
-};
+use crate::mind::{animal, rnn};
 
 /// Random placement or an explicit world-space point.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -361,24 +358,18 @@ impl Parameters {
     }
 }
 
-/// Enables collection/output windows; component selectors choose their contents.
+/// Enables inexpensive ecological observations and their recording interval.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MetricsConfig {
     pub enabled: bool,
     pub window_ticks: u64,
-    pub population: bool,
-    pub event_rates: bool,
-    pub genetic_diversity: bool,
 }
 impl Default for MetricsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
             window_ticks: 1000,
-            population: true,
-            event_rates: true,
-            genetic_diversity: false,
         }
     }
 }
@@ -386,23 +377,12 @@ impl Default for MetricsConfig {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AnimalConfig<MC = animal::Config<rnn::Config>> {
-    pub metrics: AnimalMetricsConfig,
     pub body: BodyConfig,
     pub reproduction: ReproductionConfig,
     pub feeding: FeedingConfig,
     pub mind: MC,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct AnimalMetricsConfig {
-    /// Recent totals per currently present animal, not lifetime fitness.
-    pub food_gained: Selection,
-    pub offspring: Selection,
-    pub distance: Selection,
-    /// Active ticks observed in this window for animals that died.
-    pub observed_survival: Selection,
-}
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BodyConfig {
@@ -415,7 +395,6 @@ pub struct BodyConfig {
     pub movement_time_step: f64,
     pub movement_dead_zone: f64,
     pub radius_scale: f64,
-    pub metrics: BodyMetricsConfig,
 }
 impl Default for BodyConfig {
     fn default() -> Self {
@@ -428,7 +407,6 @@ impl Default for BodyConfig {
             movement_time_step: parameters.movement_time_step,
             movement_dead_zone: parameters.movement_dead_zone,
             radius_scale: parameters.radius_scale,
-            metrics: BodyMetricsConfig::default(),
         }
     }
 }
@@ -472,12 +450,6 @@ impl Default for BodyParameters {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct BodyMetricsConfig {
-    #[serde(deserialize_with = "deserialize_energy_selection")]
-    pub energy: Selection,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
 pub struct PlantConfig {
     pub initial_energy: f64,
     pub replacement_energy: f64,
@@ -486,7 +458,6 @@ pub struct PlantConfig {
     pub radius_scale: f64,
     pub initial_position: Placement,
     pub replacement_position: Placement,
-    pub metrics: PlantMetricsConfig,
 }
 impl Default for PlantConfig {
     fn default() -> Self {
@@ -499,7 +470,6 @@ impl Default for PlantConfig {
             radius_scale: parameters.radius_scale,
             initial_position: parameters.initial_position,
             replacement_position: parameters.replacement_position,
-            metrics: PlantMetricsConfig::default(),
         }
     }
 }
@@ -539,69 +509,4 @@ impl Default for PlantParameters {
             replacement_position: Placement::Random,
         }
     }
-}
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct PlantMetricsConfig {
-    #[serde(deserialize_with = "deserialize_energy_selection")]
-    pub energy: Selection,
-}
-
-fn default_energy_selection() -> Selection {
-    Selection {
-        mean: true,
-        min: true,
-        max: true,
-        ..Selection::default()
-    }
-}
-
-impl Default for BodyMetricsConfig {
-    fn default() -> Self {
-        Self {
-            energy: default_energy_selection(),
-        }
-    }
-}
-
-impl Default for PlantMetricsConfig {
-    fn default() -> Self {
-        Self {
-            energy: default_energy_selection(),
-        }
-    }
-}
-
-// A partially specified energy table overrides the lightweight field defaults.
-fn deserialize_energy_selection<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Selection, D::Error> {
-    fn enabled() -> bool {
-        true
-    }
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Fields {
-        #[serde(default)]
-        count: bool,
-        #[serde(default)]
-        sum: bool,
-        #[serde(default = "enabled")]
-        mean: bool,
-        #[serde(default = "enabled")]
-        min: bool,
-        #[serde(default = "enabled")]
-        max: bool,
-        #[serde(default)]
-        variance: bool,
-    }
-    let fields = Fields::deserialize(deserializer)?;
-    Ok(Selection {
-        count: fields.count,
-        sum: fields.sum,
-        mean: fields.mean,
-        min: fields.min,
-        max: fields.max,
-        variance: fields.variance,
-    })
 }

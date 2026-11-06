@@ -1,10 +1,12 @@
 //! Append-only CBOR sequences shared by recording and read-only observation.
 //!
-//! Each invocation appends a Session record, then Sample records. Readers always
+//! Each new invocation creates a file with one Session record, then Samples.
+//! The run reader also accepts historical multi-session files. Readers always
 //! follow growth; an incomplete final item is pending, while malformed data is
 //! an error. The caller holds the run's writer lock when opening a Writer.
 
 mod reader;
+mod runs;
 mod writer;
 
 use anyhow::{Result, ensure};
@@ -12,6 +14,7 @@ use ciborium::Value;
 use serde::{Deserialize, Serialize};
 
 pub use reader::Reader;
+pub use runs::{DIRECTORY_NAME, RunReader, create_invocation};
 pub use writer::Writer;
 
 pub const FILE_NAME: &str = "metrics.cborseq";

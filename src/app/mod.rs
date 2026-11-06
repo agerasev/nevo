@@ -193,7 +193,7 @@ fn execute(mut cli: Cli) -> Result<()> {
     let mut metrics = MetricsLog::new(directory.path(), &options, start_tick)?;
     directory.save_config(&options)?;
     #[cfg(feature = "viewer")]
-    let metrics_path = directory.path().join(nevo::metrics::log::FILE_NAME);
+    let metrics_path = directory.path().to_owned();
     eprintln!("run={}", directory.path().display());
     println!(
         "seed={} ticks={:?} interval={:?}",

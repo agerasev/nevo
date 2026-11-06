@@ -8,13 +8,10 @@ mod update;
 mod draw;
 
 pub use config::{
-    AnimalConfig, AnimalMetricsConfig, BodyConfig, BodyMetricsConfig, Config, FeedingConfig,
-    GeneticsConfig, ImmigrationConfig, MetricsConfig, Placement, PlantConfig, PlantMetricsConfig,
-    ReproductionConfig, SensingConfig, WorldConfig,
+    AnimalConfig, BodyConfig, Config, FeedingConfig, GeneticsConfig, ImmigrationConfig,
+    MetricsConfig, Placement, PlantConfig, ReproductionConfig, SensingConfig, WorldConfig,
 };
-pub use metrics::{
-    AnimalSummary, BodySummary, EventSummary, PlantSummary, PopulationSummary, Summary, Window,
-};
+pub use metrics::{Summary, Window};
 pub use update::EcosystemUpdate;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -74,15 +71,13 @@ impl MoveAction {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Plant {
     pub id: u64,
     pub position: DVec2,
     pub energy: f64,
     radius_scale: f64,
-    #[serde(skip)]
-    metrics: metrics::PlantCache,
 }
 impl Plant {
     pub fn new(id: u64, position: DVec2, energy: f64) -> Self {
@@ -94,7 +89,6 @@ impl Plant {
             position,
             energy,
             radius_scale,
-            metrics: Default::default(),
         }
     }
     pub fn radius(&self) -> f64 {
@@ -102,14 +96,12 @@ impl Plant {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Body {
     pub position: DVec2,
     pub energy: f64,
     radius_scale: f64,
-    #[serde(skip)]
-    metrics: metrics::BodyCache,
 }
 impl Body {
     pub fn new(position: DVec2, energy: f64) -> Self {
@@ -120,7 +112,6 @@ impl Body {
             position,
             energy,
             radius_scale,
-            metrics: Default::default(),
         }
     }
     pub fn radius(&self) -> f64 {
@@ -369,11 +360,6 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
             energy,
             self.parameters.plant.radius_scale,
         )?;
-        self.plants
-            .last_mut()
-            .expect("new plant exists")
-            .metrics
-            .energy = self.metrics.plant_config.energy;
         Ok(())
     }
 
@@ -444,7 +430,6 @@ where
                 &self.initialization,
                 &mut self.rng,
                 &mut self.context,
-                &self.metrics,
                 self.mind_config.as_ref(),
             )?;
             let id = allocate_animal(&mut self.next_animal)?;
@@ -465,7 +450,6 @@ where
             &self.initialization,
             rng,
             context,
-            &self.metrics,
             self.mind_config.as_ref(),
         )
     }
@@ -476,7 +460,6 @@ where
         initialization: &G::Config,
         rng: &mut Xoshiro256PlusPlus,
         context: &mut GeneticContext,
-        metrics: &metrics::Cache,
         mind_config: Option<&M::Config>,
     ) -> Result<Animal<Body, M>> {
         let position = parameters
@@ -488,23 +471,22 @@ where
             Some(template) => template.clone(),
             None => G::random(initialization, context)?,
         };
-        let mut body = Body::with_radius_scale(
+        let body = Body::with_radius_scale(
             position,
             parameters.immigration.energy,
             parameters.body.radius_scale,
         );
-        body.metrics = metrics::BodyCache::new(metrics.body_config, metrics.animal_config);
         Ok(Animal {
             body,
-            mind: Self::develop(genome, mind_config, metrics.config.enabled)?,
+            mind: Self::develop(genome, mind_config)?,
         })
     }
 
-    fn develop(genome: G, config: Option<&M::Config>, metrics_enabled: bool) -> Result<M> {
+    fn develop(genome: G, config: Option<&M::Config>) -> Result<M> {
         let mut mind = M::try_from(genome).map_err(Into::into)?;
         match config {
-            Some(config) => mind.configure(config, metrics_enabled)?,
-            None => mind.configure(&M::Config::default(), false)?,
+            Some(config) => mind.configure(config)?,
+            None => mind.configure(&M::Config::default())?,
         }
         mind.validate()?;
         Ok(mind)
@@ -534,19 +516,10 @@ where
             "model parameters differ from the stored ecosystem"
         );
         for animal in self.animals.values_mut() {
-            animal
-                .mind
-                .configure(&config.animal.mind, config.metrics.enabled)?;
+            animal.mind.configure(&config.animal.mind)?;
         }
         self.metrics = metrics::Cache::new(config);
         self.mind_config = Some(config.animal.mind.clone());
-        for animal in self.animals.values_mut() {
-            animal.body.metrics =
-                metrics::BodyCache::new(self.metrics.body_config, self.metrics.animal_config);
-        }
-        for plant in &mut self.plants {
-            plant.metrics.energy = self.metrics.plant_config.energy;
-        }
         Ok(())
     }
 
@@ -591,21 +564,6 @@ where
 #[cfg(test)]
 mod tests;
 
-impl PartialEq for Body {
-    fn eq(&self, other: &Self) -> bool {
-        self.position == other.position
-            && self.energy == other.energy
-            && self.radius_scale == other.radius_scale
-    }
-}
-impl PartialEq for Plant {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-            && self.position == other.position
-            && self.energy == other.energy
-            && self.radius_scale == other.radius_scale
-    }
-}
 impl<M: PartialEq, G: PartialEq, P: PartialEq, MC, IC: PartialEq> PartialEq
     for Ecosystem<M, G, P, MC, IC>
 {
