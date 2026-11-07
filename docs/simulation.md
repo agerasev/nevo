@@ -24,6 +24,20 @@ Non-finite weights or non-positive/non-finite scales fail validation rather than
 being silently clamped. [Mutation presets](configuration.md) support fixed-scale
 and mutation-free comparisons.
 
+Size mutation attempts to add or remove one hidden neuron with equal probability;
+an attempt beyond the bounds leaves the width unchanged. Growth appends a neuron
+with zero connections and bias before Gaussian mutation; deletion chooses a
+neuron uniformly and removes its incident connections and bias. Surviving
+connections retain their identities. Input/output dimensions remain fixed, and
+each offspring starts with zero recurrent memory at its new width.
+
+Brain upkeep is paid once per ecological tick alongside body upkeep, after
+reproduction. Every remaining animal, including newborns and immigrants, pays for
+its own brain size; nonpositive reserves are culled on the next tick. The
+ecosystem's [brain structure contract](../src/ecosystem/brain.rs) supplies size for
+metabolism and metrics without extending the universal mind or genome interfaces.
+Controllers without a neural brain have no neural upkeep or hidden-size metrics.
+
 Bodies retain heading, linear velocity, and angular velocity. The current mind
 observes the food field and its own motion in body coordinates, then requests
 bounded forward and angular acceleration. Drag damps both velocities. This keeps

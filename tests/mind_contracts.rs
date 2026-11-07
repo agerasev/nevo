@@ -7,7 +7,7 @@ use nevo::{
     mind::{
         Mind,
         animal::AnimalMind,
-        rnn::{INPUTS, OUTPUTS, RnnGenome, WeightMutation},
+        rnn::{INPUTS, Mutation, OUTPUTS, RnnGenome},
     },
 };
 use rand::{Rng, SeedableRng};
@@ -82,7 +82,7 @@ fn mind_initialization_and_mutation_accept_an_unsized_context() {
     };
     let cx: &mut dyn Context<Rng = dyn Rng + Send> = &mut context;
     let mut genome = RnnGenome::random(&Default::default(), cx).unwrap();
-    genome.mutate(&WeightMutation::default(), cx).unwrap();
+    genome.mutate(&Mutation::default(), cx).unwrap();
     AnimalMind::new(genome)
         .unwrap()
         .process(AnimalObservation::default(), cx)
@@ -101,7 +101,7 @@ fn disabled_mutation_preserves_genome_and_random_stream() {
 
     genome
         .mutate(
-            &WeightMutation {
+            &Mutation {
                 enabled: false,
                 ..Default::default()
             },
@@ -126,7 +126,7 @@ fn invalid_mutation_fails_without_changing_genome_or_random_stream() {
         assert!(
             genome
                 .mutate(
-                    &WeightMutation {
+                    &Mutation {
                         log_sigma_std,
                         ..Default::default()
                     },
@@ -150,8 +150,9 @@ fn zero_log_variation_preserves_scale_while_weights_mutate() {
     };
     genome
         .mutate(
-            &WeightMutation {
+            &Mutation {
                 log_sigma_std: 0.0,
+                size_probability: 0.0,
                 ..Default::default()
             },
             &mut cx,
@@ -170,8 +171,9 @@ fn log_normal_scales_drive_gaussian_weight_and_bias_noise() {
         mutation_sigma: 0.07,
         ..Default::default()
     };
-    let mutation = WeightMutation {
+    let mutation = Mutation {
         log_sigma_std: 0.3,
+        size_probability: 0.0,
         ..Default::default()
     };
     let samples = 5000;

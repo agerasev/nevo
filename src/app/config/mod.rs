@@ -153,7 +153,10 @@ impl Config {
     pub fn loop_options(&self) -> Result<LoopOptions> {
         self.ecosystem.validate()?;
         self.ecosystem.genetics.initialization.validate()?;
-        self.ecosystem.genetics.mutation.validate()?;
+        self.ecosystem
+            .genetics
+            .mutation
+            .validate_width(self.ecosystem.genetics.initialization.hidden_units)?;
         ensure!(
             self.keep_checkpoints > 0,
             "keep-checkpoints must be at least one"

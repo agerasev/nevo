@@ -90,11 +90,7 @@ impl<'de> Deserialize<'de> for Placement {
         deserialize = "MC: Deserialize<'de> + Default, IC: Deserialize<'de> + Default, P: Deserialize<'de> + Default"
     )
 )]
-pub struct Config<
-    MC = animal::Config<rnn::Config>,
-    IC = rnn::Initialization,
-    P = rnn::WeightMutation,
-> {
+pub struct Config<MC = animal::Config<rnn::Config>, IC = rnn::Initialization, P = rnn::Mutation> {
     /// Size of the first batch of immigrants.
     pub initial_animals: usize,
     /// Initial count; also the maintained count when replenishment is omitted.
@@ -156,6 +152,7 @@ impl<MC, IC, P> Config<MC, IC, P> {
             immigration: self.immigration,
             sensing: self.sensing,
             body: self.animal.body.parameters(),
+            brain_weight_upkeep: self.animal.brain_weight_upkeep,
             reproduction: self.animal.reproduction,
             feeding: self.animal.feeding,
             plant: self.plant.parameters(),
@@ -270,7 +267,7 @@ impl Default for SensingConfig {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct GeneticsConfig<IC = rnn::Initialization, P = rnn::WeightMutation> {
+pub struct GeneticsConfig<IC = rnn::Initialization, P = rnn::Mutation> {
     pub initialization: IC,
     pub mutation: P,
 }
@@ -304,7 +301,7 @@ impl Default for FeedingConfig {
 }
 
 /// Canonical physical rules, independent of omitted runtime metric selectors.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Parameters {
     pub world: WorldConfig,
@@ -312,9 +309,25 @@ pub(super) struct Parameters {
     pub immigration: ImmigrationConfig,
     pub sensing: SensingConfig,
     pub body: BodyParameters,
+    pub brain_weight_upkeep: f32,
     pub reproduction: ReproductionConfig,
     pub feeding: FeedingConfig,
     pub plant: PlantParameters,
+}
+impl Default for Parameters {
+    fn default() -> Self {
+        Self {
+            world: WorldConfig::default(),
+            physics: PhysicsConfig::default(),
+            immigration: ImmigrationConfig::default(),
+            sensing: SensingConfig::default(),
+            body: BodyParameters::default(),
+            brain_weight_upkeep: AnimalConfig::<()>::default().brain_weight_upkeep,
+            reproduction: ReproductionConfig::default(),
+            feeding: FeedingConfig::default(),
+            plant: PlantParameters::default(),
+        }
+    }
 }
 impl Parameters {
     pub fn validate(self) -> Result<()> {
@@ -374,6 +387,7 @@ impl Parameters {
             "sensing gradient_dead_zone",
         )?;
         nonnegative(self.body.upkeep, "animal upkeep")?;
+        nonnegative(self.brain_weight_upkeep, "brain weight upkeep")?;
         nonnegative(self.body.max_acceleration, "animal max_acceleration")?;
         nonnegative(
             self.body.max_angular_acceleration,
@@ -488,13 +502,27 @@ impl Default for MetricsConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AnimalConfig<MC = animal::Config<rnn::Config>> {
     pub body: BodyConfig,
+    /// Reserve energy per stored brain weight or bias, once per ecological tick.
+    pub brain_weight_upkeep: f32,
     pub reproduction: ReproductionConfig,
     pub feeding: FeedingConfig,
     pub mind: MC,
+}
+
+impl<MC: Default> Default for AnimalConfig<MC> {
+    fn default() -> Self {
+        Self {
+            body: BodyConfig::default(),
+            brain_weight_upkeep: 1e-6,
+            reproduction: ReproductionConfig::default(),
+            feeding: FeedingConfig::default(),
+            mind: MC::default(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

@@ -1,0 +1,4 @@
+[ecosystem.genetics.mutation]
+size_probability = 0.01
+min_hidden_units = 1
+max_hidden_units = 32

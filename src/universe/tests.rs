@@ -22,7 +22,7 @@ fn field<'a>(value: &'a mut Value, path: &[&str]) -> &'a mut Value {
 
 #[test]
 fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover() {
-    let mut config = Config {
+    let mut config: Config = Config {
         initial_animals: 2,
         plants: 2,
         minimum_population: 2,
@@ -44,6 +44,7 @@ fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover()
         radius_min: 20.0,
         radius_max: 20.0,
     });
+    config.genetics.mutation.size_probability = 1.0;
     let template = RnnGenome {
         mutation_sigma: 0.037,
         ..Default::default()
@@ -85,7 +86,7 @@ fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover()
     let decoded: Universe = ciborium::from_reader(bytes.as_slice()).unwrap();
     assert_eq!(decoded, state);
     let mut original = state.restore(config.clone()).unwrap();
-    let mut resumed = decoded.restore(config).unwrap();
+    let mut resumed = decoded.restore(config.clone()).unwrap();
     for tick in 1..=3 {
         let report = original.tick().unwrap();
         if tick == 1 {
@@ -97,6 +98,7 @@ fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover()
                     assert!(child.mutation_sigma > 0.0);
                     assert_ne!(child.mutation_sigma, template.mutation_sigma);
                     assert_ne!(child.weights, template.weights);
+                    assert_eq!(child.hidden_units.abs_diff(template.hidden_units), 1);
                 }
             }
             assert!(
@@ -126,6 +128,13 @@ fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover()
         }
         assert_eq!(resumed.tick().unwrap(), report);
         assert_eq!(*resumed.universe().read(), *original.universe().read());
+        if tick == 1 {
+            // Continue again from a checkpoint containing the resized offspring.
+            let mut bytes = Vec::new();
+            ciborium::into_writer(&*original.universe().read(), &mut bytes).unwrap();
+            let decoded: Universe = ciborium::from_reader(bytes.as_slice()).unwrap();
+            resumed = decoded.restore(config.clone()).unwrap();
+        }
     }
 }
 

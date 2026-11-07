@@ -49,6 +49,7 @@ where
 impl<M, G, P> Ecosystem<M, G, P>
 where
     M: Mind<GeneticContext, Input = AnimalObservation, Output = MotorAction>
+        + BrainStructure
         + AsRef<G>
         + TryFrom<G>,
     M::Error: Into<anyhow::Error>,
@@ -301,9 +302,18 @@ where
                 parents.push_back(child);
             }
         }
+        let mut brain_upkeep_energy = 0.0_f64;
         for (&id, animal) in &mut update.animals {
+            let mind = match &animal.mind {
+                PreparedMind::Existing(_) => &self.animals[&id].mind,
+                PreparedMind::New(mind) => mind.as_ref(),
+            };
+            let brain_cost = self.parameters.brain_weight_upkeep
+                * mind.brain_size().map_or(0, |size| size.weights) as f32;
+            ensure!(brain_cost.is_finite(), "non-finite brain upkeep");
+            brain_upkeep_energy += f64::from(brain_cost);
             let body = &mut animal.body;
-            body.energy -= self.parameters.body.upkeep;
+            body.energy -= self.parameters.body.upkeep + brain_cost;
             body.confine(self.parameters.world);
             ensure!(id.0 > 0 && id.0 < update.next_animal, "invalid animal ID");
             validate_body(body, self.parameters)?;
@@ -353,6 +363,7 @@ where
             tick,
             events,
             decisions,
+            brain_upkeep_energy,
         };
         update.metrics.observe(&report);
         Ok((report, update))

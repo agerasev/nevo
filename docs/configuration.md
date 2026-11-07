@@ -23,6 +23,8 @@ directories configure separate aspects of the experiment.
 | Obstacles | [None](../configs/obstacles/none.toml), [32 random circles](../configs/obstacles/scattered.toml), [16 random circles](../configs/obstacles/scattered-small.toml) |
 | Brain | [Small: 4 hidden units](../configs/brain/small.toml), [Large: 16 hidden units](../configs/brain/large.toml) |
 | Mutation | [Adaptive scale](../configs/mutation/adaptive.toml), [fixed scale](../configs/mutation/fixed.toml), [disabled](../configs/mutation/none.toml) |
+| Brain topology | [Evolving width](../configs/topology/evolving.toml), [fixed width](../configs/topology/fixed.toml) |
+| Brain upkeep | [Weight count](../configs/brain-upkeep/weight-count.toml), [none](../configs/brain-upkeep/none.toml) |
 | Locomotion | [Damped acceleration](../configs/locomotion/damped.toml) |
 | Movement energy budget | [Work and motor losses](../configs/movement/work-and-loss.toml), [upkeep only](../configs/movement/upkeep-only.toml) |
 | Plant growth | [Uniform](../configs/plant-growth/uniform.toml), [patch-dependent](../configs/plant-growth/patches.toml) |
@@ -38,6 +40,15 @@ weights and biases still mutate. `mutation.enabled = false` disables all mutatio
 without consuming randomness. The initial default scale matches the old uniform
 noise variance; changing the distribution or adapting its scale does not establish
 an evolutionary advantage.
+
+Topology presets independently control the probability and bounds of hidden-size
+mutation. Brain presets set the initial width, which must fit the bounds when size
+mutation is enabled. Fixed mutation scale does not freeze topology; use fixed
+topology for that comparison. Disabling mutation disables both kinds of change.
+Brain upkeep charges `animal.brain_weight_upkeep` for every stored weight and bias,
+including zero-valued connections, in addition to body upkeep. This deterministic
+proxy for dense-network computation is independent of hardware and physics substeps.
+Its starting coefficient is an experiment setting, not a measured biological cost.
 
 Large-world presets use a sparser plant population across the larger arena.
 Local sensing uses fixed `sensing.distance_scale` and

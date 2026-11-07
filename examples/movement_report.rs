@@ -41,6 +41,7 @@ struct Totals {
     distance: f64,
     movement_energy: f64,
     upkeep_energy: f64,
+    brain_upkeep_energy: f64,
     animal_energy: f64,
     plant_energy: f64,
     moving_actions: u64,
@@ -65,6 +66,7 @@ impl Totals {
             distance,
             movement_energy,
             upkeep_energy,
+            brain_upkeep_energy,
             animal_energy,
             plant_energy,
             moving_actions,
@@ -91,7 +93,7 @@ impl Totals {
             "turns_over_90_fraction": ratio(self.turns_over_90 as f64, self.travel_direction_pairs as f64),
             "turns_over_150_fraction": ratio(self.turns_over_150 as f64, self.travel_direction_pairs as f64),
             "mean_turn_degrees": ratio(self.turn_degrees, self.travel_direction_pairs as f64),
-            "food_per_energy_spent": ratio(self.food, self.upkeep_energy + self.movement_energy),
+            "food_per_energy_spent": ratio(self.food, self.upkeep_energy + self.brain_upkeep_energy + self.movement_energy),
         })
     }
 }
@@ -110,6 +112,7 @@ fn observe(
         plant_ticks: world.plants().len() as u64,
         active_animal_ticks: report.decisions.len() as u64,
         upkeep_energy: world.animals().len() as f64 * f64::from(body.upkeep),
+        brain_upkeep_energy: report.brain_upkeep_energy,
         animal_energy: world
             .animals()
             .values()
@@ -160,9 +163,9 @@ fn main() -> Result<()> {
     );
     let checkpoint: Checkpoint = ciborium::from_reader(BufReader::new(fs::File::open(&path)?))?;
     ensure!(
-        checkpoint.format_version == 19
-            && checkpoint.world_model == "foraging-random-obstacles-v13"
-            && checkpoint.agent_model == "animal-rnn-self-adaptive-v5",
+        checkpoint.format_version == 20
+            && checkpoint.world_model == "foraging-brain-upkeep-v14"
+            && checkpoint.agent_model == "animal-rnn-evolving-width-v6",
         "unsupported checkpoint; use the matching simulation build"
     );
     checkpoint.state.validate()?;

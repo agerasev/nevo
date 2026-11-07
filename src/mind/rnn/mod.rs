@@ -2,7 +2,7 @@
 
 mod genome;
 
-pub use genome::{Initialization, RnnGenome, WeightMutation};
+pub use genome::{Initialization, Mutation, RnnGenome};
 
 use std::array;
 

@@ -9,8 +9,8 @@ behavioral tradeoffs can pay off before adding evolutionary complexity.
 
 Each milestone should yield a runnable preset and relevant invariants, validated
 with an explicit tick budget.
-Steps 1–4 establish navigation; 5–6 extend ecology. Mutation mechanisms in 7–8
-are implemented; their evaluation and step 9 need an established environment.
+Steps 1–4 establish navigation; 5–6 extend ecology. Mutation mechanisms in 7–9
+are implemented; their evaluation needs an established environment.
 
 1. **Completed: larger worlds and camera navigation.** [Camera controls](viewer.md)
    and fixed [sensing scales](configuration.md) support a
@@ -52,12 +52,14 @@ are implemented; their evaluation and step 9 need an established environment.
    and inherited scales. Defer per-matrix/per-weight scales and evolution of the
    adaptation rate. Small scales may be selected in stable tasks; self-adaptation
    does not guarantee continued exploration.
-9. **Evolving hidden width with brain upkeep.** First compare fixed widths, then
-   infrequent neuron additions/removals preserving existing connections where
-   possible. **Open:** size limits, mutation rates, initialization, and neuron versus
-   connection costs. Dense recurrence grows quadratically; new capacity costs energy
-   before it becomes useful. Keep input/output semantics fixed and compare genetic
-   coordinates only across compatible shapes. Larger brains are not a success criterion.
+9. **Completed: evolving hidden width with brain upkeep.** Bounded neuron
+   additions/removals preserve surviving connections. Upkeep scales with stored
+   weight and bias count; [presets](configuration.md) separate initial width,
+   topology mutation, and upkeep. [Metrics](metrics.md) report hidden widths and
+   brain energy expenditure. **Evaluation remains open:** compare fixed and
+   evolving widths across upkeep costs. New capacity costs energy before it becomes
+   useful; larger brains are not a success criterion. Compare genetic coordinates
+   only across compatible shapes.
 
 Preserve the [component contracts](simulation.md) and [persistence policy](persistence.md).
 Keep a runnable reference and use replicated evolutionary seeds with held-out

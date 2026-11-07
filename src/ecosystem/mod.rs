@@ -1,6 +1,7 @@
 //! The foraging experiment: physical bodies and their minds share one lifetime.
 
 mod body;
+mod brain;
 mod config;
 mod feeding;
 mod metrics;
@@ -14,6 +15,7 @@ mod update;
 mod draw;
 
 pub use body::{Body, MotorAction};
+pub use brain::{BrainSize, BrainStructure};
 pub use config::{
     AnimalConfig, BodyConfig, Config, FeedingConfig, GeneticsConfig, ImmigrationConfig,
     MetricsConfig, PhysicsConfig, Placement, PlantConfig, ReproductionConfig, SensingConfig,
@@ -38,7 +40,7 @@ use crate::{
     mind::{
         Mind,
         animal::AnimalMind,
-        rnn::{RnnGenome, WeightMutation},
+        rnn::{Mutation, RnnGenome},
     },
     universe::Simulation,
 };
@@ -153,6 +155,8 @@ pub struct TickReport {
     pub tick: u64,
     pub events: Vec<Event>,
     pub decisions: Vec<Decision>,
+    /// Brain maintenance paid by all animals remaining after reproduction.
+    pub brain_upkeep_energy: f64,
 }
 
 fn plant_position(
@@ -291,7 +295,7 @@ fn validate_plants(
 pub struct Ecosystem<
     M = AnimalMind,
     G = RnnGenome,
-    P = WeightMutation,
+    P = Mutation,
     MC = <M as Mind<GeneticContext>>::Config,
     IC = <G as RandomInit<GeneticContext>>::Config,
 > {
@@ -319,7 +323,10 @@ pub struct Ecosystem<
 impl Ecosystem {
     pub fn new(config: Config, seed: u64) -> Result<Self> {
         config.genetics.initialization.validate()?;
-        config.genetics.mutation.validate()?;
+        config
+            .genetics
+            .mutation
+            .validate_width(config.genetics.initialization.hidden_units)?;
         Self::with_genetics(config, seed, None)
     }
 }
@@ -457,6 +464,7 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
 impl<M, G, P> Ecosystem<M, G, P>
 where
     M: Mind<GeneticContext, Input = AnimalObservation, Output = MotorAction>
+        + BrainStructure
         + AsRef<G>
         + TryFrom<G>,
     M::Error: Into<anyhow::Error>,
@@ -586,6 +594,7 @@ where
 impl<M, G, P> Simulation for Ecosystem<M, G, P>
 where
     M: Mind<GeneticContext, Input = AnimalObservation, Output = MotorAction>
+        + BrainStructure
         + AsRef<G>
         + TryFrom<G>,
     M::Error: Into<anyhow::Error>,

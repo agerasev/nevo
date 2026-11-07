@@ -28,6 +28,7 @@ pub(super) struct Cache {
     plant_recruits: u64,
     distance: f64,
     movement_energy: f64,
+    brain_upkeep_energy: f64,
 }
 
 impl Default for Cache {
@@ -47,6 +48,7 @@ impl Default for Cache {
             plant_recruits: 0,
             distance: 0.0,
             movement_energy: 0.0,
+            brain_upkeep_energy: 0.0,
         }
     }
 }
@@ -101,6 +103,7 @@ impl Cache {
             return;
         };
         window.active_animal_ticks += report.decisions.len() as u64;
+        self.brain_upkeep_energy += report.brain_upkeep_energy;
         for decision in &report.decisions {
             // Includes actors that subsequently die; excludes birth/growth displacement.
             self.distance += f64::from(decision.distance);
@@ -129,6 +132,12 @@ pub struct Summary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mean_animal_energy: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_hidden_units: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mean_hidden_units: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_hidden_units: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mean_plant_energy: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub food_per_tick: Option<f64>,
@@ -148,6 +157,8 @@ pub struct Summary {
     pub distance_per_animal_tick: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub movement_energy_per_tick: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub brain_upkeep_energy_per_tick: Option<f64>,
 }
 
 impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
@@ -159,7 +170,7 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
     }
 }
 
-impl<M, G, P, MC, IC> Metrics for Ecosystem<M, G, P, MC, IC> {
+impl<M: BrainStructure, G, P, MC, IC> Metrics for Ecosystem<M, G, P, MC, IC> {
     type Summary = Summary;
 
     fn collect_metrics(&self, summary: &mut Summary) {
@@ -171,6 +182,23 @@ impl<M, G, P, MC, IC> Metrics for Ecosystem<M, G, P, MC, IC> {
         summary.window = cache.window;
         summary.population = Some(self.animals.len() as u64);
         summary.plant_count = Some(self.plants.len() as u64);
+        let mut count = 0;
+        let mut total = 0.0;
+        for size in self.animals.values().filter_map(|a| a.mind.brain_size()) {
+            count += 1;
+            total += size.hidden_units as f64;
+            summary.min_hidden_units = Some(
+                summary
+                    .min_hidden_units
+                    .map_or(size.hidden_units, |h| h.min(size.hidden_units)),
+            );
+            summary.max_hidden_units = Some(
+                summary
+                    .max_hidden_units
+                    .map_or(size.hidden_units, |h| h.max(size.hidden_units)),
+            );
+        }
+        summary.mean_hidden_units = (count > 0).then(|| total / f64::from(count));
         summary.mean_animal_energy = (!self.animals.is_empty()).then(|| {
             self.animals
                 .values()
@@ -185,6 +213,7 @@ impl<M, G, P, MC, IC> Metrics for Ecosystem<M, G, P, MC, IC> {
             let ticks = window.samples as f64;
             summary.food_per_tick = Some(cache.food / ticks);
             summary.movement_energy_per_tick = Some(cache.movement_energy / ticks);
+            summary.brain_upkeep_energy_per_tick = Some(cache.brain_upkeep_energy / ticks);
             summary.plant_growth_per_tick = Some(cache.plant_growth / ticks);
             if self.parameters.plant.replenishment.is_some() {
                 summary.plant_recruitment_attempts_per_tick =

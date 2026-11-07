@@ -104,6 +104,44 @@ impl RnnGenome {
         );
         Ok(())
     }
+
+    /// Append a silent neuron or remove one, preserving every surviving coordinate.
+    fn resize_hidden(&mut self, hidden: usize, removed: Option<usize>) -> Result<()> {
+        let old = self.hidden_units;
+        let mut weights = Vec::new();
+        weights.try_reserve_exact(weight_count(hidden)?)?;
+        weights.resize(weight_count(hidden)?, 0.0);
+        let source = |i: usize| {
+            let index = i + usize::from(removed.is_some_and(|r| i >= r));
+            (index < old).then_some(index)
+        };
+        let old_recurrent = INPUTS * old;
+        let recurrent = INPUTS * hidden;
+        let old_bias = old_recurrent + old * old;
+        let bias = recurrent + hidden * hidden;
+        let old_output = old_bias + old;
+        let output = bias + hidden;
+        for i in 0..hidden {
+            let Some(previous) = source(i) else { continue };
+            weights[i * INPUTS..(i + 1) * INPUTS]
+                .copy_from_slice(&self.weights[previous * INPUTS..(previous + 1) * INPUTS]);
+            weights[bias + i] = self.weights[old_bias + previous];
+            for j in 0..hidden {
+                if let Some(previous_j) = source(j) {
+                    weights[recurrent + i * hidden + j] =
+                        self.weights[old_recurrent + previous * old + previous_j];
+                }
+            }
+            for o in 0..OUTPUTS {
+                weights[output + o * hidden + i] = self.weights[old_output + o * old + previous];
+            }
+        }
+        weights[output + OUTPUTS * hidden..]
+            .copy_from_slice(&self.weights[old_output + OUTPUTS * old..]);
+        self.weights = weights;
+        self.hidden_units = hidden;
+        Ok(())
+    }
 }
 
 impl<C: Context + ?Sized> RandomInit<C> for RnnGenome {
@@ -131,38 +169,66 @@ impl<C: Context + ?Sized> RandomInit<C> for RnnGenome {
 
 impl<C: Context + ?Sized> Genome<C> for RnnGenome {}
 
-/// Mutate log(sigma) first, then apply independent Gaussian weight/bias noise.
+/// Mutate log(sigma), attempt a size change, then apply Gaussian weight/bias noise.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct WeightMutation {
+pub struct Mutation {
     pub enabled: bool,
     /// Standard deviation of the additive change to ln(mutation_sigma).
     /// Zero keeps the inherited scale fixed while weights still mutate.
     pub log_sigma_std: f32,
+    /// Probability of attempting a one-neuron size change, split equally by direction.
+    pub size_probability: f32,
+    pub min_hidden_units: usize,
+    pub max_hidden_units: usize,
 }
 
-impl Default for WeightMutation {
+impl Default for Mutation {
     fn default() -> Self {
         Self {
             enabled: true,
             log_sigma_std: 0.1,
+            size_probability: 0.01,
+            min_hidden_units: 1,
+            max_hidden_units: 32,
         }
     }
 }
 
-impl WeightMutation {
+impl Mutation {
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            (0.0..=1.0).contains(&self.size_probability),
+            "size_probability must be between zero and one"
+        );
+        weight_count(self.min_hidden_units)?;
+        weight_count(self.max_hidden_units)?;
+        ensure!(
+            self.min_hidden_units <= self.max_hidden_units,
+            "hidden size bounds are reversed"
+        );
         ensure!(
             self.log_sigma_std.is_finite() && self.log_sigma_std >= 0.0,
             "log_sigma_std must be finite and nonnegative"
         );
         Ok(())
     }
+
+    pub fn validate_width(&self, hidden: usize) -> Result<()> {
+        self.validate()?;
+        if self.enabled && self.size_probability > 0.0 {
+            ensure!(
+                (self.min_hidden_units..=self.max_hidden_units).contains(&hidden),
+                "hidden width is outside the size mutation bounds"
+            );
+        }
+        Ok(())
+    }
 }
 
-impl<C: Context + ?Sized> Mutate<C, WeightMutation> for RnnGenome {
-    fn mutate(&mut self, param: &WeightMutation, cx: &mut C) -> Result<()> {
-        param.validate()?;
+impl<C: Context + ?Sized> Mutate<C, Mutation> for RnnGenome {
+    fn mutate(&mut self, param: &Mutation, cx: &mut C) -> Result<()> {
+        param.validate_width(self.hidden_units)?;
         self.validate()?;
         if !param.enabled {
             return Ok(());
@@ -175,11 +241,148 @@ impl<C: Context + ?Sized> Mutate<C, WeightMutation> for RnnGenome {
             .exp()
         };
         validate_sigma(sigma)?;
+        if param.size_probability > 0.0 && cx.rng().random_bool(f64::from(param.size_probability)) {
+            if cx.rng().random_bool(0.5) {
+                if self.hidden_units < param.max_hidden_units {
+                    self.resize_hidden(self.hidden_units + 1, None)?;
+                }
+            } else if self.hidden_units > param.min_hidden_units {
+                let removed = cx.rng().random_range(0..self.hidden_units);
+                self.resize_hidden(self.hidden_units - 1, Some(removed))?;
+            }
+        }
         for weight in &mut self.weights {
             *weight += sigma * cx.rng().sample::<f32, _>(StandardNormal);
             ensure!(weight.is_finite(), "non-finite mutated genome weight");
         }
         self.mutation_sigma = sigma;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::Cpu;
+    use rand::SeedableRng;
+    use rand_xoshiro::Xoshiro256PlusPlus;
+
+    fn numbered(hidden_units: usize) -> RnnGenome {
+        RnnGenome {
+            hidden_units,
+            weights: (1..=weight_count(hidden_units).unwrap())
+                .map(|i| i as f32)
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn growth_preserves_connections_and_adds_only_zero_coordinates() {
+        let mut genome = numbered(2);
+        genome.resize_hidden(3, None).unwrap();
+        assert_eq!(genome.hidden_units, 3);
+        assert_eq!(
+            genome.weights,
+            [
+                1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 0., 0., 0., 0., 0., 0., 13.,
+                14., 0., 15., 16., 0., 0., 0., 0., 17., 18., 0., 19., 20., 0., 21., 22., 0., 23.,
+                24.,
+            ]
+        );
+        genome.validate().unwrap();
+    }
+
+    #[test]
+    fn deleting_a_middle_neuron_preserves_surviving_connections_and_biases() {
+        let mut genome = numbered(3);
+        genome.resize_hidden(2, Some(1)).unwrap();
+        assert_eq!(genome.hidden_units, 2);
+        assert_eq!(
+            genome.weights,
+            [
+                1., 2., 3., 4., 5., 6., 13., 14., 15., 16., 17., 18., 19., 21., 25., 27., 28., 30.,
+                31., 33., 34., 36., 37., 38.,
+            ]
+        );
+        genome.validate().unwrap();
+    }
+
+    #[test]
+    fn size_attempts_are_symmetric_and_skip_changes_beyond_bounds() {
+        let mut cx = Cpu {
+            rng: Xoshiro256PlusPlus::seed_from_u64(91),
+        };
+        let mutation = Mutation {
+            log_sigma_std: 0.0,
+            size_probability: 1.0,
+            min_hidden_units: 1,
+            max_hidden_units: 3,
+            ..Default::default()
+        };
+        for hidden in 1..=3 {
+            let parent = RnnGenome {
+                weights: vec![0.0; weight_count(hidden).unwrap()],
+                hidden_units: hidden,
+                ..Default::default()
+            };
+            let mut widths = [0; 3];
+            for _ in 0..1000 {
+                let mut child = parent.clone();
+                child.mutate(&mutation, &mut cx).unwrap();
+                child.validate().unwrap();
+                assert!(child.weights.iter().all(|&w| w != 0.0));
+                widths[child.hidden_units - 1] += 1;
+            }
+            assert_eq!(widths[if hidden == 2 { 1 } else { 3 - hidden }], 0);
+            for count in widths.into_iter().filter(|&count| count > 0) {
+                assert!((400..600).contains(&count));
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_size_settings_fail_before_mutation_or_random_draws() {
+        let mut cx = Cpu {
+            rng: Xoshiro256PlusPlus::seed_from_u64(12),
+        };
+        let before = cx.clone();
+        let original = RnnGenome::default();
+        for mutation in [
+            Mutation {
+                size_probability: -0.1,
+                ..Default::default()
+            },
+            Mutation {
+                size_probability: 1.1,
+                ..Default::default()
+            },
+            Mutation {
+                size_probability: f32::NAN,
+                ..Default::default()
+            },
+            Mutation {
+                min_hidden_units: 0,
+                ..Default::default()
+            },
+            Mutation {
+                max_hidden_units: usize::MAX,
+                ..Default::default()
+            },
+            Mutation {
+                min_hidden_units: 5,
+                max_hidden_units: 4,
+                ..Default::default()
+            },
+            Mutation {
+                max_hidden_units: 3,
+                ..Default::default()
+            },
+        ] {
+            let mut genome = original.clone();
+            assert!(genome.mutate(&mutation, &mut cx).is_err());
+            assert_eq!(genome, original);
+            assert_eq!(cx, before);
+        }
     }
 }

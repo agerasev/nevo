@@ -24,6 +24,7 @@ impl Default for Admission {
 impl<M, G, P> Ecosystem<M, G, P>
 where
     M: Mind<GeneticContext, Input = AnimalObservation, Output = MotorAction>
+        + BrainStructure
         + AsRef<G>
         + TryFrom<G>,
     M::Error: Into<anyhow::Error>,
@@ -106,6 +107,8 @@ struct FixedMind<const FAIL_INIT: bool = false> {
     genome: FixedGenome<FAIL_INIT>,
     calls: usize,
 }
+
+impl<const FAIL_INIT: bool> BrainStructure for FixedMind<FAIL_INIT> {}
 
 impl<const FAIL_INIT: bool> AsRef<FixedGenome<FAIL_INIT>> for FixedMind<FAIL_INIT> {
     fn as_ref(&self) -> &FixedGenome<FAIL_INIT> {
@@ -845,14 +848,8 @@ fn failed_random_initialization_does_not_publish_consumed_randomness() {
 #[test]
 fn immigrant_templates_bypass_random_initialization() {
     let genome = RnnGenome::default();
-    let mut world: Ecosystem = Ecosystem::empty(
-        0,
-        0,
-        42,
-        17,
-        Some(genome.clone()),
-        WeightMutation::default(),
-    );
+    let mut world: Ecosystem =
+        Ecosystem::empty(0, 0, 42, 17, Some(genome.clone()), Mutation::default());
     let before = world.context.clone();
     world.admit(2).unwrap();
     assert!(
@@ -868,7 +865,7 @@ fn immigrant_templates_bypass_random_initialization() {
 fn an_invalid_template_is_rejected_even_without_animals() {
     let mut genome = RnnGenome::default();
     genome.weights[0] = f32::NAN;
-    let world: Ecosystem = Ecosystem::empty(0, 0, 42, 17, Some(genome), WeightMutation::default());
+    let world: Ecosystem = Ecosystem::empty(0, 0, 42, 17, Some(genome), Mutation::default());
     assert!(world.validate().is_err());
 }
 
@@ -921,6 +918,7 @@ fn measured_config<MC: Default>() -> Config<MC, (), FixedMutation> {
 #[test]
 fn template_validation_does_not_require_runtime_settings() {
     struct ConfiguredMind(RnnGenome);
+    impl BrainStructure for ConfiguredMind {}
     impl From<RnnGenome> for ConfiguredMind {
         fn from(genome: RnnGenome) -> Self {
             Self(genome)
@@ -955,7 +953,7 @@ fn template_validation_does_not_require_runtime_settings() {
         42,
         17,
         Some(RnnGenome::default()),
-        WeightMutation::default(),
+        Mutation::default(),
     );
     assert!(world.mind_config.is_none());
     world.validate().unwrap();
@@ -988,7 +986,7 @@ fn configured_immigration_is_identical_for_initial_and_later_arrivals() {
     let first = &initial.animals[&id(1)];
     let next = &later.animals[&id(1)];
     let mut expected_body = first.body.clone();
-    expected_body.energy -= 0.0075;
+    expected_body.energy -= 0.0075 + 114.0e-6;
     assert_eq!(expected_body, next.body);
     assert_eq!(first.mind, next.mind);
     assert_eq!(next.mind.brain.memory.len(), 7);
@@ -1286,6 +1284,7 @@ fn invalid_physics_and_conflicting_restore_parameters_are_rejected() {
         |c| c.plant.linear_drag = -1.0,
         |c| c.plant.angular_drag = f32::NAN,
         |c| c.animal.body.radius_scale = 0.0,
+        |c| c.animal.brain_weight_upkeep = -0.1,
         |c| c.sensing.softening = 0.0,
         |c| c.genetics.initialization.hidden_units = 0,
         |c| c.genetics.mutation.log_sigma_std = f32::NAN,
@@ -1432,4 +1431,92 @@ fn resuming_starts_a_fresh_metrics_window() {
         (window.start_tick, window.end_tick, window.samples),
         (1, 2, 1)
     );
+}
+
+#[test]
+fn brain_upkeep_charges_parent_and_resized_child_once_at_their_own_sizes() {
+    let mut config: Config = Config {
+        initial_animals: 1,
+        minimum_population: 0,
+        plants: 0,
+        ..Default::default()
+    };
+    config.animal.body.upkeep = 0.0;
+    config.animal.body.energy_scale = 0.0;
+    config.animal.brain_weight_upkeep = 0.0001;
+    config.metrics.window_ticks = 1;
+    config.immigration.energy = 1.2;
+    config.genetics.mutation.size_probability = 1.0;
+    let genome = RnnGenome {
+        hidden_units: 2,
+        weights: vec![0.0; 24],
+        ..Default::default()
+    };
+    let mut world: Ecosystem = Ecosystem::with_genetics(config, 93, Some(genome)).unwrap();
+    let report = world.advance(1).unwrap();
+    assert_eq!(world.animals.len(), 2);
+    assert_eq!(
+        crate::metrics::Metrics::metrics(&world).brain_upkeep_energy_per_tick,
+        Some(report.brain_upkeep_energy)
+    );
+    let parent = &world.animals[&id(1)];
+    let child = &world.animals[&id(2)];
+    let child_weights = match child.mind.brain.genome.hidden_units {
+        1 => 12.0,
+        3 => 38.0,
+        _ => panic!("size must change by one"),
+    };
+    assert!((parent.body.energy - (0.6 - 24.0 * 0.0001)).abs() < f32::EPSILON);
+    assert!((child.body.energy - (0.6 - child_weights * 0.0001)).abs() < f32::EPSILON);
+    assert!((report.brain_upkeep_energy - (24.0 + child_weights as f64) * 0.0001).abs() < 1e-9);
+}
+
+#[test]
+fn hidden_size_metrics_summarize_the_current_population_and_omit_empty_means() {
+    use crate::metrics::Metrics;
+    let mut world = Ecosystem::new(
+        Config {
+            initial_animals: 0,
+            minimum_population: 0,
+            plants: 0,
+            ..Default::default()
+        },
+        94,
+    )
+    .unwrap();
+    let empty = world.metrics();
+    assert_eq!(
+        (
+            empty.min_hidden_units,
+            empty.mean_hidden_units,
+            empty.max_hidden_units
+        ),
+        (None, None, None)
+    );
+    for (serial, hidden_units, weights) in [(1, 2, 24), (2, 4, 54)] {
+        world.animals.insert(
+            id(serial),
+            Animal {
+                body: Body::new(Vec2::ZERO, 0.5),
+                mind: AnimalMind::new(RnnGenome {
+                    hidden_units,
+                    weights: vec![0.0; weights],
+                    ..Default::default()
+                })
+                .unwrap(),
+            },
+        );
+    }
+    let summary = world.metrics();
+    assert_eq!(
+        (
+            summary.min_hidden_units,
+            summary.mean_hidden_units,
+            summary.max_hidden_units
+        ),
+        (Some(2), Some(3.0), Some(4))
+    );
+    let mut fixture = Fixture::debug(94);
+    fixture.world.metrics = metrics::Cache::new(&measured_config::<()>());
+    assert_eq!(fixture.world.metrics().mean_hidden_units, None);
 }
