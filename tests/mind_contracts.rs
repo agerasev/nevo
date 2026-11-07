@@ -90,7 +90,7 @@ fn mind_initialization_and_mutation_accept_an_unsized_context() {
 }
 
 #[test]
-fn zero_mutation_preserves_genome_and_random_stream() {
+fn disabled_mutation_preserves_genome_and_random_stream() {
     let mut context = Cpu {
         rng: Xoshiro256PlusPlus::seed_from_u64(17),
     };
@@ -100,7 +100,13 @@ fn zero_mutation_preserves_genome_and_random_stream() {
     let original = genome.clone();
 
     genome
-        .mutate(&WeightMutation { max_delta: 0.0 }, &mut context)
+        .mutate(
+            &WeightMutation {
+                enabled: false,
+                ..Default::default()
+            },
+            &mut context,
+        )
         .unwrap();
     assert_eq!(genome, original);
     assert_eq!(context, before);
@@ -116,10 +122,16 @@ fn invalid_mutation_fails_without_changing_genome_or_random_stream() {
     genome.weights.fill(0.5);
     let original = genome.clone();
 
-    for max_delta in [-1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::MAX] {
+    for log_sigma_std in [-1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
         assert!(
             genome
-                .mutate(&WeightMutation { max_delta }, &mut context)
+                .mutate(
+                    &WeightMutation {
+                        log_sigma_std,
+                        ..Default::default()
+                    },
+                    &mut context
+                )
                 .is_err()
         );
         assert_eq!(genome, original);
@@ -128,14 +140,61 @@ fn invalid_mutation_fails_without_changing_genome_or_random_stream() {
 }
 
 #[test]
-fn nonzero_mutation_changes_weights_within_the_configured_range() {
+fn zero_log_variation_preserves_scale_while_weights_mutate() {
     let mut cx = Cpu {
         rng: Xoshiro256PlusPlus::seed_from_u64(42),
     };
-    let mut genome = RnnGenome::default();
+    let mut genome = RnnGenome {
+        mutation_sigma: 0.07,
+        ..Default::default()
+    };
     genome
-        .mutate(&WeightMutation { max_delta: 0.07 }, &mut cx)
+        .mutate(
+            &WeightMutation {
+                log_sigma_std: 0.0,
+                ..Default::default()
+            },
+            &mut cx,
+        )
         .unwrap();
-    assert!(genome.weights.iter().any(|&w| w != 0.0));
-    assert!(genome.weights.iter().all(|w| (-0.07..0.07).contains(w)));
+    assert_eq!(genome.mutation_sigma, 0.07);
+    assert!(genome.weights.iter().all(|&w| w.is_finite() && w != 0.0));
+}
+
+#[test]
+fn log_normal_scales_drive_gaussian_weight_and_bias_noise() {
+    let mut cx = Cpu {
+        rng: Xoshiro256PlusPlus::seed_from_u64(81),
+    };
+    let parent = RnnGenome {
+        mutation_sigma: 0.07,
+        ..Default::default()
+    };
+    let mutation = WeightMutation {
+        log_sigma_std: 0.3,
+        ..Default::default()
+    };
+    let samples = 5000;
+    let (mut log_sum, mut log_squares) = (0.0_f64, 0.0_f64);
+    let (mut sum, mut squares, mut tails) = (0.0_f64, 0.0_f64, 0);
+    for _ in 0..samples {
+        let mut child = parent.clone();
+        child.mutate(&mutation, &mut cx).unwrap();
+        let log_change = f64::from((child.mutation_sigma / parent.mutation_sigma).ln());
+        log_sum += log_change;
+        log_squares += log_change * log_change;
+        for weight in child.weights {
+            // This also verifies that weights use the child's new scale.
+            let z = f64::from(weight / child.mutation_sigma);
+            sum += z;
+            squares += z * z;
+            tails += usize::from(z.abs() > 3.0);
+        }
+    }
+    let count = (samples * parent.weights.len()) as f64;
+    assert!((log_sum / samples as f64).abs() < 0.015);
+    assert!((log_squares / samples as f64 - 0.09).abs() < 0.009);
+    assert!((sum / count).abs() < 0.015);
+    assert!((squares / count - 1.0).abs() < 0.03);
+    assert!(tails > 0); // Gaussian noise is not clipped to a uniform interval.
 }

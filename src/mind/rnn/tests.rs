@@ -47,6 +47,7 @@ fn output_overflow_does_not_publish_prepared_memory() {
     let mut genome = RnnGenome {
         hidden_units: 2,
         weights: vec![0.0; 24],
+        ..RnnGenome::default()
     };
     genome.weights[16..18].fill(f32::MAX); // Saturate both hidden units.
     genome.weights[18..20].fill(f32::MAX); // Their finite contributions overflow output 0.
@@ -63,6 +64,7 @@ fn recurrent_units_read_previous_memory_at_a_nondefault_width() {
     let mut genome = RnnGenome {
         hidden_units: 2,
         weights: vec![0.0; 24],
+        ..RnnGenome::default()
     };
     genome.weights[0] = 1.0; // input 0 -> hidden 0
     genome.weights[14] = 1.0; // previous hidden 0 -> hidden 1
@@ -97,9 +99,11 @@ fn initialization_respects_width_and_range() {
         hidden_units: 7,
         weight_min: -0.25,
         weight_max: 0.75,
+        mutation_sigma: 0.03,
     };
     let genome = RnnGenome::random(&config, &mut cx).unwrap();
     assert_eq!(genome.weights.len(), 114);
+    assert_eq!(genome.mutation_sigma, 0.03);
     assert_eq!(RnnGenome::default().weights.len(), 54);
     assert!(genome.weights.iter().all(|w| (-0.25..0.75).contains(w)));
     assert_eq!(Rnn::new(genome).unwrap().memory, vec![0.0; 7]);
@@ -130,6 +134,22 @@ fn invalid_initialization_and_dynamic_shapes_fail_before_using_randomness() {
     };
     let before = cx.clone();
     for config in [
+        Initialization {
+            mutation_sigma: 0.0,
+            ..Initialization::default()
+        },
+        Initialization {
+            mutation_sigma: -0.1,
+            ..Initialization::default()
+        },
+        Initialization {
+            mutation_sigma: f32::NAN,
+            ..Initialization::default()
+        },
+        Initialization {
+            mutation_sigma: f32::INFINITY,
+            ..Initialization::default()
+        },
         Initialization {
             hidden_units: 0,
             ..Initialization::default()
@@ -173,4 +193,17 @@ fn invalid_initialization_and_dynamic_shapes_fail_before_using_randomness() {
     brain.memory.pop();
     assert!(brain.compute_update([0.0; INPUTS], &mut cx).is_err());
     assert_eq!(cx, before);
+}
+
+#[test]
+fn invalid_inherited_mutation_scales_are_rejected() {
+    for mutation_sigma in [0.0, -0.1, f32::NAN, f32::INFINITY] {
+        assert!(
+            Rnn::new(RnnGenome {
+                mutation_sigma,
+                ..Default::default()
+            })
+            .is_err()
+        );
+    }
 }

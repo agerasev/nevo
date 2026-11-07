@@ -13,9 +13,9 @@ use serde::{Deserialize, Serialize};
 
 use super::config::Config;
 
-const FORMAT_VERSION: u32 = 18;
+const FORMAT_VERSION: u32 = 19;
 pub(super) const WORLD_MODEL: &str = "foraging-random-obstacles-v13";
-pub(super) const AGENT_MODEL: &str = "animal-rnn-6-n-2-v4";
+pub(super) const AGENT_MODEL: &str = "animal-rnn-self-adaptive-v5";
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

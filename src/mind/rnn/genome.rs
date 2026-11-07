@@ -1,5 +1,6 @@
 use anyhow::{Result, ensure};
 use rand::RngExt;
+use rand_distr::StandardNormal;
 
 use super::{INPUTS, OUTPUTS};
 use crate::{
@@ -14,6 +15,8 @@ pub struct Initialization {
     pub hidden_units: usize,
     pub weight_min: f32,
     pub weight_max: f32,
+    /// Initial inherited standard deviation of Gaussian weight/bias mutations.
+    pub mutation_sigma: f32,
 }
 
 impl Default for Initialization {
@@ -22,6 +25,8 @@ impl Default for Initialization {
             hidden_units: 4,
             weight_min: -0.5,
             weight_max: 0.5,
+            // Match the variance of the previous uniform [-0.02, 0.02) noise.
+            mutation_sigma: 0.02 / 3.0_f32.sqrt(),
         }
     }
 }
@@ -29,6 +34,7 @@ impl Default for Initialization {
 impl Initialization {
     pub fn validate(&self) -> Result<()> {
         weight_count(self.hidden_units)?;
+        validate_sigma(self.mutation_sigma)?;
         ensure!(
             self.weight_min.is_finite()
                 && self.weight_max.is_finite()
@@ -38,6 +44,14 @@ impl Initialization {
         );
         Ok(())
     }
+}
+
+fn validate_sigma(sigma: f32) -> Result<()> {
+    ensure!(
+        sigma.is_finite() && sigma > 0.0,
+        "mutation_sigma must be finite and positive"
+    );
+    Ok(())
 }
 
 /// Checked shape arithmetic also rejects lengths that a Rust allocation cannot hold.
@@ -53,26 +67,30 @@ pub(super) fn weight_count(hidden_units: usize) -> Result<usize> {
 }
 
 /// Row-major input weights, recurrent weights, hidden biases, output weights,
-/// and output biases. Width is inherited together with the weight coordinates.
+/// and output biases. Width and mutation scale are inherited with the weights.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RnnGenome {
     pub hidden_units: usize,
     pub weights: Vec<f32>,
+    pub mutation_sigma: f32,
 }
 
 impl Default for RnnGenome {
     fn default() -> Self {
-        let hidden_units = Initialization::default().hidden_units;
+        let initialization = Initialization::default();
+        let hidden_units = initialization.hidden_units;
         Self {
             hidden_units,
             weights: vec![0.0; weight_count(hidden_units).expect("default shape is valid")],
+            mutation_sigma: initialization.mutation_sigma,
         }
     }
 }
 
 impl RnnGenome {
     pub fn validate(&self) -> Result<()> {
+        validate_sigma(self.mutation_sigma)?;
         let expected = weight_count(self.hidden_units)?;
         ensure!(
             self.weights.len() == expected,
@@ -106,30 +124,37 @@ impl<C: Context + ?Sized> RandomInit<C> for RnnGenome {
         Ok(Self {
             hidden_units: config.hidden_units,
             weights,
+            mutation_sigma: config.mutation_sigma,
         })
     }
 }
 
 impl<C: Context + ?Sized> Genome<C> for RnnGenome {}
 
-/// Independent uniform noise in [-max_delta, max_delta) for each weight and bias.
+/// Mutate log(sigma) first, then apply independent Gaussian weight/bias noise.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WeightMutation {
-    pub max_delta: f32,
+    pub enabled: bool,
+    /// Standard deviation of the additive change to ln(mutation_sigma).
+    /// Zero keeps the inherited scale fixed while weights still mutate.
+    pub log_sigma_std: f32,
 }
 
 impl Default for WeightMutation {
     fn default() -> Self {
-        Self { max_delta: 0.02 }
+        Self {
+            enabled: true,
+            log_sigma_std: 0.1,
+        }
     }
 }
 
 impl WeightMutation {
     pub fn validate(&self) -> Result<()> {
         ensure!(
-            self.max_delta >= 0.0 && (2.0 * self.max_delta).is_finite(),
-            "mutation max_delta must be nonnegative with a finite sampling range"
+            self.log_sigma_std.is_finite() && self.log_sigma_std >= 0.0,
+            "log_sigma_std must be finite and nonnegative"
         );
         Ok(())
     }
@@ -137,14 +162,24 @@ impl WeightMutation {
 
 impl<C: Context + ?Sized> Mutate<C, WeightMutation> for RnnGenome {
     fn mutate(&mut self, param: &WeightMutation, cx: &mut C) -> Result<()> {
-        let delta = param.max_delta;
         param.validate()?;
         self.validate()?;
-        if delta > 0.0 {
-            for weight in &mut self.weights {
-                *weight += cx.rng().random_range(-delta..delta);
-            }
+        if !param.enabled {
+            return Ok(());
         }
+        let sigma = if param.log_sigma_std == 0.0 {
+            self.mutation_sigma
+        } else {
+            (self.mutation_sigma.ln()
+                + param.log_sigma_std * cx.rng().sample::<f32, _>(StandardNormal))
+            .exp()
+        };
+        validate_sigma(sigma)?;
+        for weight in &mut self.weights {
+            *weight += sigma * cx.rng().sample::<f32, _>(StandardNormal);
+            ensure!(weight.is_finite(), "non-finite mutated genome weight");
+        }
+        self.mutation_sigma = sigma;
         Ok(())
     }
 }

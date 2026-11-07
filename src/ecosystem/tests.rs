@@ -1288,7 +1288,7 @@ fn invalid_physics_and_conflicting_restore_parameters_are_rejected() {
         |c| c.animal.body.radius_scale = 0.0,
         |c| c.sensing.softening = 0.0,
         |c| c.genetics.initialization.hidden_units = 0,
-        |c| c.genetics.mutation.max_delta = f32::NAN,
+        |c| c.genetics.mutation.log_sigma_std = f32::NAN,
     ];
     for change in invalid_changes {
         let mut invalid = config.clone();

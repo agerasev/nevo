@@ -16,6 +16,14 @@ learned state belongs to the mind. [AnimalMind](../src/mind/animal/mod.rs) owns 
 mapping between biological observations/actions and neural signals. Initial and
 later immigration follow the same admission policy.
 
+Each animal's [RNN genome](../src/mind/rnn/genome.rs) carries one positive mutation
+scale shared by its weights and biases. Reproduction changes the child's scale in
+log space before applying independent Gaussian weight and bias noise; the parent's
+genome stays unchanged. The scale persists in checkpoints alongside the weights.
+Non-finite weights or non-positive/non-finite scales fail validation rather than
+being silently clamped. [Mutation presets](configuration.md) support fixed-scale
+and mutation-free comparisons.
+
 Bodies retain heading, linear velocity, and angular velocity. The current mind
 observes the food field and its own motion in body coordinates, then requests
 bounded forward and angular acceleration. Drag damps both velocities. This keeps

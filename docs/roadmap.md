@@ -9,8 +9,8 @@ behavioral tradeoffs can pay off before adding evolutionary complexity.
 
 Each milestone should yield a runnable preset and relevant invariants, validated
 with an explicit tick budget.
-Steps 1–4 establish navigation; 5–6 extend ecology. Step 7 can happen earlier;
-8–9 need an established evaluation environment.
+Steps 1–4 establish navigation; 5–6 extend ecology. Mutation mechanisms in 7–8
+are implemented; their evaluation and step 9 need an established environment.
 
 1. **Completed: larger worlds and camera navigation.** [Camera controls](viewer.md)
    and fixed [sensing scales](configuration.md) support a
@@ -41,16 +41,17 @@ Steps 1–4 establish navigation; 5–6 extend ecology. Step 7 can happen earlie
    controllers, reusing bodies and perception. **Open:** attacks, escapes, costs,
    energy transfer, and kin/cannibalism rules. Establish simple-controller behavior
    before interpreting coevolution; distinguish coexistence from immigration support.
-7. **Gaussian mutations.** Compare Gaussian and uniform noise at matched variance,
-   including biases: uniform `[-a, a)` corresponds to `sigma = a / sqrt(3)`.
-   Keep topology and scale fixed initially; a different distribution need not improve
-   adaptation.
-8. **Inherited mutation strength.** Start with one positive scale per genome,
-   mutated multiplicatively by log-normal noise before applying weight mutations.
-   **Open:** initial scale, fixed log-space variation, and numerical bounds.
-   Compare fixed and inherited scales; defer per-matrix/per-weight scales and
-   evolution of the adaptation rate. Small scales may be selected in stable tasks;
-   self-adaptation does not guarantee continued exploration.
+7. **Completed: Gaussian mutations.** Independent normal noise applies to weights
+   and biases. The initial scale matches the previous uniform noise variance.
+   **Evaluation remains open:** compare fixed-scale Gaussian mutation against the
+   earlier uniform implementation; a different distribution need not improve adaptation.
+8. **Completed: inherited mutation strength.** One positive scale per animal's
+   genome changes in log space before weight mutation, with a configurable fixed
+   log-space variation. [Mutation presets](configuration.md) support adaptive,
+   fixed-scale, and disabled mutation. **Evaluation remains open:** compare fixed
+   and inherited scales. Defer per-matrix/per-weight scales and evolution of the
+   adaptation rate. Small scales may be selected in stable tasks; self-adaptation
+   does not guarantee continued exploration.
 9. **Evolving hidden width with brain upkeep.** First compare fixed widths, then
    infrequent neuron additions/removals preserving existing connections where
    possible. **Open:** size limits, mutation rates, initialization, and neuron versus

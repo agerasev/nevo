@@ -44,8 +44,12 @@ fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover()
         radius_min: 20.0,
         radius_max: 20.0,
     });
+    let template = RnnGenome {
+        mutation_sigma: 0.037,
+        ..Default::default()
+    };
     let world: Ecosystem =
-        Ecosystem::with_genetics(config.clone(), 23, Some(RnnGenome::default())).unwrap();
+        Ecosystem::with_genetics(config.clone(), 23, Some(template.clone())).unwrap();
     let moving_plant_position = world.obstacles()[0].position - Vec2::new(30.0, 0.0);
     let mut value = Value::serialized(&Universe::from_world(world).unwrap()).unwrap();
     let animals = field(&mut value, &["world", "animals"])
@@ -85,6 +89,16 @@ fn checkpoint_continuation_preserves_memory_randomness_and_population_turnover()
     for tick in 1..=3 {
         let report = original.tick().unwrap();
         if tick == 1 {
+            let state = original.universe().read();
+            for event in &report.events {
+                if let Event::Birth { parent, child } = event {
+                    assert_eq!(state.world().animals()[parent].mind.brain.genome, template);
+                    let child = &state.world().animals()[child].mind.brain.genome;
+                    assert!(child.mutation_sigma > 0.0);
+                    assert_ne!(child.mutation_sigma, template.mutation_sigma);
+                    assert_ne!(child.weights, template.weights);
+                }
+            }
             assert!(
                 report
                     .events

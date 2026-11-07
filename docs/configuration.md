@@ -22,12 +22,22 @@ directories configure separate aspects of the experiment.
 | World | [Small uniform](../configs/world/small-uniform.toml), [small non-uniform](../configs/world/small-nonuniform.toml), [large uniform](../configs/world/large-uniform.toml), [large non-uniform](../configs/world/large-nonuniform.toml), [debug](../configs/world/debug.toml) |
 | Obstacles | [None](../configs/obstacles/none.toml), [32 random circles](../configs/obstacles/scattered.toml), [16 random circles](../configs/obstacles/scattered-small.toml) |
 | Brain | [Small: 4 hidden units](../configs/brain/small.toml), [Large: 16 hidden units](../configs/brain/large.toml) |
+| Mutation | [Adaptive scale](../configs/mutation/adaptive.toml), [fixed scale](../configs/mutation/fixed.toml), [disabled](../configs/mutation/none.toml) |
 | Locomotion | [Damped acceleration](../configs/locomotion/damped.toml) |
 | Movement energy budget | [Work and motor losses](../configs/movement/work-and-loss.toml), [upkeep only](../configs/movement/upkeep-only.toml) |
 | Plant growth | [Uniform](../configs/plant-growth/uniform.toml), [patch-dependent](../configs/plant-growth/patches.toml) |
 | Viewer | [Window](../configs/viewer/window.toml) |
 | Metrics | [Long window](../configs/metrics/long-window.toml) |
 | Diagnostics | [Tick trace](../configs/diagnostics/trace.toml) |
+
+Mutation presets configure [RNN genetics](../src/mind/rnn/genome.rs).
+`initialization.mutation_sigma` sets the scale for randomly initialized animals;
+offspring inherit their parent's scale, and immigrant templates retain their own.
+`mutation.log_sigma_std` controls scale adaptation; zero freezes the scale while
+weights and biases still mutate. `mutation.enabled = false` disables all mutation
+without consuming randomness. The initial default scale matches the old uniform
+noise variance; changing the distribution or adapting its scale does not establish
+an evolutionary advantage.
 
 Large-world presets use a sparser plant population across the larger arena.
 Local sensing uses fixed `sensing.distance_scale` and
@@ -85,6 +95,7 @@ cargo run --release --locked -- \
   --config configs/world/large-nonuniform.toml \
   --config configs/obstacles/scattered.toml \
   --config configs/brain/large.toml \
+  --config configs/mutation/adaptive.toml \
   --config configs/locomotion/damped.toml \
   --config configs/movement/work-and-loss.toml \
   --seed 1 --ticks 1000

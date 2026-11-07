@@ -1,0 +1,6 @@
+[ecosystem.genetics.initialization]
+mutation_sigma = 0.011547005
+
+[ecosystem.genetics.mutation]
+enabled = true
+log_sigma_std = 0.1
