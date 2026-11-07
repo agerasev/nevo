@@ -25,6 +25,7 @@ directories configure separate aspects of the experiment.
 | Mutation | [Adaptive scale](../configs/mutation/adaptive.toml), [fixed scale](../configs/mutation/fixed.toml), [disabled](../configs/mutation/none.toml) |
 | Brain topology | [Evolving width](../configs/topology/evolving.toml), [fixed width](../configs/topology/fixed.toml) |
 | Brain upkeep | [Weight count](../configs/brain-upkeep/weight-count.toml), [none](../configs/brain-upkeep/none.toml) |
+| Sensing | [Plants and animals](../configs/sensing/plants-and-animals.toml), [plants only](../configs/sensing/plants-only.toml) |
 | Locomotion | [Damped acceleration](../configs/locomotion/damped.toml) |
 | Movement energy budget | [Work and motor losses](../configs/movement/work-and-loss.toml), [upkeep only](../configs/movement/upkeep-only.toml) |
 | Plant growth | [Uniform](../configs/plant-growth/uniform.toml), [patch-dependent](../configs/plant-growth/patches.toml) |
@@ -51,13 +52,15 @@ proxy for dense-network computation is independent of hardware and physics subst
 Its starting coefficient is an experiment setting, not a measured biological cost.
 
 Large-world presets use a sparser plant population across the larger arena.
-Local sensing uses fixed `sensing.distance_scale` and
-`sensing.signal_scale`, independent of arena dimensions
-and plant count. Their defaults retain the original 500-plant baseline's signal
-scale; sparse worlds no longer amplify each source by averaging over fewer plants.
+Sensing uses a shared `sensing.distance_scale`, with separate plant
+`sensing.signal_scale` and `sensing.animal_signal_scale` gains. These stay fixed
+independently of arena dimensions and source counts. Setting the animal gain to
+zero masks its three input channels while retaining the same brain dimensions.
+The [sensing contract](simulation.md) defines field sources and body coordinates.
 Sources still contribute at all distances and through obstacles; finite-range
 sensing and occlusion are later work.
-This changes the world model, so earlier checkpoints require their original build.
+Changes to sensing or brain input dimensions require a new run; earlier checkpoints
+require their original build.
 
 Non-uniform worlds give fixed, seeded Gaussian patches a local plant capacity.
 Patch centers are sampled uniformly across the usable arena and persist in

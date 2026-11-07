@@ -241,10 +241,12 @@ impl Default for ImmigrationConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SensingConfig {
-    /// Inverse world-unit scale applied to displacement from each food source.
+    /// Inverse world-unit scale applied to displacement from each sensed source.
     pub distance_scale: f32,
-    /// Gain on summed strength and gradient, before the gradient dead zone.
+    /// Gain on summed plant strength and gradient, before the gradient dead zone.
     pub signal_scale: f32,
+    /// Gain on the other-animal field; zero disables these sensing channels.
+    pub animal_signal_scale: f32,
     pub softening: f32,
     pub gradient_dead_zone: f32,
     /// Gain on body-relative linear velocity before neural encoding.
@@ -257,6 +259,7 @@ impl Default for SensingConfig {
         Self {
             distance_scale: 1.0 / 700.0,
             signal_scale: 1.0 / 500.0,
+            animal_signal_scale: 1.0 / 20.0,
             softening: 0.01,
             gradient_dead_zone: 0.01,
             velocity_scale: 0.01,
@@ -375,6 +378,10 @@ impl Parameters {
         self.immigration.position.validate(self.world)?;
         positive(self.sensing.distance_scale, "sensing distance_scale")?;
         positive(self.sensing.signal_scale, "sensing signal_scale")?;
+        nonnegative(
+            self.sensing.animal_signal_scale,
+            "sensing animal_signal_scale",
+        )?;
         positive(self.sensing.velocity_scale, "sensing velocity_scale")?;
         positive(
             self.sensing.angular_velocity_scale,

@@ -39,13 +39,21 @@ metabolism and metrics without extending the universal mind or genome interfaces
 Controllers without a neural brain have no neural upkeep or hidden-size metrics.
 
 Bodies retain heading, linear velocity, and angular velocity. The current mind
-observes the food field and its own motion in body coordinates, then requests
-bounded forward and angular acceleration. Drag damps both velocities. This keeps
+observes separate food and other-animal fields and its own motion in body
+coordinates, then requests bounded forward and angular acceleration. Drag damps
+both velocities. This keeps
 the controller's observations and actions independent of the world's compass
 axes. Animals and plants are physical disks: positive reserve energy sets mass
 through the common `mass_per_energy` scale, and inertia is `0.5 * mass * radius²`.
 Plants have passive linear and angular drag. Zero-energy plants remain physically
 inactive until they grow; animals with nonpositive reserves are culled next tick.
+
+The [sensing fields](../src/ecosystem/sensing.rs) use plant maturity and other
+animals' positive stored energy as source weights, excluding the observer itself.
+Both gradients are normalized above a dead zone and rotated into forward (`x`)
+and left (`y`) components; field strengths remain scalar. All animals sense the
+same pre-tick state, before feeding, deaths, immigration, or births are applied.
+The [neural adapter](../src/mind/animal/mod.rs) defines the input ordering.
 
 The [shared dynamics](../src/ecosystem/physics/mod.rs) use `phy`'s `f32` RK4
 integrator and `geom2`'s disk contact geometry. Contacts between moving disks,

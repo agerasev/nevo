@@ -163,9 +163,9 @@ fn main() -> Result<()> {
     );
     let checkpoint: Checkpoint = ciborium::from_reader(BufReader::new(fs::File::open(&path)?))?;
     ensure!(
-        checkpoint.format_version == 20
-            && checkpoint.world_model == "foraging-brain-upkeep-v14"
-            && checkpoint.agent_model == "animal-rnn-evolving-width-v6",
+        checkpoint.format_version == 21
+            && checkpoint.world_model == "foraging-animal-sensing-v15"
+            && checkpoint.agent_model == "animal-rnn-9-n-2-v7",
         "unsupported checkpoint; use the matching simulation build"
     );
     checkpoint.state.validate()?;

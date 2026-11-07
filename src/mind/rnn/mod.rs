@@ -11,7 +11,7 @@ use anyhow::{Result, ensure};
 use super::Mind;
 use crate::context::Context;
 
-pub const INPUTS: usize = 6;
+pub const INPUTS: usize = 9;
 pub const OUTPUTS: usize = 2;
 
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]

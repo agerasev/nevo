@@ -9,6 +9,7 @@ mod obstacle;
 mod patches;
 mod physics;
 mod replenishment;
+mod sensing;
 mod update;
 
 #[cfg(feature = "viewer")]
@@ -64,9 +65,14 @@ impl AnimalId {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AnimalObservation {
+    /// Plant field strength, independent of body heading.
     pub strength: f32,
     /// Food gradient in body coordinates: x forward, y left.
     pub gradient: Vec2,
+    /// Energy-weighted field of other living animals, excluding the observer.
+    pub animal_strength: f32,
+    /// Other-animal gradient in body coordinates: x forward, y left.
+    pub animal_gradient: Vec2,
     /// Body-relative velocity multiplied by sensing.velocity_scale.
     pub velocity: Vec2,
     /// Angular velocity multiplied by sensing.angular_velocity_scale.
@@ -435,29 +441,6 @@ impl<M, G, P, MC, IC> Ecosystem<M, G, P, MC, IC> {
             self.parameters.plant.radius_scale,
         )?;
         Ok(())
-    }
-
-    fn sense(&self, body: &Body) -> AnimalObservation {
-        let mut field = AnimalObservation::default();
-        for plant in &self.plants {
-            let displacement =
-                (plant.position - body.position) * self.parameters.sensing.distance_scale;
-            let distance = displacement.length() + self.parameters.sensing.softening;
-            let mass = plant.energy / self.parameters.plant.max_energy;
-            field.strength += mass / distance;
-            field.gradient += mass * displacement / (distance * distance * distance);
-        }
-        field.strength *= self.parameters.sensing.signal_scale;
-        field.gradient *= self.parameters.sensing.signal_scale;
-        field.gradient = if field.gradient.length() > self.parameters.sensing.gradient_dead_zone {
-            body.world_to_body(field.gradient.normalize())
-        } else {
-            Vec2::ZERO
-        };
-        field.velocity = body.world_to_body(body.velocity) * self.parameters.sensing.velocity_scale;
-        field.angular_velocity =
-            body.angular_velocity * self.parameters.sensing.angular_velocity_scale;
-        field
     }
 }
 

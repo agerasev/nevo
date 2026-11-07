@@ -78,6 +78,9 @@ where
             observation.velocity.x,
             observation.velocity.y,
             observation.angular_velocity,
+            observation.animal_gradient.x,
+            observation.animal_gradient.y,
+            observation.animal_strength,
         ];
         ensure!(
             input.iter().all(|value| value.is_finite()),

@@ -45,11 +45,16 @@ fn observation_signals_keep_body_order_and_zero_outputs_are_idle() {
                 strength: 2.0,
                 velocity: Vec2::new(1.5, -2.5),
                 angular_velocity: 0.75,
+                animal_gradient: Vec2::new(-0.8, 0.6),
+                animal_strength: 3.0,
             },
             &mut context(),
         )
         .unwrap();
-    assert_eq!(mind.brain.input, Some([0.25, -0.5, 2.0, 1.5, -2.5, 0.75]));
+    assert_eq!(
+        mind.brain.input,
+        Some([0.25, -0.5, 2.0, 1.5, -2.5, 0.75, -0.8, 0.6, 3.0])
+    );
     assert_eq!(action.thrust, 0.0);
     assert_eq!(action.turn, 0.0);
 }
@@ -75,6 +80,14 @@ fn motor_outputs_allow_only_forward_thrust_and_signed_turning() {
 fn invalid_signals_and_outputs_do_not_apply_brain_updates() {
     let mut mind = AnimalMind::from_brain(Probe::default());
     for observation in [
+        AnimalObservation {
+            animal_strength: f32::NAN,
+            ..AnimalObservation::default()
+        },
+        AnimalObservation {
+            animal_gradient: Vec2::splat(f32::INFINITY),
+            ..AnimalObservation::default()
+        },
         AnimalObservation {
             strength: f32::NAN,
             ..AnimalObservation::default()

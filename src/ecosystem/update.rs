@@ -76,7 +76,7 @@ where
             if animal.body.energy <= 0.0 {
                 continue;
             }
-            let observation = self.sense(&animal.body);
+            let observation = self.sense(id);
             let (action, mind) = animal
                 .mind
                 .compute_update(observation, &mut update.context)?;

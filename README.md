@@ -26,6 +26,7 @@ cargo run --release --locked -- \
   --config configs/mutation/adaptive.toml \
   --config configs/topology/evolving.toml \
   --config configs/brain-upkeep/weight-count.toml \
+  --config configs/sensing/plants-and-animals.toml \
   --config configs/locomotion/damped.toml \
   --config configs/movement/work-and-loss.toml --viewer --paused
 ```

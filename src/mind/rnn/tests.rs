@@ -8,8 +8,8 @@ type Cx = Cpu<Xoshiro256PlusPlus>;
 #[test]
 fn preparing_and_discarding_memory_does_not_change_the_mind() {
     let mut genome = RnnGenome::default();
-    genome.weights[40] = 0.5; // hidden 0 bias
-    genome.weights[44] = 1.0; // hidden 0 -> output 0
+    genome.weights[52] = 0.5; // hidden 0 bias
+    genome.weights[56] = 1.0; // hidden 0 -> output 0
     let mind = Rnn::new(genome).unwrap();
     let original = mind.clone();
     let mut cx = Cpu {
@@ -46,11 +46,11 @@ fn nonfinite_inputs_fail_before_changing_the_mind() {
 fn output_overflow_does_not_publish_prepared_memory() {
     let mut genome = RnnGenome {
         hidden_units: 2,
-        weights: vec![0.0; 24],
+        weights: vec![0.0; 30],
         ..RnnGenome::default()
     };
-    genome.weights[16..18].fill(f32::MAX); // Saturate both hidden units.
-    genome.weights[18..20].fill(f32::MAX); // Their finite contributions overflow output 0.
+    genome.weights[22..24].fill(f32::MAX); // Saturate both hidden units.
+    genome.weights[24..26].fill(f32::MAX); // Their finite contributions overflow output 0.
     let mut brain = Rnn::new(genome).unwrap();
     let mut cx = Cx {
         rng: Xoshiro256PlusPlus::seed_from_u64(73),
@@ -63,14 +63,14 @@ fn output_overflow_does_not_publish_prepared_memory() {
 fn recurrent_units_read_previous_memory_at_a_nondefault_width() {
     let mut genome = RnnGenome {
         hidden_units: 2,
-        weights: vec![0.0; 24],
+        weights: vec![0.0; 30],
         ..RnnGenome::default()
     };
     genome.weights[0] = 1.0; // input 0 -> hidden 0
-    genome.weights[14] = 1.0; // previous hidden 0 -> hidden 1
-    genome.weights[18] = 1.0; // hidden 0 -> output 0
-    genome.weights[21] = 1.0; // hidden 1 -> output 1
-    genome.weights[23] = -1.0; // output 1 bias
+    genome.weights[20] = 1.0; // previous hidden 0 -> hidden 1
+    genome.weights[24] = 1.0; // hidden 0 -> output 0
+    genome.weights[27] = 1.0; // hidden 1 -> output 1
+    genome.weights[29] = -1.0; // output 1 bias
     let mut brain = Rnn::new(genome).unwrap();
     let mut cx = Cx {
         rng: Xoshiro256PlusPlus::seed_from_u64(73),
@@ -102,9 +102,9 @@ fn initialization_respects_width_and_range() {
         mutation_sigma: 0.03,
     };
     let genome = RnnGenome::random(&config, &mut cx).unwrap();
-    assert_eq!(genome.weights.len(), 114);
+    assert_eq!(genome.weights.len(), 135);
     assert_eq!(genome.mutation_sigma, 0.03);
-    assert_eq!(RnnGenome::default().weights.len(), 54);
+    assert_eq!(RnnGenome::default().weights.len(), 66);
     assert!(genome.weights.iter().all(|w| (-0.25..0.75).contains(w)));
     assert_eq!(Rnn::new(genome).unwrap().memory, vec![0.0; 7]);
 }

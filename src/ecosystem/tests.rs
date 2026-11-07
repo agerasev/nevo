@@ -185,7 +185,7 @@ impl Fixture {
     }
 
     fn sense(&self) -> AnimalObservation {
-        self.world.sense(&self.world.animals[&id(1)].body)
+        self.world.sense(id(1))
     }
 }
 
@@ -986,7 +986,7 @@ fn configured_immigration_is_identical_for_initial_and_later_arrivals() {
     let first = &initial.animals[&id(1)];
     let next = &later.animals[&id(1)];
     let mut expected_body = first.body.clone();
-    expected_body.energy -= 0.0075 + 114.0e-6;
+    expected_body.energy -= 0.0075 + 135.0e-6;
     assert_eq!(expected_body, next.body);
     assert_eq!(first.mind, next.mind);
     assert_eq!(next.mind.brain.memory.len(), 7);
@@ -1101,6 +1101,16 @@ fn sensing_preserves_body_relative_signals_when_the_scene_rotates() {
     fixture.world.parameters.sensing.velocity_scale = 0.25;
     fixture.world.parameters.sensing.angular_velocity_scale = 0.5;
     fixture.world.plants[0].position = Vec2::new(70.0, 35.0);
+    fixture
+        .world
+        .admit_with(
+            1,
+            Admission {
+                position: Some(Vec2::new(-70.0, 35.0)),
+                energy: 0.5,
+            },
+        )
+        .unwrap();
     let body = &mut fixture.world.animals.get_mut(&id(1)).unwrap().body;
     body.velocity = Vec2::new(3.0, -4.0);
     body.angular_velocity = 1.5;
@@ -1109,11 +1119,15 @@ fn sensing_preserves_body_relative_signals_when_the_scene_rotates() {
     assert_eq!(before.angular_velocity, 0.75);
 
     fixture.world.plants[0].position = Vec2::new(-35.0, 70.0);
+    fixture.world.animals.get_mut(&id(2)).unwrap().body.position = Vec2::new(-35.0, -70.0);
     let body = &mut fixture.world.animals.get_mut(&id(1)).unwrap().body;
     body.heading = std::f32::consts::FRAC_PI_2;
     body.velocity = Vec2::new(4.0, 3.0);
     let rotated = fixture.sense();
     assert!(rotated.gradient.distance(before.gradient) < 4.0 * f32::EPSILON);
+    assert!(before.animal_strength > 0.0);
+    assert!(rotated.animal_gradient.distance(before.animal_gradient) < 4.0 * f32::EPSILON);
+    assert_eq!(rotated.animal_strength, before.animal_strength);
     assert!(
         rotated.velocity.distance(before.velocity) < 4.0 * f32::EPSILON * before.velocity.length()
     );
@@ -1286,6 +1300,9 @@ fn invalid_physics_and_conflicting_restore_parameters_are_rejected() {
         |c| c.animal.body.radius_scale = 0.0,
         |c| c.animal.brain_weight_upkeep = -0.1,
         |c| c.sensing.softening = 0.0,
+        |c| c.sensing.animal_signal_scale = -0.1,
+        |c| c.sensing.animal_signal_scale = f32::NAN,
+        |c| c.sensing.animal_signal_scale = f32::INFINITY,
         |c| c.genetics.initialization.hidden_units = 0,
         |c| c.genetics.mutation.log_sigma_std = f32::NAN,
     ];
@@ -1449,7 +1466,7 @@ fn brain_upkeep_charges_parent_and_resized_child_once_at_their_own_sizes() {
     config.genetics.mutation.size_probability = 1.0;
     let genome = RnnGenome {
         hidden_units: 2,
-        weights: vec![0.0; 24],
+        weights: vec![0.0; 30],
         ..Default::default()
     };
     let mut world: Ecosystem = Ecosystem::with_genetics(config, 93, Some(genome)).unwrap();
@@ -1462,13 +1479,13 @@ fn brain_upkeep_charges_parent_and_resized_child_once_at_their_own_sizes() {
     let parent = &world.animals[&id(1)];
     let child = &world.animals[&id(2)];
     let child_weights = match child.mind.brain.genome.hidden_units {
-        1 => 12.0,
-        3 => 38.0,
+        1 => 15.0,
+        3 => 47.0,
         _ => panic!("size must change by one"),
     };
-    assert!((parent.body.energy - (0.6 - 24.0 * 0.0001)).abs() < f32::EPSILON);
+    assert!((parent.body.energy - (0.6 - 30.0 * 0.0001)).abs() < f32::EPSILON);
     assert!((child.body.energy - (0.6 - child_weights * 0.0001)).abs() < f32::EPSILON);
-    assert!((report.brain_upkeep_energy - (24.0 + child_weights as f64) * 0.0001).abs() < 1e-9);
+    assert!((report.brain_upkeep_energy - (30.0 + child_weights as f64) * 0.0001).abs() < 1e-9);
 }
 
 #[test]
@@ -1493,7 +1510,7 @@ fn hidden_size_metrics_summarize_the_current_population_and_omit_empty_means() {
         ),
         (None, None, None)
     );
-    for (serial, hidden_units, weights) in [(1, 2, 24), (2, 4, 54)] {
+    for (serial, hidden_units, weights) in [(1, 2, 30), (2, 4, 66)] {
         world.animals.insert(
             id(serial),
             Animal {
@@ -1519,4 +1536,70 @@ fn hidden_size_metrics_summarize_the_current_population_and_omit_empty_means() {
     let mut fixture = Fixture::debug(94);
     fixture.world.metrics = metrics::Cache::new(&measured_config::<()>());
     assert_eq!(fixture.world.metrics().mean_hidden_units, None);
+}
+
+#[test]
+fn animal_field_excludes_self_and_dead_bodies_and_weights_other_energy() {
+    let mut fixture = Fixture::debug(95);
+    let alone = fixture.sense();
+    assert_eq!(alone.animal_strength, 0.0);
+    assert_eq!(alone.animal_gradient, Vec2::ZERO);
+    fixture
+        .world
+        .admit_with(
+            1,
+            Admission {
+                position: Some(Vec2::new(70.0, 0.0)),
+                energy: 0.5,
+            },
+        )
+        .unwrap();
+    let other = fixture.sense();
+    assert!((other.animal_strength - 0.025 / 0.11).abs() < f32::EPSILON);
+    assert_eq!(other.animal_gradient, Vec2::X);
+    assert_eq!(
+        (other.strength, other.gradient),
+        (alone.strength, alone.gradient)
+    );
+    fixture
+        .world
+        .admit_with(
+            1,
+            Admission {
+                position: Some(Vec2::new(-70.0, 0.0)),
+                energy: 0.0,
+            },
+        )
+        .unwrap();
+    for energy in [0.0, -0.5] {
+        fixture.world.animals.get_mut(&id(3)).unwrap().body.energy = energy;
+        assert_eq!(fixture.sense(), other);
+    }
+    fixture.world.parameters.sensing.animal_signal_scale = 0.0;
+    assert_eq!(fixture.sense(), alone);
+}
+
+#[test]
+fn turning_in_place_rotates_both_gradient_axes_but_not_strengths() {
+    let mut fixture = Fixture::debug(96);
+    fixture.world.plants[0].position = Vec2::new(0.0, 70.0);
+    fixture
+        .world
+        .admit_with(
+            1,
+            Admission {
+                position: Some(Vec2::new(70.0, 0.0)),
+                energy: 0.5,
+            },
+        )
+        .unwrap();
+    let before = fixture.sense();
+    assert_eq!(before.gradient, Vec2::Y);
+    assert_eq!(before.animal_gradient, Vec2::X);
+    fixture.world.animals.get_mut(&id(1)).unwrap().body.heading = std::f32::consts::FRAC_PI_2;
+    let turned = fixture.sense();
+    assert!(turned.gradient.distance(Vec2::X) < f32::EPSILON);
+    assert!(turned.animal_gradient.distance(-Vec2::Y) < f32::EPSILON);
+    assert_eq!(turned.strength, before.strength);
+    assert_eq!(turned.animal_strength, before.animal_strength);
 }

@@ -28,7 +28,8 @@ are implemented; their evaluation needs an established environment.
    ecological events per tick. Heading is visible in the viewer.
 4. **Local perception and obstacles.** Contact physics completed and validated:
    animals and plants share disk dynamics with fixed obstacles and geometry-aware
-   admission. **Next:** finite-range body-relative rays reporting nearest surfaces
+   admission. Separate plant and other-animal gradient fields are implemented in
+   body coordinates. **Next:** finite-range body-relative rays reporting nearest surfaces
    and an explicit miss, with obstacle occlusion and optional food-gradient smell.
    **Open:** field of view, ray count, categories, smell rules, and wrapping-boundary
    rollout. Compare modalities on held-out maps; masking an input and evolving
