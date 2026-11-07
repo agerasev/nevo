@@ -20,3 +20,6 @@ checks are available through Git history.
 - [Controllers after 8.85 million ticks with costly movement](2026-11-05-costly-movement-models.md):
   slower, food-dependent gradient following; rare reproduction and occasional
   immigration persisted.
+- [Brains after 2.43 million ticks with physical movement](2026-11-06-physics-brains.md):
+  a dominant food-seeking family amid substantial immigration; disabling
+  recurrence improved food collection and motor efficiency in matched continuations.
